@@ -34,7 +34,7 @@ export function LoginPage() {
     <div className="auth-page">
       <div className="auth-container">
         <div className="brand">
-          <div className="brand-icon">🌾</div>
+          <img src="/happy_farm_logo.jpg" alt="SAI Happy Farms" className="brand-logo" />
           <h1>SAI Happy Farms</h1>
           <p>Farmer Login</p>
         </div>

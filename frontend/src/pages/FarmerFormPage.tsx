@@ -12,7 +12,7 @@ export function FarmerFormPage() {
     <div className="dashboard-page">
       <header className="dash-header">
         <div className="dash-header-left">
-          <span className="dash-logo">🌾</span>
+          <img src="/happy_farm_logo.jpg" alt="SAI Happy Farms" className="dash-logo-img" />
           <div>
             <h1>SAI Happy Farms</h1>
             <p className="dash-subtitle">Farmer Daily Report</p>
