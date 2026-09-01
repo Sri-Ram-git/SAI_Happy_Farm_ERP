@@ -7,20 +7,6 @@ export async function loginUser(email: string, password: string) {
   return result;
 }
 
-export async function sendPhoneOtp(phoneNumber: string, recaptchaVerifier: any) {
-  console.log('[AuthService] Sending OTP to:', phoneNumber);
-  const confirmationResult = await f.auth().signInWithPhoneNumber(phoneNumber, recaptchaVerifier);
-  console.log('[AuthService] OTP sent');
-  return confirmationResult;
-}
-
-export async function confirmPhoneOtp(confirmationResult: any, code: string) {
-  console.log('[AuthService] Confirming OTP');
-  const result = await confirmationResult.confirm(code);
-  console.log('[AuthService] Phone auth success, uid:', result.user.uid);
-  return result;
-}
-
 export async function logoutUser() {
   console.log('[AuthService] Signing out');
   return f.auth().signOut();

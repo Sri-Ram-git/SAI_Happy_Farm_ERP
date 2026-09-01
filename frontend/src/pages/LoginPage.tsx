@@ -1,15 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getRouteForRole } from '../utils/routeByRole';
 import { LoginForm } from '../components/LoginForm';
-import { PhoneLoginForm } from '../components/PhoneLoginForm';
 import { LoadingScreen } from '../components/LoadingScreen';
 
 export function LoginPage() {
-  const { role, loading, isAuthenticated } = useAuth();
+  const { role, loading, isAuthenticated, authError } = useAuth();
   const navigate = useNavigate();
-  const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
 
   useEffect(() => {
     if (!loading && isAuthenticated && role) {
@@ -28,23 +26,7 @@ export function LoginPage() {
           <h1>SAI Happy Farms</h1>
           <p>Farmer Login</p>
         </div>
-
-        <div className="auth-tabs">
-          <button
-            className={`auth-tab ${loginMethod === 'email' ? 'auth-tab--active' : ''}`}
-            onClick={() => setLoginMethod('email')}
-          >
-            Email
-          </button>
-          <button
-            className={`auth-tab ${loginMethod === 'phone' ? 'auth-tab--active' : ''}`}
-            onClick={() => setLoginMethod('phone')}
-          >
-            Phone OTP
-          </button>
-        </div>
-
-        {loginMethod === 'email' ? <LoginForm /> : <PhoneLoginForm />}
+        <LoginForm />
       </div>
     </div>
   );
