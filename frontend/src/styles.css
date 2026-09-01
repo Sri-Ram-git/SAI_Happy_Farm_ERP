@@ -425,6 +425,84 @@ body {
   border-bottom: none;
 }
 
+/* ─── Auth Tabs ─── */
+.auth-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 24px;
+  background: var(--gray-100);
+  border-radius: var(--radius);
+  padding: 4px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 10px 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--gray-500);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.auth-tab:hover {
+  color: var(--gray-700);
+}
+
+.auth-tab--active {
+  background: var(--white);
+  color: var(--green-700);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ─── OTP Input ─── */
+.otp-input {
+  text-align: center;
+  letter-spacing: 8px;
+  font-size: 22px !important;
+  font-weight: 600;
+}
+
+.otp-info {
+  text-align: center;
+  font-size: 14px;
+  color: var(--gray-600);
+  margin-bottom: 20px;
+}
+
+.otp-info strong {
+  color: var(--gray-800);
+}
+
+/* ─── Link Button ─── */
+.btn--link {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px;
+  background: none;
+  border: none;
+  color: var(--green-700);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  transition: color var(--transition);
+}
+
+.btn--link:hover:not(:disabled) {
+  color: var(--green-800);
+  text-decoration: underline;
+}
+
+.btn--link:disabled {
+  color: var(--gray-400);
+  cursor: not-allowed;
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 480px) {
   .auth-card {

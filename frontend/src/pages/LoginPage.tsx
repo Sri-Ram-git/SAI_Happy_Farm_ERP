@@ -1,34 +1,24 @@
-import { useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getRouteForRole } from '../utils/routeByRole';
 import { LoginForm } from '../components/LoginForm';
+import { PhoneLoginForm } from '../components/PhoneLoginForm';
 import { LoadingScreen } from '../components/LoadingScreen';
 
 export function LoginPage() {
-  const { role, loading, isAuthenticated, authError } = useAuth();
+  const { role, loading, isAuthenticated } = useAuth();
   const navigate = useNavigate();
-
-  console.log('[LoginPage] RENDER:', { loading, isAuthenticated, role, authError });
+  const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
 
   useEffect(() => {
-    console.log('[LoginPage] useEffect:', { loading, isAuthenticated, role });
     if (!loading && isAuthenticated && role) {
-      const dest = getRouteForRole(role);
-      console.log('[LoginPage] NAVIGATING TO:', dest);
-      navigate(dest, { replace: true });
+      navigate(getRouteForRole(role), { replace: true });
     }
   }, [loading, isAuthenticated, role, navigate]);
 
-  if (loading) {
-    console.log('[LoginPage] Showing LoadingScreen');
-    return <LoadingScreen />;
-  }
-
-  if (isAuthenticated && role) {
-    console.log('[LoginPage] Authenticated, returning null (will redirect)');
-    return null;
-  }
+  if (loading) return <LoadingScreen />;
+  if (isAuthenticated && role) return null;
 
   return (
     <div className="auth-page">
@@ -38,7 +28,23 @@ export function LoginPage() {
           <h1>SAI Happy Farms</h1>
           <p>Farmer Login</p>
         </div>
-        <LoginForm />
+
+        <div className="auth-tabs">
+          <button
+            className={`auth-tab ${loginMethod === 'email' ? 'auth-tab--active' : ''}`}
+            onClick={() => setLoginMethod('email')}
+          >
+            Email
+          </button>
+          <button
+            className={`auth-tab ${loginMethod === 'phone' ? 'auth-tab--active' : ''}`}
+            onClick={() => setLoginMethod('phone')}
+          >
+            Phone OTP
+          </button>
+        </div>
+
+        {loginMethod === 'email' ? <LoginForm /> : <PhoneLoginForm />}
       </div>
     </div>
   );
