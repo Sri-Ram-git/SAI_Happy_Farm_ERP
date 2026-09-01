@@ -85,16 +85,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const normalizedRole = normalizeRole(profile.role);
 
-        if (normalizedRole !== 'farmer') {
+        if (!normalizedRole) {
           await f.auth().signOut();
           setFirebaseUser(null);
           setUserProfile(null);
-          setAuthError('Farmers must use the Farmer Login portal.');
+          setAuthError('User role is not configured.');
           setLoading(false);
           return;
         }
 
-        if (profile.farmIds.length === 0) {
+        if (normalizedRole === 'farmer' && profile.farmIds.length === 0) {
           await f.auth().signOut();
           setFirebaseUser(null);
           setUserProfile(null);
@@ -126,7 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearAuthError = () => setAuthError(null);
 
   const normalizedRole = normalizeRole(userProfile?.role);
-  const isAuth = !!firebaseUser && !!userProfile && userProfile.active === true && normalizedRole === 'farmer' && userProfile.farmIds.length > 0;
+  const isAuth = !!firebaseUser && !!userProfile && userProfile.active === true && !!normalizedRole;
 
   const value: AuthContextValue = {
     firebaseUser,
