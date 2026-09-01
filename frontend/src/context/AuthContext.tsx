@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
 import { getUserProfile, type UserProfile } from '../services/userService';
+import { normalizeRole } from '../utils/normalizeRole';
 
 const f = (window as any).firebase;
 
@@ -38,12 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mountedRef.current = true;
 
     const unsubscribe = f.auth().onAuthStateChanged(async (user: any) => {
-      console.log('[Auth] onAuthStateChanged:', user ? user.uid : null);
-
       if (!mountedRef.current) return;
 
       if (!user) {
-        console.log('[Auth] No user → clearing');
         setFirebaseUser(null);
         setUserProfile(null);
         setLoading(false);
@@ -52,16 +50,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setFirebaseUser(user);
       setAuthError(null);
-      console.log('[Auth] Firebase user:', user.uid, user.email);
 
       try {
         const profile = await getUserProfile(user.uid);
-        console.log('[Auth] Profile returned:', profile);
 
         if (!mountedRef.current) return;
 
         if (!profile) {
-          console.log('[Auth] FAIL: profile not found');
           await f.auth().signOut();
           setFirebaseUser(null);
           setUserProfile(null);
@@ -71,17 +66,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (profile.active !== true) {
-          console.log('[Auth] FAIL: active !== true, value:', profile.active);
           await f.auth().signOut();
           setFirebaseUser(null);
           setUserProfile(null);
-          setAuthError('Account is disabled.');
+          setAuthError('Account is disabled. Please contact the administrator.');
           setLoading(false);
           return;
         }
 
         if (!profile.role) {
-          console.log('[Auth] FAIL: role is missing');
           await f.auth().signOut();
           setFirebaseUser(null);
           setUserProfile(null);
@@ -90,18 +83,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (profile.role !== 'farmer') {
-          console.log('[Auth] FAIL: role is', profile.role, ', expected farmer');
+        const normalizedRole = normalizeRole(profile.role);
+
+        if (normalizedRole !== 'farmer') {
           await f.auth().signOut();
           setFirebaseUser(null);
           setUserProfile(null);
-          setAuthError('This account does not have access to the Farmer portal. Role: "' + profile.role + '"');
+          setAuthError('Farmers must use the Farmer Login portal.');
           setLoading(false);
           return;
         }
 
         if (profile.farmIds.length === 0) {
-          console.log('[Auth] FAIL: no farmIds');
           await f.auth().signOut();
           setFirebaseUser(null);
           setUserProfile(null);
@@ -110,7 +103,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        console.log('[Auth] SUCCESS: setting authenticated profile');
         setUserProfile(profile);
         setLoading(false);
 
@@ -120,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await f.auth().signOut();
         setFirebaseUser(null);
         setUserProfile(null);
-        setAuthError('Failed to load profile: ' + (err.code || err.message));
+        setAuthError('Failed to load profile. Please try again.');
         setLoading(false);
       }
     });
@@ -133,12 +125,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const clearAuthError = () => setAuthError(null);
 
-  const isAuth = !!firebaseUser && !!userProfile && userProfile.active === true && userProfile.role === 'farmer' && userProfile.farmIds.length > 0;
+  const normalizedRole = normalizeRole(userProfile?.role);
+  const isAuth = !!firebaseUser && !!userProfile && userProfile.active === true && normalizedRole === 'farmer' && userProfile.farmIds.length > 0;
 
   const value: AuthContextValue = {
     firebaseUser,
     userProfile,
-    role: userProfile?.role ?? null,
+    role: normalizedRole,
     loading,
     isAuthenticated: isAuth,
     authError,

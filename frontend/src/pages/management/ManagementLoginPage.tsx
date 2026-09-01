@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getUserByUid } from '../../services/userDataService';
+import { normalizeRole } from '../../utils/normalizeRole';
 
 const f = (window as any).firebase;
 
@@ -24,23 +25,32 @@ export function ManagementLoginPage() {
 
       if (!profile) {
         await f.auth().signOut();
-        setError('User profile not found. Please contact the administrator.');
+        setError('Your account profile is not configured. Please contact the administrator.');
         setLoading(false);
         return;
       }
 
       if (!profile.active) {
         await f.auth().signOut();
-        setError('Account is disabled. Please contact the administrator.');
+        setError('Your account has been disabled. Please contact the administrator.');
+        setLoading(false);
+        return;
+      }
+
+      const normalizedRole = normalizeRole(profile.role);
+
+      if (normalizedRole === 'farmer') {
+        await f.auth().signOut();
+        setError('Farmers must use the Farmer Login portal.');
         setLoading(false);
         return;
       }
 
       const expectedRole = activeTab;
-      if (profile.role !== expectedRole) {
+      if (normalizedRole !== expectedRole) {
         await f.auth().signOut();
         const friendly = expectedRole === 'supervisor' ? 'Supervisor' : 'Administrator';
-        setError(`This account does not have ${friendly} access. Role: "${profile.role}"`);
+        setError(`This account does not have ${friendly} access.`);
         setLoading(false);
         return;
       }
@@ -48,11 +58,15 @@ export function ManagementLoginPage() {
       navigate(expectedRole === 'admin' ? '/admin' : '/supervisor', { replace: true });
     } catch (err: any) {
       console.error('[ManagementLogin] Error:', err.code);
-      if (err.code === 'auth/user-not-found') setError('No account found with this email.');
-      else if (err.code === 'auth/wrong-password') setError('Incorrect password.');
-      else if (err.code === 'auth/invalid-email') setError('Invalid email address.');
-      else if (err.code === 'auth/too-many-requests') setError('Too many attempts. Please try again later.');
-      else setError('Login failed. Please try again.');
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        setError('Email or password is incorrect.');
+      } else if (err.code === 'auth/invalid-email') {
+        setError('Invalid email address.');
+      } else if (err.code === 'auth/too-many-requests') {
+        setError('Too many attempts. Please try again later.');
+      } else {
+        setError('Login failed. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
