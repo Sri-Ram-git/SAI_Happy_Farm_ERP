@@ -81,15 +81,15 @@ export function ManagementLoginPage() {
           <p>Management Portal</p>
         </div>
 
-        <div className="auth-tabs">
+        <div className="role-selector">
           <button
-            className={`auth-tab ${activeTab === 'supervisor' ? 'auth-tab--active' : ''}`}
+            className={`role-btn ${activeTab === 'supervisor' ? 'role-btn--active' : ''}`}
             onClick={() => { setActiveTab('supervisor'); setError(''); }}
           >
             Supervisor
           </button>
           <button
-            className={`auth-tab ${activeTab === 'admin' ? 'auth-tab--active' : ''}`}
+            className={`role-btn ${activeTab === 'admin' ? 'role-btn--active' : ''}`}
             onClick={() => { setActiveTab('admin'); setError(''); }}
           >
             Admin
