@@ -12,6 +12,10 @@ import { getAllUsers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
 import { aggregateReports, calcSubmissionCompliance } from '../../utils/kpiCalculations';
 import { useAllDailyReports } from '../../hooks/useDailyReports';
+import {
+  Warehouse,
+  ChevronRight,
+} from 'lucide-react';
 
 export function AdminFarmsPage() {
   const { userProfile } = useAuth();
@@ -54,14 +58,20 @@ export function AdminFarmsPage() {
   return (
     <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
-        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
+        {error && <div className="mgmt-error" style={{ marginBottom: 16 }}><span className="mgmt-error__description">{error}</span></div>}
+
         <div className="mgmt-page-header">
-          <h2>Farm Management</h2>
-          <DateFilter days={days} onChange={setDays} />
+          <div className="mgmt-page-header__title-group">
+            <h2 className="mgmt-page-header__title">Farm Management</h2>
+            <p className="mgmt-page-header__description">{farms.length} farms in the system</p>
+          </div>
+          <div className="mgmt-page-header__actions">
+            <DateFilter days={days} onChange={setDays} />
+          </div>
         </div>
 
-        <div className="table-container">
-          <table className="data-table">
+        <div className="mgmt-table-container">
+          <table className="mgmt-table">
             <thead>
               <tr>
                 <th>Farm ID</th>
@@ -72,21 +82,36 @@ export function AdminFarmsPage() {
                 <th>Compliance</th>
                 <th>Reports</th>
                 <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {farmRows.map(({ farm, agg, farmer, compliance, reportCount }) => (
-                <tr key={farm.farmId} className="clickable-row" onClick={() => navigate(`/admin/farms/${farm.farmId}`)}>
-                  <td className="td-bold">{farm.farmId}</td>
+                <tr
+                  key={farm.farmId}
+                  className="mgmt-table__row--clickable"
+                  onClick={() => navigate(`/admin/farms/${farm.farmId}`)}
+                >
+                  <td style={{ fontWeight: 600, fontFamily: 'var(--mgmt-font-mono)' }}>{farm.farmId}</td>
                   <td>{farm.name || '--'}</td>
                   <td>{farmer?.name || 'Unassigned'}</td>
-                  <td>{agg.avgProductionRate}%</td>
-                  <td className={agg.avgMortalityRate > 10 ? 'text-danger' : ''}>{agg.avgMortalityRate}%</td>
-                  <td>{compliance}%</td>
-                  <td>{reportCount}</td>
+                  <td className="mgmt-table__cell--number">{agg.avgProductionRate}%</td>
+                  <td className="mgmt-table__cell--number">
+                    <span className={`mgmt-badge ${agg.avgMortalityRate > 10 ? 'mgmt-badge--danger' : 'mgmt-badge--success'}`}>
+                      {agg.avgMortalityRate}%
+                    </span>
+                  </td>
+                  <td className="mgmt-table__cell--number">{compliance}%</td>
+                  <td className="mgmt-table__cell--number">{reportCount}</td>
                   <td>
-                    <span className={`status-badge ${farm.active ? 'status-badge--ok' : 'status-badge--warn'}`}>
+                    <span className={`mgmt-badge ${farm.active ? 'mgmt-badge--success' : 'mgmt-badge--warning'}`}>
+                      <span className="mgmt-badge__dot" />
                       {farm.active ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                  <td className="mgmt-table__cell--actions">
+                    <span className="mgmt-icon-btn">
+                      <ChevronRight size={16} />
                     </span>
                   </td>
                 </tr>
@@ -95,7 +120,13 @@ export function AdminFarmsPage() {
           </table>
         </div>
 
-        {farmRows.length === 0 && <EmptyState message="No farms found." />}
+        {farmRows.length === 0 && (
+          <div className="mgmt-empty-state">
+            <div className="mgmt-empty-state__icon"><Warehouse size={24} /></div>
+            <div className="mgmt-empty-state__title">No Farms Found</div>
+            <div className="mgmt-empty-state__description">No farms have been registered yet.</div>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );

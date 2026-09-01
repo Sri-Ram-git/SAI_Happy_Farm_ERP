@@ -15,6 +15,19 @@ import { getIstDate, getDaysAgo, formatDisplayDate, formatTime } from '../../uti
 import { calcProductionRate, calcMortalityRate, calcFeedPerBird, calcSelectionRate, calcAverage, aggregateReports } from '../../utils/kpiCalculations';
 import { KPI_THRESHOLDS } from '../../config/kpiThresholds';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import {
+  ArrowLeft,
+  Building2,
+  User,
+  TrendingUp,
+  Activity,
+  Wheat,
+  Thermometer,
+  Egg,
+  FileText,
+  AlertTriangle,
+  Clock,
+} from 'lucide-react';
 
 export function SupervisorFarmDetailPage() {
   const { farmId } = useParams<{ farmId: string }>();
@@ -73,93 +86,163 @@ export function SupervisorFarmDetailPage() {
   return (
     <DashboardLayout role={role} userName={profile?.name}>
       <div className="mgmt-page">
-        <button className="btn-back" onClick={() => navigate(`${basePath}/farms`)}>&#8592; Back to Farms</button>
+        <button
+          className="mgmt-btn mgmt-btn--ghost"
+          onClick={() => navigate(`${basePath}/farms`)}
+          style={{ marginBottom: 16 }}
+        >
+          <ArrowLeft size={16} />
+          Back to Farms
+        </button>
 
-        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
+        {error && (
+          <div className="mgmt-error" style={{ marginBottom: 16 }}>
+            <div className="mgmt-error__icon"><AlertTriangle size={24} /></div>
+            <div className="mgmt-error__description">{error}</div>
+          </div>
+        )}
 
-        <div className="farm-detail-header">
-          <h2>{farm.farmId}</h2>
-          <p>{farm.name || 'Unnamed Farm'} | Farmer: {farmer?.name || 'Unknown'}</p>
-          {attentionItems.length > 0 && (
-            <div className="attention-banner">&#9888; Attention: {attentionItems.join(', ')}</div>
-          )}
+        <div className="mgmt-detail-header">
+          <div className="mgmt-detail-header__icon">
+            <Building2 size={28} />
+          </div>
+          <div className="mgmt-detail-header__content">
+            <h2 className="mgmt-detail-header__title">{farm.name || 'Unnamed Farm'}</h2>
+            <div className="mgmt-detail-header__meta">
+              <span className="mgmt-detail-header__meta-item">
+                <Building2 size={14} />
+                {farm.farmId}
+              </span>
+              <span className="mgmt-detail-header__meta-item">
+                <User size={14} />
+                {farmer?.name || 'Unknown'}
+              </span>
+              {attentionItems.length > 0 && (
+                <span className="mgmt-badge mgmt-badge--danger">
+                  <span className="mgmt-badge__dot" />
+                  {attentionItems.length} issue{attentionItems.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            {attentionItems.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: 13, color: 'var(--mgmt-danger)' }}>
+                <AlertTriangle size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                {attentionItems.join(' / ')}
+              </div>
+            )}
+          </div>
+          <div className="mgmt-detail-header__actions">
+            <DateFilter days={days} onChange={setDays} />
+          </div>
         </div>
 
-        <DateFilter days={days} onChange={setDays} />
-
-        <div className="kpi-grid">
-          <KpiCard title="Avg Production" value={`${agg.avgProductionRate}%`} icon="&#128002;" />
-          <KpiCard title="Avg Mortality" value={`${agg.avgMortalityRate}%`} icon="&#128196;" color={agg.avgMortalityRate > 10 ? '#dc2626' : undefined} />
-          <KpiCard title="Avg Feed/Bird" value={`${agg.avgFeedPerBird}g`} icon="&#127838;" />
-          <KpiCard title="Avg Temperature" value={`${agg.avgTemperature}°C`} icon="&#127777;" />
-          <KpiCard title="Avg Egg Weight" value={`${agg.avgEggWeight}g`} icon="&#129370;" />
-          <KpiCard title="Reports" value={agg.totalReports} icon="&#128196;" />
+        <div className="mgmt-section">
+          <div className="mgmt-kpi-grid">
+            <KpiCard title="Avg Production" value={`${agg.avgProductionRate}%`} icon={TrendingUp} />
+            <KpiCard
+              title="Avg Mortality"
+              value={`${agg.avgMortalityRate}%`}
+              icon={Activity}
+              color={agg.avgMortalityRate > 10 ? 'var(--mgmt-danger)' : undefined}
+            />
+            <KpiCard title="Avg Feed/Bird" value={`${agg.avgFeedPerBird}g`} icon={Wheat} />
+            <KpiCard title="Avg Temperature" value={`${agg.avgTemperature}°C`} icon={Thermometer} />
+            <KpiCard title="Avg Egg Weight" value={`${agg.avgEggWeight}g`} icon={Egg} />
+            <KpiCard title="Total Reports" value={agg.totalReports} icon={FileText} />
+          </div>
         </div>
 
         {chartData.length > 0 && (
-          <div className="chart-grid">
-            <div className="chart-card">
-              <h3>Production & Mortality Trend</h3>
-              <ResponsiveContainer width="100%" height={250}>
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Legend />
-                  <Line type="monotone" dataKey="production" stroke="#15803d" strokeWidth={2} name="Production %" />
-                  <Line type="monotone" dataKey="mortality" stroke="#dc2626" strokeWidth={2} name="Mortality %" />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="chart-card">
-              <h3>Temperature Trend</h3>
-              <ResponsiveContainer width="100%" height={250}>
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                  <YAxis tick={{ fontSize: 12 }} />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="temperature" stroke="#d97706" strokeWidth={2} name="Temp °C" />
-                </LineChart>
-              </ResponsiveContainer>
+          <div className="mgmt-section">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+              <div className="mgmt-chart-card">
+                <div className="mgmt-chart-card__header">
+                  <div>
+                    <div className="mgmt-chart-card__title">Production & Mortality Trend</div>
+                    <div className="mgmt-chart-card__subtitle">Daily performance metrics</div>
+                  </div>
+                </div>
+                <div className="mgmt-chart-card__body">
+                  <ResponsiveContainer width="100%" height={250}>
+                    <LineChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="production" stroke="var(--mgmt-primary, #15803d)" strokeWidth={2} name="Production %" />
+                      <Line type="monotone" dataKey="mortality" stroke="var(--mgmt-danger, #dc2626)" strokeWidth={2} name="Mortality %" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div className="mgmt-chart-card">
+                <div className="mgmt-chart-card__header">
+                  <div>
+                    <div className="mgmt-chart-card__title">Temperature Trend</div>
+                    <div className="mgmt-chart-card__subtitle">Daily temperature readings</div>
+                  </div>
+                </div>
+                <div className="mgmt-chart-card__body">
+                  <ResponsiveContainer width="100%" height={250}>
+                    <LineChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                      <YAxis tick={{ fontSize: 12 }} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="temperature" stroke="var(--mgmt-warning, #d97706)" strokeWidth={2} name="Temp °C" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
-        <div className="section-card">
-          <h3>Report History</h3>
-          <div className="table-container">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Birds</th>
-                  <th>Production</th>
-                  <th>Mortality</th>
-                  <th>Feed</th>
-                  <th>Temp</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...reports].reverse().map((r) => (
-                  <tr key={r.reportId}>
-                    <td>{formatDisplayDate(r.submissionDate)}</td>
-                    <td>{r.birdCount}</td>
-                    <td>{calcProductionRate(r.eggsProduced ?? 0, r.birdCount ?? 0)}%</td>
-                    <td className={calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0) > 10 ? 'text-danger' : ''}>
-                      {calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0)}%
-                    </td>
-                    <td>{calcFeedPerBird(r.feedKg ?? 0, r.birdCount ?? 0)}g</td>
-                    <td>{r.temperature}°C</td>
-                    <td>{formatTime(r.createdAt)}</td>
+        <div className="mgmt-section">
+          <div className="mgmt-section-card">
+            <div className="mgmt-section-card__header">
+              <div className="mgmt-section-card__title">Report History</div>
+              <div className="mgmt-section-card__subtitle">{reports.length} report{reports.length !== 1 ? 's' : ''}</div>
+            </div>
+            <div className="mgmt-table-container">
+              <table className="mgmt-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Birds</th>
+                    <th>Production</th>
+                    <th>Mortality</th>
+                    <th>Feed</th>
+                    <th>Temp</th>
+                    <th>Time</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {[...reports].reverse().map((r) => {
+                    const mortRate = calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0);
+                    return (
+                      <tr key={r.reportId}>
+                        <td>{formatDisplayDate(r.submissionDate)}</td>
+                        <td className="mgmt-table__cell--number">{r.birdCount}</td>
+                        <td>{calcProductionRate(r.eggsProduced ?? 0, r.birdCount ?? 0)}%</td>
+                        <td>
+                          <span className={`mgmt-badge ${mortRate > 10 ? 'mgmt-badge--danger' : 'mgmt-badge--success'}`}>
+                            {mortRate}%
+                          </span>
+                        </td>
+                        <td>{calcFeedPerBird(r.feedKg ?? 0, r.birdCount ?? 0)}g</td>
+                        <td>{r.temperature}°C</td>
+                        <td>{formatTime(r.createdAt)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {reports.length === 0 && <EmptyState message="No reports found for this period." />}
           </div>
-          {reports.length === 0 && <EmptyState message="No reports found for this period." />}
         </div>
       </div>
     </DashboardLayout>

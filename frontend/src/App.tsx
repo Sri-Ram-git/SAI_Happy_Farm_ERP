@@ -22,6 +22,7 @@ import { AdminSubmissionsPage } from './pages/admin/AdminSubmissionsPage';
 import { LoadingScreen } from './components/LoadingScreen';
 import { getRouteForRole } from './utils/routeByRole';
 import './styles.css';
+import './mgmt-portal.css';
 
 function RootRedirect() {
   const { role, loading, isAuthenticated } = useAuth();

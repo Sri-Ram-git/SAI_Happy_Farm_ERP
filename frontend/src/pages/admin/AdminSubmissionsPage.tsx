@@ -9,6 +9,12 @@ import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { getAllUsers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils';
 import { useDailyReportsByDate } from '../../hooks/useDailyReports';
+import {
+  Search,
+  CheckCircle,
+  Clock,
+  FileText,
+} from 'lucide-react';
 
 export function AdminSubmissionsPage() {
   const { userProfile } = useAuth();
@@ -54,32 +60,50 @@ export function AdminSubmissionsPage() {
   return (
     <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
-        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
+        {error && <div className="mgmt-error" style={{ marginBottom: 16 }}><span className="mgmt-error__description">{error}</span></div>}
+
         <div className="mgmt-page-header">
-          <h2>Submissions - {formatDisplayDate(date)}</h2>
-          <div className="header-controls">
-            <input
-              type="text"
-              className="search-input"
-              placeholder="Search farm or farmer..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+          <div className="mgmt-page-header__title-group">
+            <h2 className="mgmt-page-header__title">Submissions - {formatDisplayDate(date)}</h2>
+            <p className="mgmt-page-header__description">
+              {submittedCount} of {farms.length} farms submitted ({farms.length - submittedCount} pending)
+            </p>
+          </div>
+          <div className="mgmt-page-header__actions">
+            <div className="mgmt-search">
+              <Search className="mgmt-search__icon" size={16} />
+              <input
+                type="text"
+                className="mgmt-search__input"
+                placeholder="Search farm or farmer..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {search && (
+                <button className="mgmt-search__clear" onClick={() => setSearch('')}>
+                  &times;
+                </button>
+              )}
+            </div>
             <input
               type="date"
-              className="date-input"
+              className="mgmt-filters__select"
               value={date}
               onChange={(e) => setDate(e.target.value)}
+              style={{ padding: '6px 10px', fontFamily: 'var(--mgmt-font)', fontSize: 13 }}
             />
           </div>
         </div>
 
-        <div className="submission-summary">
-          <span className="submission-count">{submittedCount} / {farms.length} submitted</span>
-        </div>
-
-        <div className="table-container">
-          <table className="data-table">
+        <div className="mgmt-table-container">
+          <div className="mgmt-table-container__header">
+            <span className="mgmt-table-container__title">Daily Submissions</span>
+            <span className="mgmt-badge mgmt-badge--info">
+              <CheckCircle size={12} />
+              {submittedCount} / {farms.length} submitted
+            </span>
+          </div>
+          <table className="mgmt-table">
             <thead>
               <tr>
                 <th>Farm ID</th>
@@ -93,15 +117,18 @@ export function AdminSubmissionsPage() {
             <tbody>
               {rows.map(({ farm, report, farmer }) => (
                 <tr key={farm.farmId}>
-                  <td className="td-bold">{farm.farmId}</td>
+                  <td style={{ fontWeight: 600, fontFamily: 'var(--mgmt-font-mono)' }}>{farm.farmId}</td>
                   <td>{farmer?.name || 'Unknown'}</td>
                   <td>
-                    <span className={`status-badge ${report ? 'status-badge--ok' : 'status-badge--warn'}`}>
+                    <span className={`mgmt-badge ${report ? 'mgmt-badge--success' : 'mgmt-badge--warning'}`}>
+                      <span className="mgmt-badge__dot" />
                       {report ? 'Submitted' : 'Not Submitted'}
                     </span>
                   </td>
-                  <td>{report?.birdCount ?? '--'}</td>
-                  <td>{report ? `${((report.eggsProduced ?? 0) / (report.birdCount ?? 1) * 100).toFixed(1)}%` : '--'}</td>
+                  <td className="mgmt-table__cell--number">{report?.birdCount ?? '--'}</td>
+                  <td className="mgmt-table__cell--number">
+                    {report ? `${((report.eggsProduced ?? 0) / (report.birdCount ?? 1) * 100).toFixed(1)}%` : '--'}
+                  </td>
                   <td>{report ? formatTime(report.createdAt) : '--'}</td>
                 </tr>
               ))}
@@ -109,7 +136,15 @@ export function AdminSubmissionsPage() {
           </table>
         </div>
 
-        {rows.length === 0 && <EmptyState message="No farms found." />}
+        {rows.length === 0 && (
+          <div className="mgmt-empty-state">
+            <div className="mgmt-empty-state__icon"><FileText size={24} /></div>
+            <div className="mgmt-empty-state__title">No Farms Found</div>
+            <div className="mgmt-empty-state__description">
+              {search ? 'No farms match your search criteria.' : 'No farms found for this date.'}
+            </div>
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );
