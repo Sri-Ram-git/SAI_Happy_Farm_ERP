@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
-import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
 import { type ReportDoc } from '../../services/reportDataService';
@@ -10,12 +9,6 @@ import { useDailyReportsByDate } from '../../hooks/useDailyReports';
 import { getFarmsByIds, type FarmDoc } from '../../services/farmDataService';
 import { getActiveFarmers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils';
-import {
-  ClipboardCheck,
-  Clock,
-  CheckCircle2,
-  AlertTriangle,
-} from 'lucide-react';
 
 export function SupervisorSubmissionsPage() {
   const { userProfile } = useAuth();
@@ -48,7 +41,6 @@ export function SupervisorSubmissionsPage() {
   });
 
   const submittedCount = rows.filter((r) => r.submitted).length;
-  const pendingCount = rows.length - submittedCount;
 
   if (loading) return <DashboardLayout role="supervisor" userName={profile?.name}><LoadingState /></DashboardLayout>;
   if (assignedFarmIds.length === 0) return <DashboardLayout role="supervisor" userName={profile?.name}><EmptyState message="No farms assigned." /></DashboardLayout>;
@@ -57,67 +49,45 @@ export function SupervisorSubmissionsPage() {
     <DashboardLayout role="supervisor" userName={profile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
-          <div className="mgmt-page-header__title-group">
-            <h2 className="mgmt-page-header__title">Submissions</h2>
-            <p className="mgmt-page-header__description">{formatDisplayDate(date)}</p>
-          </div>
-          <div className="mgmt-page-header__actions">
+          <h2>Submissions - {formatDisplayDate(date)}</h2>
+          <div className="header-controls">
+            <span className="submission-count">{submittedCount} / {farms.length} submitted</span>
             <input
               type="date"
-              className="mgmt-search__input"
+              className="date-input"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              style={{ width: 'auto' }}
             />
           </div>
         </div>
 
-        {error && (
-          <div className="mgmt-error" style={{ marginBottom: 16 }}>
-            <div className="mgmt-error__icon"><AlertTriangle size={24} /></div>
-            <div className="mgmt-error__description">{error}</div>
-          </div>
-        )}
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
 
-        <div className="mgmt-section">
-          <div className="mgmt-kpi-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-            <KpiCard title="Total Farms" value={farms.length} icon={ClipboardCheck} />
-            <KpiCard title="Submitted" value={submittedCount} icon={CheckCircle2} color="var(--mgmt-success)" />
-            <KpiCard title="Pending" value={pendingCount} icon={Clock} color={pendingCount > 0 ? 'var(--mgmt-warning)' : 'var(--mgmt-success)'} />
-          </div>
-        </div>
-
-        <div className="mgmt-section">
-          <div className="mgmt-table-container">
-            <table className="mgmt-table">
-              <thead>
-                <tr>
-                  <th>Farm</th>
-                  <th>Farmer</th>
-                  <th>Status</th>
-                  <th>Submitted At</th>
+        <div className="table-container">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Farm ID</th>
+                <th>Farmer</th>
+                <th>Status</th>
+                <th>Submitted At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(({ farm, report, farmer }) => (
+                <tr key={farm.farmId}>
+                  <td className="td-bold">{farm.farmId}</td>
+                  <td>{farmer?.name || 'Unknown'}</td>
+                  <td>
+                    <span className={`status-badge ${report ? 'status-badge--ok' : 'status-badge--warn'}`}>
+                      {report ? 'Submitted' : 'Not Submitted'}
+                    </span>
+                  </td>
+                  <td>{report ? formatTime(report.createdAt) : '--'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {rows.map(({ farm, report, farmer }) => (
-                  <tr key={farm.farmId}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>{farm.farmId}</div>
-                      <div style={{ fontSize: 12, color: 'var(--mgmt-text-muted)' }}>{farm.name || 'Unnamed'}</div>
-                    </td>
-                    <td>{farmer?.name || 'Unknown'}</td>
-                    <td>
-                      <span className={`mgmt-badge ${report ? 'mgmt-badge--success' : 'mgmt-badge--warning'}`}>
-                        <span className="mgmt-badge__dot" />
-                        {report ? 'Submitted' : 'Not Submitted'}
-                      </span>
-                    </td>
-                    <td>{report ? formatTime(report.createdAt) : '--'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </DashboardLayout>

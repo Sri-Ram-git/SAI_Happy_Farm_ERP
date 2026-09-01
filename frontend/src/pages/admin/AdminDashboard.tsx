@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
+import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
@@ -12,16 +13,6 @@ import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
 import { calcProductionRate, calcMortalityRate, calcAverage } from '../../utils/kpiCalculations';
 import { useAllDailyReports } from '../../hooks/useDailyReports';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import {
-  Warehouse,
-  Users,
-  Briefcase,
-  Bird,
-  TrendingUp,
-  AlertTriangle,
-  CheckCircle,
-  FileText,
-} from 'lucide-react';
 
 export function AdminDashboard() {
   const { userProfile } = useAuth();
@@ -75,99 +66,58 @@ export function AdminDashboard() {
 
   if (loading) return <DashboardLayout role="admin" userName={profile?.name}><LoadingState /></DashboardLayout>;
 
-  const kpis = [
-    { label: 'Total Farms', value: farms.length, icon: Warehouse, accent: 'primary' as const },
-    { label: 'Active Farmers', value: farmers.length, icon: Users, accent: 'success' as const },
-    { label: 'Supervisors', value: supervisors.length, icon: Briefcase, iconClass: 'info' as const },
-    { label: 'Active Birds', value: reports.length > 0 ? reports.reduce((sum, r) => sum + (r.birdCount ?? 0), 0).toLocaleString() : '0', icon: Bird, accent: 'primary' as const },
-    { label: 'Avg Production', value: `${avgProd}%`, icon: TrendingUp, accent: 'success' as const },
-    { label: 'Avg Mortality', value: `${avgMort}%`, icon: AlertTriangle, accent: avgMort > 10 ? 'danger' as const : 'warning' as const },
-    { label: 'Submitted Today', value: `${submittedToday} / ${farms.length}`, icon: CheckCircle, accent: 'success' as const },
-    { label: 'Total Reports', value: reports.length, icon: FileText, accent: 'info' as const },
-  ];
-
   return (
     <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
-        {error && <div className="mgmt-error" style={{ marginBottom: 16 }}><span className="mgmt-error__description">{error}</span></div>}
-
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="mgmt-page-header">
-          <div className="mgmt-page-header__title-group">
-            <h2 className="mgmt-page-header__title">Admin Overview</h2>
-            <p className="mgmt-page-header__description">Monitor farm operations across your organization</p>
-          </div>
-          <div className="mgmt-page-header__actions">
-            <DateFilter days={days} onChange={setDays} />
-          </div>
+          <h2>Admin Overview</h2>
+          <DateFilter days={days} onChange={setDays} />
         </div>
 
-        <div className="mgmt-kpi-grid">
-          {kpis.map((kpi) => (
-            <div className="mgmt-kpi-card" key={kpi.label}>
-              <div className={`mgmt-kpi-card__accent mgmt-kpi-card__accent--${kpi.accent}`} />
-              <div className="mgmt-kpi-card__header">
-                <div className={`mgmt-kpi-card__icon mgmt-kpi-card__icon--${kpi.iconClass ?? kpi.accent}`}>
-                  <kpi.icon size={20} />
-                </div>
-              </div>
-              <div className="mgmt-kpi-card__label">{kpi.label}</div>
-              <div className="mgmt-kpi-card__value">{kpi.value}</div>
-            </div>
-          ))}
+        <div className="kpi-grid">
+          <KpiCard title="Total Farms" value={farms.length} icon="&#127968;" />
+          <KpiCard title="Active Farmers" value={farmers.length} icon="&#128100;" />
+          <KpiCard title="Supervisors" value={supervisors.length} icon="&#128188;" />
+          <KpiCard title="Submitted Today" value={`${submittedToday} / ${farms.length}`} icon="&#9989;" />
+          <KpiCard title="Missing Today" value={Math.max(0, farms.length - submittedToday)} icon="&#9888;" color="#dc2626" />
+          <KpiCard title="Avg Production" value={`${avgProd}%`} icon="&#128002;" />
+          <KpiCard title="Avg Mortality" value={`${avgMort}%`} icon="&#128196;" color={avgMort > 10 ? '#dc2626' : undefined} />
+          <KpiCard title="Total Reports" value={reports.length} icon="&#128196;" />
         </div>
 
         {chartData.length > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 24 }}>
-            <div className="mgmt-chart-card">
-              <div className="mgmt-chart-card__header">
-                <div>
-                  <div className="mgmt-chart-card__title">Production & Mortality Trend</div>
-                  <div className="mgmt-chart-card__subtitle">Last {days} days</div>
-                </div>
-              </div>
-              <div className="mgmt-chart-card__body">
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--mgmt-border)" />
-                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="production" stroke="#15803d" strokeWidth={2} name="Production %" />
-                    <Line type="monotone" dataKey="mortality" stroke="#dc2626" strokeWidth={2} name="Mortality %" />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+          <div className="chart-grid">
+            <div className="chart-card">
+              <h3>Production & Mortality Trend</h3>
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="production" stroke="#15803d" strokeWidth={2} name="Production %" />
+                  <Line type="monotone" dataKey="mortality" stroke="#dc2626" strokeWidth={2} name="Mortality %" />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
-            <div className="mgmt-chart-card">
-              <div className="mgmt-chart-card__header">
-                <div>
-                  <div className="mgmt-chart-card__title">Daily Report Submissions</div>
-                  <div className="mgmt-chart-card__subtitle">Reports per day</div>
-                </div>
-              </div>
-              <div className="mgmt-chart-card__body">
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={chartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--mgmt-border)" />
-                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 12 }} />
-                    <Tooltip />
-                    <Bar dataKey="reports" fill="#15803d" name="Reports" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+            <div className="chart-card">
+              <h3>Daily Report Submissions</h3>
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Bar dataKey="reports" fill="#15803d" name="Reports" />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
         )}
 
-        {chartData.length === 0 && (
-          <div className="mgmt-empty-state">
-            <div className="mgmt-empty-state__icon"><FileText size={24} /></div>
-            <div className="mgmt-empty-state__title">No Data Available</div>
-            <div className="mgmt-empty-state__description">No report data available for the selected period.</div>
-          </div>
-        )}
+        {chartData.length === 0 && <EmptyState message="No report data available for the selected period." />}
       </div>
     </DashboardLayout>
   );

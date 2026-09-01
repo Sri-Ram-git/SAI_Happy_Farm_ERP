@@ -11,7 +11,6 @@ import { getFarmsByIds } from '../../services/farmDataService';
 import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
 import { calcProductionRate, calcMortalityRate, calcFeedPerBird, calcSelectionRate, calcAverage, aggregateReports } from '../../utils/kpiCalculations';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
-import { AlertTriangle } from 'lucide-react';
 
 export function SupervisorAnalyticsPage() {
   const { userProfile } = useAuth();
@@ -60,112 +59,74 @@ export function SupervisorAnalyticsPage() {
     <DashboardLayout role="supervisor" userName={profile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
-          <div className="mgmt-page-header__title-group">
-            <h2 className="mgmt-page-header__title">Analytics</h2>
-            <p className="mgmt-page-header__description">Comprehensive data analysis across all farms</p>
-          </div>
-          <div className="mgmt-page-header__actions">
-            <DateFilter days={days} onChange={setDays} />
-          </div>
+          <h2>Analytics</h2>
+          <DateFilter days={days} onChange={setDays} />
         </div>
 
-        {error && (
-          <div className="mgmt-error" style={{ marginBottom: 16 }}>
-            <div className="mgmt-error__icon"><AlertTriangle size={24} /></div>
-            <div className="mgmt-error__description">{error}</div>
-          </div>
-        )}
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
 
         {chartData.length === 0 ? (
           <EmptyState message="No data available for analytics." />
         ) : (
-          <div className="mgmt-section">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-              <div className="mgmt-chart-card">
-                <div className="mgmt-chart-card__header">
-                  <div>
-                    <div className="mgmt-chart-card__title">Production Rate Trend</div>
-                    <div className="mgmt-chart-card__subtitle">Daily average production and selection rates</div>
-                  </div>
-                </div>
-                <div className="mgmt-chart-card__body">
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="production" stroke="var(--mgmt-primary, #15803d)" strokeWidth={2} name="Production %" />
-                      <Line type="monotone" dataKey="selection" stroke="var(--mgmt-info, #2563eb)" strokeWidth={2} name="Selection %" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+          <>
+            <div className="chart-grid">
+              <div className="chart-card">
+                <h3>Production Rate Trend</h3>
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Line type="monotone" dataKey="production" stroke="#15803d" strokeWidth={2} name="Production %" />
+                    <Line type="monotone" dataKey="selection" stroke="#2563eb" strokeWidth={2} name="Selection %" />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
 
-              <div className="mgmt-chart-card">
-                <div className="mgmt-chart-card__header">
-                  <div>
-                    <div className="mgmt-chart-card__title">Mortality Trend</div>
-                    <div className="mgmt-chart-card__subtitle">Daily average mortality rate</div>
-                  </div>
-                </div>
-                <div className="mgmt-chart-card__body">
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="mortality" stroke="var(--mgmt-danger, #dc2626)" strokeWidth={2} name="Mortality %" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="chart-card">
+                <h3>Mortality Trend</h3>
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="mortality" stroke="#dc2626" strokeWidth={2} name="Mortality %" />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
 
-              <div className="mgmt-chart-card">
-                <div className="mgmt-chart-card__header">
-                  <div>
-                    <div className="mgmt-chart-card__title">Temperature Trend</div>
-                    <div className="mgmt-chart-card__subtitle">Daily average temperature readings</div>
-                  </div>
-                </div>
-                <div className="mgmt-chart-card__body">
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="temperature" stroke="var(--mgmt-warning, #d97706)" strokeWidth={2} name="Temp °C" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="chart-card">
+                <h3>Temperature Trend</h3>
+                <ResponsiveContainer width="100%" height={250}>
+                  <LineChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="temperature" stroke="#d97706" strokeWidth={2} name="Temp °C" />
+                  </LineChart>
+                </ResponsiveContainer>
               </div>
 
-              <div className="mgmt-chart-card">
-                <div className="mgmt-chart-card__header">
-                  <div>
-                    <div className="mgmt-chart-card__title">Farm Comparison</div>
-                    <div className="mgmt-chart-card__subtitle">Production vs mortality by farm</div>
-                  </div>
-                </div>
-                <div className="mgmt-chart-card__body">
-                  <ResponsiveContainer width="100%" height={250}>
-                    <BarChart data={farmComparison}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="farmId" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="production" fill="var(--mgmt-primary, #15803d)" name="Production %" />
-                      <Bar dataKey="mortality" fill="var(--mgmt-danger, #dc2626)" name="Mortality %" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+              <div className="chart-card">
+                <h3>Farm Comparison</h3>
+                <ResponsiveContainer width="100%" height={250}>
+                  <BarChart data={farmComparison}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="farmId" tick={{ fontSize: 12 }} />
+                    <YAxis tick={{ fontSize: 12 }} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="production" fill="#15803d" name="Production %" />
+                    <Bar dataKey="mortality" fill="#dc2626" name="Mortality %" />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
-          </div>
+          </>
         )}
       </div>
     </DashboardLayout>

@@ -13,16 +13,6 @@ import { getActiveFarmers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
 import { calcProductionRate, calcMortalityRate, calcAverage } from '../../utils/kpiCalculations';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import {
-  Building2,
-  Bird,
-  TrendingUp,
-  AlertTriangle,
-  Wheat,
-  ClipboardCheck,
-  Activity,
-  Users,
-} from 'lucide-react';
 
 export function SupervisorDashboard() {
   const { userProfile } = useAuth();
@@ -76,94 +66,62 @@ export function SupervisorDashboard() {
     <DashboardLayout role="supervisor" userName={profile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
-          <div className="mgmt-page-header__title-group">
-            <h2 className="mgmt-page-header__title">Supervisor Overview</h2>
-            <p className="mgmt-page-header__description">Monitor farm performance and submission status</p>
-          </div>
-          <div className="mgmt-page-header__actions">
-            <DateFilter days={days} onChange={setDays} />
-          </div>
+          <h2>Supervisor Overview</h2>
+          <DateFilter days={days} onChange={setDays} />
         </div>
 
-        {error && (
-          <div className="mgmt-error" style={{ marginBottom: 16 }}>
-            <div className="mgmt-error__icon"><AlertTriangle size={24} /></div>
-            <div className="mgmt-error__description">{error}</div>
-          </div>
-        )}
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
 
-        <div className="mgmt-section">
-          <div className="mgmt-kpi-grid">
-            <KpiCard title="Assigned Farms" value={assignedFarmIds.length} icon={Building2} />
-            <KpiCard title="Active Birds" value={farmers.length} icon={Users} />
-            <KpiCard
-              title="Submitted Today"
-              value={`${submittedToday} / ${assignedFarmIds.length}`}
-              icon={ClipboardCheck}
-              color={missingToday > 0 ? 'var(--mgmt-warning)' : 'var(--mgmt-success)'}
-            />
-            <KpiCard
-              title="Avg Production"
-              value={`${avgProd}%`}
-              icon={TrendingUp}
-              color={avgProd >= 70 ? 'var(--mgmt-success)' : 'var(--mgmt-warning)'}
-            />
-            <KpiCard
-              title="Avg Mortality"
-              value={`${avgMort}%`}
-              icon={Activity}
-              color={avgMort <= 5 ? 'var(--mgmt-success)' : 'var(--mgmt-danger)'}
-            />
-            <KpiCard
-              title="Avg Feed/Bird"
-              value={`${avgFeed.toFixed(0)}g`}
-              icon={Wheat}
-            />
-          </div>
+        <div className="kpi-grid">
+          <KpiCard title="Assigned Farms" value={assignedFarmIds.length} icon="&#127968;" />
+          <KpiCard title="Active Farmers" value={farmers.length} icon="&#128100;" />
+          <KpiCard title="Submitted Today" value={`${submittedToday} / ${assignedFarmIds.length}`} icon="&#9989;" color={missingToday > 0 ? '#d97706' : '#15803d'} />
+          <KpiCard title="Missing Today" value={missingToday} icon="&#9888;" color={missingToday > 0 ? '#dc2626' : '#15803d'} />
+          <KpiCard title="Avg Production Rate" value={`${avgProd}%`} icon="&#128002;" color={avgProd >= 70 ? '#15803d' : '#d97706'} />
+          <KpiCard title="Avg Mortality Rate" value={`${avgMort}%`} icon="&#128196;" color={avgMort <= 5 ? '#15803d' : '#dc2626'} />
+          <KpiCard title="Avg Feed/Bird" value={`${avgFeed.toFixed(0)}g`} icon="&#127838;" />
+          <KpiCard title="Attention Needed" value={missingToday + (avgMort > 10 ? 1 : 0)} icon="&#128680;" color="#dc2626" />
         </div>
 
         {chartData.length > 0 && (
-          <div className="mgmt-section">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
-              <div className="mgmt-chart-card">
-                <div className="mgmt-chart-card__header">
-                  <div>
-                    <div className="mgmt-chart-card__title">Production Trend</div>
-                    <div className="mgmt-chart-card__subtitle">Daily average production rate</div>
-                  </div>
-                </div>
-                <div className="mgmt-chart-card__body">
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="production" stroke="var(--mgmt-primary, #15803d)" strokeWidth={2} name="Production %" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+          <div className="chart-grid">
+            <div className="chart-card">
+              <h3>Egg Production Trend</h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="production" stroke="#15803d" strokeWidth={2} name="Production %" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
 
-              <div className="mgmt-chart-card">
-                <div className="mgmt-chart-card__header">
-                  <div>
-                    <div className="mgmt-chart-card__title">Mortality Trend</div>
-                    <div className="mgmt-chart-card__subtitle">Daily average mortality rate</div>
-                  </div>
-                </div>
-                <div className="mgmt-chart-card__body">
-                  <ResponsiveContainer width="100%" height={250}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="mortality" stroke="var(--mgmt-danger, #dc2626)" strokeWidth={2} name="Mortality %" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+            <div className="chart-card">
+              <h3>Mortality Trend</h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="mortality" stroke="#dc2626" strokeWidth={2} name="Mortality %" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="chart-card">
+              <h3>Feed Consumption (g/bird)</h3>
+              <ResponsiveContainer width="100%" height={250}>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                  <YAxis tick={{ fontSize: 12 }} />
+                  <Tooltip />
+                  <Bar dataKey="feed" fill="#16a34a" name="Feed g/bird" />
+                </BarChart>
+              </ResponsiveContainer>
             </div>
           </div>
         )}
