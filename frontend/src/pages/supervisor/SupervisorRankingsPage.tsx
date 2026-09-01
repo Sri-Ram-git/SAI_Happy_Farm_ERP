@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
@@ -12,13 +13,15 @@ import { aggregateReports, calcPerformanceScore, calcSubmissionCompliance } from
 
 export function SupervisorRankingsPage() {
   const { userProfile } = useAuth();
+  const mockProfile = useMockProfile('supervisor');
+  const profile = userProfile || mockProfile;
   const navigate = useNavigate();
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [reports, setReports] = useState<ReportDoc[]>([]);
 
-  const assignedFarmIds = userProfile?.farmIds ?? [];
+  const assignedFarmIds = profile?.farmIds ?? [];
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -55,11 +58,11 @@ export function SupervisorRankingsPage() {
     return { farm, agg, compliance, score, reportCount: farmReports.length };
   }).sort((a, b) => b.score.total - a.score.total);
 
-  if (loading) return <DashboardLayout role="supervisor" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
-  if (assignedFarmIds.length === 0) return <DashboardLayout role="supervisor" userName={userProfile?.name}><EmptyState message="No farms assigned." /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="supervisor" userName={profile?.name}><LoadingState /></DashboardLayout>;
+  if (assignedFarmIds.length === 0) return <DashboardLayout role="supervisor" userName={profile?.name}><EmptyState message="No farms assigned." /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="supervisor" userName={userProfile?.name}>
+    <DashboardLayout role="supervisor" userName={profile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>Farm Rankings</h2>

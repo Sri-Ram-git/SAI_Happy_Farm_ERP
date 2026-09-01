@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
@@ -13,6 +14,8 @@ import { aggregateReports, calcSubmissionCompliance } from '../../utils/kpiCalcu
 
 export function AdminFarmsPage() {
   const { userProfile } = useAuth();
+  const mockProfile = useMockProfile('admin');
+  const profile = userProfile || mockProfile;
   const navigate = useNavigate();
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
@@ -51,10 +54,10 @@ export function AdminFarmsPage() {
     return { farm, agg, farmer, compliance, reportCount: farmReports.length };
   });
 
-  if (loading) return <DashboardLayout role="admin" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="admin" userName={profile?.name}><LoadingState /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="admin" userName={userProfile?.name}>
+    <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>Farm Management</h2>

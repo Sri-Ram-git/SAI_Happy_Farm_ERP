@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
@@ -14,13 +15,15 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 export function SupervisorDashboard() {
   const { userProfile } = useAuth();
+  const mockProfile = useMockProfile('supervisor');
+  const profile = userProfile || mockProfile;
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(true);
   const [reports, setReports] = useState<ReportDoc[]>([]);
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [farmers, setFarmers] = useState<UserDoc[]>([]);
 
-  const assignedFarmIds = userProfile?.farmIds ?? [];
+  const assignedFarmIds = profile?.farmIds ?? [];
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -68,11 +71,11 @@ export function SupervisorDashboard() {
       }));
   })();
 
-  if (loading) return <DashboardLayout role="supervisor" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
-  if (assignedFarmIds.length === 0) return <DashboardLayout role="supervisor" userName={userProfile?.name}><EmptyState message="No farms assigned to you." /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="supervisor" userName={profile?.name}><LoadingState /></DashboardLayout>;
+  if (assignedFarmIds.length === 0) return <DashboardLayout role="supervisor" userName={profile?.name}><EmptyState message="No farms assigned to you." /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="supervisor" userName={userProfile?.name}>
+    <DashboardLayout role="supervisor" userName={profile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>Supervisor Overview</h2>

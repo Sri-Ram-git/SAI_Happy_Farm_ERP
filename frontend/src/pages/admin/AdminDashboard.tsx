@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
@@ -14,6 +15,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 export function AdminDashboard() {
   const { userProfile } = useAuth();
+  const mockProfile = useMockProfile('admin');
+  const profile = userProfile || mockProfile;
   const [days, setDays] = useState(7);
   const [loading, setLoading] = useState(true);
   const [reports, setReports] = useState<ReportDoc[]>([]);
@@ -66,10 +69,10 @@ export function AdminDashboard() {
       }));
   })();
 
-  if (loading) return <DashboardLayout role="admin" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="admin" userName={profile?.name}><LoadingState /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="admin" userName={userProfile?.name}>
+    <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>Admin Overview</h2>

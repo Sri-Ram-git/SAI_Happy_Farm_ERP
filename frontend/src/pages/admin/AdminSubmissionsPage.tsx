@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
@@ -10,6 +11,8 @@ import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils
 
 export function AdminSubmissionsPage() {
   const { userProfile } = useAuth();
+  const mockProfile = useMockProfile('admin');
+  const profile = userProfile || mockProfile;
   const [date, setDate] = useState(getIstDate());
   const [loading, setLoading] = useState(true);
   const [reports, setReports] = useState<ReportDoc[]>([]);
@@ -49,10 +52,10 @@ export function AdminSubmissionsPage() {
 
   const submittedCount = rows.filter((r) => r.submitted).length;
 
-  if (loading) return <DashboardLayout role="admin" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="admin" userName={profile?.name}><LoadingState /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="admin" userName={userProfile?.name}>
+    <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>Submissions - {formatDisplayDate(date)}</h2>

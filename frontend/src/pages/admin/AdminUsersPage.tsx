@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
@@ -7,6 +8,8 @@ import { getAllUsers, updateUserStatus, type UserDoc } from '../../services/user
 
 export function AdminUsersPage() {
   const { userProfile } = useAuth();
+  const mockProfile = useMockProfile('admin');
+  const profile = userProfile || mockProfile;
   const [loading, setLoading] = useState(true);
   const [users, setUsers] = useState<UserDoc[]>([]);
   const [filter, setFilter] = useState('all');
@@ -40,10 +43,10 @@ export function AdminUsersPage() {
 
   const filtered = filter === 'all' ? users : users.filter((u) => u.role === filter);
 
-  if (loading) return <DashboardLayout role="admin" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="admin" userName={profile?.name}><LoadingState /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="admin" userName={userProfile?.name}>
+    <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>User Management</h2>
@@ -87,7 +90,7 @@ export function AdminUsersPage() {
                   <td>
                     <button
                       className="btn btn--sm"
-                      disabled={actionLoading === u.uid || u.uid === userProfile?.uid}
+                      disabled={actionLoading === u.uid || u.uid === profile?.uid}
                       onClick={() => handleToggleStatus(u.uid, u.active)}
                     >
                       {actionLoading === u.uid ? '...' : u.active ? 'Deactivate' : 'Activate'}

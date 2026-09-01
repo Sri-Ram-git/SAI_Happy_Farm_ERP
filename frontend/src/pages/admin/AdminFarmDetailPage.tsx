@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
@@ -17,6 +18,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export function AdminFarmDetailPage() {
   const { farmId } = useParams<{ farmId: string }>();
   const { userProfile } = useAuth();
+  const mockProfile = useMockProfile('admin');
+  const profile = userProfile || mockProfile;
   const navigate = useNavigate();
   const [days, setDays] = useState(30);
   const [loading, setLoading] = useState(true);
@@ -66,11 +69,11 @@ export function AdminFarmDetailPage() {
   if (agg.avgAmmonia > KPI_THRESHOLDS.ammoniaCritical) attentionItems.push('High ammonia');
   if (!todayReport) attentionItems.push('No report submitted today');
 
-  if (loading) return <DashboardLayout role="admin" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
-  if (!farm) return <DashboardLayout role="admin" userName={userProfile?.name}><EmptyState message="Farm not found." /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="admin" userName={profile?.name}><LoadingState /></DashboardLayout>;
+  if (!farm) return <DashboardLayout role="admin" userName={profile?.name}><EmptyState message="Farm not found." /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="admin" userName={userProfile?.name}>
+    <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
         <button className="btn-back" onClick={() => navigate('/admin/farms')}>&#8592; Back to Farms</button>
 
