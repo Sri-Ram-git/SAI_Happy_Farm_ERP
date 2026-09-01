@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
@@ -19,8 +18,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 export function SupervisorFarmDetailPage() {
   const { farmId } = useParams<{ farmId: string }>();
   const { userProfile } = useAuth();
-  const mockProfile = useMockProfile('supervisor');
-  const profile = userProfile || mockProfile;
   const navigate = useNavigate();
   const [days, setDays] = useState(30);
   const [farmLoading, setFarmLoading] = useState(true);
@@ -64,14 +61,14 @@ export function SupervisorFarmDetailPage() {
   if (agg.avgAmmonia > KPI_THRESHOLDS.ammoniaCritical) attentionItems.push('High ammonia');
   if (!todayReport) attentionItems.push('No report submitted today');
 
-  const role = profile?.role === 'admin' ? 'admin' : 'supervisor';
+  const role = userProfile?.role === 'admin' ? 'admin' : 'supervisor';
   const basePath = role === 'admin' ? '/admin' : '/supervisor';
 
-  if (loading) return <DashboardLayout role={role} userName={profile?.name}><LoadingState /></DashboardLayout>;
-  if (!farm) return <DashboardLayout role={role} userName={profile?.name}><EmptyState message="Farm not found." /></DashboardLayout>;
+  if (loading) return <DashboardLayout role={role} userName={userProfile?.name}><LoadingState /></DashboardLayout>;
+  if (!farm) return <DashboardLayout role={role} userName={userProfile?.name}><EmptyState message="Farm not found." /></DashboardLayout>;
 
   return (
-    <DashboardLayout role={role} userName={profile?.name}>
+    <DashboardLayout role={role} userName={userProfile?.name}>
       <div className="mgmt-page">
         <button className="btn-back" onClick={() => navigate(`${basePath}/farms`)}>&#8592; Back to Farms</button>
 

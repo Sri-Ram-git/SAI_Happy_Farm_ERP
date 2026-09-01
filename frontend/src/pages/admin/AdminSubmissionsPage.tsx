@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
@@ -12,8 +11,6 @@ import { useDailyReportsByDate } from '../../hooks/useDailyReports';
 
 export function AdminSubmissionsPage() {
   const { userProfile } = useAuth();
-  const mockProfile = useMockProfile('admin');
-  const profile = userProfile || mockProfile;
   const [date, setDate] = useState(getIstDate());
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [farmers, setFarmers] = useState<UserDoc[]>([]);
@@ -49,10 +46,10 @@ export function AdminSubmissionsPage() {
 
   const submittedCount = rows.filter((r) => r.submitted).length;
 
-  if (loading) return <DashboardLayout role="admin" userName={profile?.name}><LoadingState /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="admin" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="admin" userName={profile?.name}>
+    <DashboardLayout role="admin" userName={userProfile?.name}>
       <div className="mgmt-page">
         {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="mgmt-page-header">

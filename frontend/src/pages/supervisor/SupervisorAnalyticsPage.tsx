@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
@@ -14,12 +13,10 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 export function SupervisorAnalyticsPage() {
   const { userProfile } = useAuth();
-  const mockProfile = useMockProfile('supervisor');
-  const profile = userProfile || mockProfile;
   const [days, setDays] = useState(30);
   const [farms, setFarms] = useState<{ id: string; name: string }[]>([]);
 
-  const assignedFarmIds = profile?.farmIds ?? [];
+  const assignedFarmIds = userProfile?.farmIds ?? [];
   const { reports, loading, error } = useDailyReportsByFarms(assignedFarmIds, getDaysAgo(days), getIstDate());
 
   useEffect(() => {
@@ -53,10 +50,10 @@ export function SupervisorAnalyticsPage() {
     return { farmId: farm.id, name: farm.name, production: agg.avgProductionRate, mortality: agg.avgMortalityRate, feedPerBird: agg.avgFeedPerBird };
   });
 
-  if (loading) return <DashboardLayout role="supervisor" userName={profile?.name}><LoadingState /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="supervisor" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="supervisor" userName={profile?.name}>
+    <DashboardLayout role="supervisor" userName={userProfile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>Analytics</h2>

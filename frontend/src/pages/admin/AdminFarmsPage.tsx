@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
@@ -15,8 +14,6 @@ import { useAllDailyReports } from '../../hooks/useDailyReports';
 
 export function AdminFarmsPage() {
   const { userProfile } = useAuth();
-  const mockProfile = useMockProfile('admin');
-  const profile = userProfile || mockProfile;
   const navigate = useNavigate();
   const [days, setDays] = useState(30);
   const [farms, setFarms] = useState<FarmDoc[]>([]);
@@ -49,10 +46,10 @@ export function AdminFarmsPage() {
     return { farm, agg, farmer, compliance, reportCount: farmReports.length };
   });
 
-  if (loading) return <DashboardLayout role="admin" userName={profile?.name}><LoadingState /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="admin" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="admin" userName={profile?.name}>
+    <DashboardLayout role="admin" userName={userProfile?.name}>
       <div className="mgmt-page">
         {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="mgmt-page-header">

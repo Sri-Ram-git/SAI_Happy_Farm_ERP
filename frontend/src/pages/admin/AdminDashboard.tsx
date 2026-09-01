@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
@@ -16,8 +15,6 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 export function AdminDashboard() {
   const { userProfile } = useAuth();
-  const mockProfile = useMockProfile('admin');
-  const profile = userProfile || mockProfile;
   const [days, setDays] = useState(7);
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [users, setUsers] = useState<UserDoc[]>([]);
@@ -64,10 +61,10 @@ export function AdminDashboard() {
       }));
   })();
 
-  if (loading) return <DashboardLayout role="admin" userName={profile?.name}><LoadingState /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="admin" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="admin" userName={profile?.name}>
+    <DashboardLayout role="admin" userName={userProfile?.name}>
       <div className="mgmt-page">
         {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="mgmt-page-header">

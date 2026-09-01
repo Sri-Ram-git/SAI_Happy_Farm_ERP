@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
@@ -12,13 +11,11 @@ import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils
 
 export function SupervisorSubmissionsPage() {
   const { userProfile } = useAuth();
-  const mockProfile = useMockProfile('supervisor');
-  const profile = userProfile || mockProfile;
   const [date, setDate] = useState(getIstDate());
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [farmers, setFarmers] = useState<UserDoc[]>([]);
 
-  const assignedFarmIds = profile?.farmIds ?? [];
+  const assignedFarmIds = userProfile?.farmIds ?? [];
   const { reports: allReports, loading, error } = useDailyReportsByDate(date);
   const reports = allReports.filter((r) => assignedFarmIds.includes(r.farmId));
 
@@ -42,11 +39,11 @@ export function SupervisorSubmissionsPage() {
 
   const submittedCount = rows.filter((r) => r.submitted).length;
 
-  if (loading) return <DashboardLayout role="supervisor" userName={profile?.name}><LoadingState /></DashboardLayout>;
-  if (assignedFarmIds.length === 0) return <DashboardLayout role="supervisor" userName={profile?.name}><EmptyState message="No farms assigned." /></DashboardLayout>;
+  if (loading) return <DashboardLayout role="supervisor" userName={userProfile?.name}><LoadingState /></DashboardLayout>;
+  if (assignedFarmIds.length === 0) return <DashboardLayout role="supervisor" userName={userProfile?.name}><EmptyState message="No farms assigned." /></DashboardLayout>;
 
   return (
-    <DashboardLayout role="supervisor" userName={profile?.name}>
+    <DashboardLayout role="supervisor" userName={userProfile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>Submissions - {formatDisplayDate(date)}</h2>
