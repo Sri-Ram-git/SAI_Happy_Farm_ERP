@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
@@ -7,7 +7,8 @@ import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
-import { getReportsByFarm, type ReportDoc } from '../../services/reportDataService';
+import { type ReportDoc } from '../../services/reportDataService';
+import { useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { getFarmById, type FarmDoc } from '../../services/farmDataService';
 import { getUserByUid, type UserDoc } from '../../services/userDataService';
 import { getIstDate, getDaysAgo, formatDisplayDate, formatTime } from '../../utils/dateUtils';
@@ -22,35 +23,28 @@ export function SupervisorFarmDetailPage() {
   const profile = userProfile || mockProfile;
   const navigate = useNavigate();
   const [days, setDays] = useState(30);
-  const [loading, setLoading] = useState(true);
+  const [farmLoading, setFarmLoading] = useState(true);
   const [farm, setFarm] = useState<FarmDoc | null>(null);
   const [farmer, setFarmer] = useState<UserDoc | null>(null);
-  const [reports, setReports] = useState<ReportDoc[]>([]);
 
-  const loadData = useCallback(async () => {
+  const farmIdArray = farmId ? [farmId] : [];
+  const { reports, loading: reportsLoading, error } = useDailyReportsByFarms(farmIdArray, getDaysAgo(days), getIstDate());
+  const loading = farmLoading || reportsLoading;
+
+  useEffect(() => {
     if (!farmId) return;
-    setLoading(true);
-    try {
-      const startDate = getDaysAgo(days);
-      const endDate = getIstDate();
-      const [f, rpts] = await Promise.all([
-        getFarmById(farmId),
-        getReportsByFarm(farmId, startDate, endDate),
-      ]);
-      setFarm(f);
-      setReports(rpts);
-      if (rpts.length > 0 && rpts[0]) {
-        const u = await getUserByUid(rpts[0].submittedBy);
-        setFarmer(u);
-      }
-    } catch (err) {
-      console.error('[FarmDetail] Load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [farmId, days]);
+    setFarmLoading(true);
+    getFarmById(farmId)
+      .then(setFarm)
+      .catch((err) => console.error('[FarmDetail] Load error:', err))
+      .finally(() => setFarmLoading(false));
+  }, [farmId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (reports.length > 0 && reports[0]) {
+      getUserByUid(reports[0].submittedBy).then(setFarmer);
+    }
+  }, [reports]);
 
   const chartData = reports.map((r) => ({
     date: r.submissionDate.slice(5),
@@ -80,6 +74,8 @@ export function SupervisorFarmDetailPage() {
     <DashboardLayout role={role} userName={profile?.name}>
       <div className="mgmt-page">
         <button className="btn-back" onClick={() => navigate(`${basePath}/farms`)}>&#8592; Back to Farms</button>
+
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
 
         <div className="farm-detail-header">
           <h2>{farm.farmId}</h2>

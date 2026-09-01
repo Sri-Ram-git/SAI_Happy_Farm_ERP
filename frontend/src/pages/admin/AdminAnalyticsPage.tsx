@@ -1,14 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
-import { getAllReports, type ReportDoc } from '../../services/reportDataService';
+import { type ReportDoc } from '../../services/reportDataService';
 import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
-import { calcProductionRate, calcMortalityRate, calcFeedPerBird, calcSelectionRate, aggregateReports } from '../../utils/kpiCalculations';
+import { calcProductionRate, calcMortalityRate, calcFeedPerBird, calcSelectionRate, aggregateReports, calcAverage } from '../../utils/kpiCalculations';
+import { useAllDailyReports } from '../../hooks/useDailyReports';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 
 export function AdminAnalyticsPage() {
@@ -16,29 +17,25 @@ export function AdminAnalyticsPage() {
   const mockProfile = useMockProfile('admin');
   const profile = userProfile || mockProfile;
   const [days, setDays] = useState(30);
-  const [loading, setLoading] = useState(true);
-  const [reports, setReports] = useState<ReportDoc[]>([]);
   const [farms, setFarms] = useState<{ id: string; name: string }[]>([]);
+  const [farmLoading, setFarmLoading] = useState(true);
+  const { reports, loading: reportsLoading, error } = useAllDailyReports(getDaysAgo(days), getIstDate());
+  const loading = farmLoading || reportsLoading;
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const startDate = getDaysAgo(days);
-      const endDate = getIstDate();
-      const [rpts, frms] = await Promise.all([
-        getAllReports(startDate, endDate),
-        getAllFarms(),
-      ]);
-      setReports(rpts);
-      setFarms(frms.map((f) => ({ id: f.farmId, name: f.name || f.farmId })));
-    } catch (err) {
-      console.error('[AdminAnalytics] Load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [days]);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const frms = await getAllFarms();
+        if (mounted) setFarms(frms.map((f) => ({ id: f.farmId, name: f.name || f.farmId })));
+      } catch (err) {
+        console.error('[AdminAnalytics] Load error:', err);
+      } finally {
+        if (mounted) setFarmLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const chartData = (() => {
     const byDate: Record<string, ReportDoc[]> = {};
@@ -50,10 +47,10 @@ export function AdminAnalyticsPage() {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, dayReports]) => ({
         date: date.slice(5),
-        production: calcAvg(dayReports.map((r) => calcProductionRate(r.eggsProduced ?? 0, r.birdCount ?? 0))),
-        mortality: calcAvg(dayReports.map((r) => calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0))),
-        feed: calcAvg(dayReports.map((r) => calcFeedPerBird(r.feedKg ?? 0, r.birdCount ?? 0))),
-        temperature: calcAvg(dayReports.map((r) => r.temperature)),
+        production: calcAverage(dayReports.map((r) => calcProductionRate(r.eggsProduced ?? 0, r.birdCount ?? 0))),
+        mortality: calcAverage(dayReports.map((r) => calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0))),
+        feed: calcAverage(dayReports.map((r) => calcFeedPerBird(r.feedKg ?? 0, r.birdCount ?? 0))),
+        temperature: calcAverage(dayReports.map((r) => r.temperature)),
       }));
   })();
 
@@ -68,6 +65,7 @@ export function AdminAnalyticsPage() {
   return (
     <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="mgmt-page-header">
           <h2>Analytics</h2>
           <DateFilter days={days} onChange={setDays} />
@@ -137,10 +135,4 @@ export function AdminAnalyticsPage() {
       </div>
     </DashboardLayout>
   );
-}
-
-function calcAvg(values: (number | undefined | null)[]): number {
-  const valid = values.filter((v): v is number => v != null && !isNaN(v) && isFinite(v));
-  if (valid.length === 0) return 0;
-  return parseFloat((valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(1));
 }

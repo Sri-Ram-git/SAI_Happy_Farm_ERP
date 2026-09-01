@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
@@ -6,11 +6,12 @@ import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
-import { getAllReports, type ReportDoc } from '../../services/reportDataService';
+import { type ReportDoc } from '../../services/reportDataService';
 import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { getAllUsers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
 import { calcProductionRate, calcMortalityRate, calcAverage } from '../../utils/kpiCalculations';
+import { useAllDailyReports } from '../../hooks/useDailyReports';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 
 export function AdminDashboard() {
@@ -18,32 +19,26 @@ export function AdminDashboard() {
   const mockProfile = useMockProfile('admin');
   const profile = userProfile || mockProfile;
   const [days, setDays] = useState(7);
-  const [loading, setLoading] = useState(true);
-  const [reports, setReports] = useState<ReportDoc[]>([]);
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [users, setUsers] = useState<UserDoc[]>([]);
+  const [farmLoading, setFarmLoading] = useState(true);
+  const { reports, loading: reportsLoading, error } = useAllDailyReports(getDaysAgo(days), getIstDate());
+  const loading = farmLoading || reportsLoading;
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const startDate = getDaysAgo(days);
-      const endDate = getIstDate();
-      const [rpts, frms, usrs] = await Promise.all([
-        getAllReports(startDate, endDate),
-        getAllFarms(),
-        getAllUsers(),
-      ]);
-      setReports(rpts);
-      setFarms(frms);
-      setUsers(usrs);
-    } catch (err) {
-      console.error('[AdminDashboard] Load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [days]);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [frms, usrs] = await Promise.all([getAllFarms(), getAllUsers()]);
+        if (mounted) { setFarms(frms); setUsers(usrs); }
+      } catch (err) {
+        console.error('[AdminDashboard] Load error:', err);
+      } finally {
+        if (mounted) setFarmLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const today = getIstDate();
   const todayReports = reports.filter((r) => r.submissionDate === today);
@@ -74,6 +69,7 @@ export function AdminDashboard() {
   return (
     <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="mgmt-page-header">
           <h2>Admin Overview</h2>
           <DateFilter days={days} onChange={setDays} />

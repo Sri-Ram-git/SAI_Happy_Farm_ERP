@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
-import { getReportsByDate, type ReportDoc } from '../../services/reportDataService';
+import { type ReportDoc } from '../../services/reportDataService';
+import { useDailyReportsByDate } from '../../hooks/useDailyReports';
 import { getFarmsByIds, type FarmDoc } from '../../services/farmDataService';
 import { getActiveFarmers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils';
@@ -14,33 +15,22 @@ export function SupervisorSubmissionsPage() {
   const mockProfile = useMockProfile('supervisor');
   const profile = userProfile || mockProfile;
   const [date, setDate] = useState(getIstDate());
-  const [loading, setLoading] = useState(true);
-  const [reports, setReports] = useState<ReportDoc[]>([]);
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [farmers, setFarmers] = useState<UserDoc[]>([]);
 
   const assignedFarmIds = profile?.farmIds ?? [];
+  const { reports: allReports, loading, error } = useDailyReportsByDate(date);
+  const reports = allReports.filter((r) => assignedFarmIds.includes(r.farmId));
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [allReports, frms, frs] = await Promise.all([
-        getReportsByDate(date),
-        getFarmsByIds(assignedFarmIds),
-        getActiveFarmers(),
-      ]);
-      const assignedReports = allReports.filter((r) => assignedFarmIds.includes(r.farmId));
-      setReports(assignedReports);
-      setFarms(frms);
-      setFarmers(frs.filter((f) => f.farmIds.some((id) => assignedFarmIds.includes(id))));
-    } catch (err) {
-      console.error('[SupervisorSubmissions] Load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [date, assignedFarmIds]);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (assignedFarmIds.length === 0) return;
+    Promise.all([getFarmsByIds(assignedFarmIds), getActiveFarmers()])
+      .then(([frms, frs]) => {
+        setFarms(frms);
+        setFarmers(frs.filter((f) => f.farmIds.some((id) => assignedFarmIds.includes(id))));
+      })
+      .catch((err) => console.error('[SupervisorSubmissions] Load error:', err));
+  }, [assignedFarmIds.join(',')]);
 
   const submittedFarmIds = new Set(reports.map((r) => r.farmId));
 
@@ -70,6 +60,8 @@ export function SupervisorSubmissionsPage() {
             />
           </div>
         </div>
+
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
 
         <div className="table-container">
           <table className="data-table">

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
@@ -7,10 +7,11 @@ import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
 import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
-import { getAllReports, type ReportDoc } from '../../services/reportDataService';
+import { type ReportDoc } from '../../services/reportDataService';
 import { getAllUsers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
 import { aggregateReports, calcSubmissionCompliance } from '../../utils/kpiCalculations';
+import { useAllDailyReports } from '../../hooks/useDailyReports';
 
 export function AdminFarmsPage() {
   const { userProfile } = useAuth();
@@ -18,32 +19,26 @@ export function AdminFarmsPage() {
   const profile = userProfile || mockProfile;
   const navigate = useNavigate();
   const [days, setDays] = useState(30);
-  const [loading, setLoading] = useState(true);
   const [farms, setFarms] = useState<FarmDoc[]>([]);
-  const [reports, setReports] = useState<ReportDoc[]>([]);
   const [farmers, setFarmers] = useState<UserDoc[]>([]);
+  const [farmLoading, setFarmLoading] = useState(true);
+  const { reports, loading: reportsLoading, error } = useAllDailyReports(getDaysAgo(days), getIstDate());
+  const loading = farmLoading || reportsLoading;
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const startDate = getDaysAgo(days);
-      const endDate = getIstDate();
-      const [frms, rpts, frs] = await Promise.all([
-        getAllFarms(),
-        getAllReports(startDate, endDate),
-        getAllUsers(),
-      ]);
-      setFarms(frms);
-      setReports(rpts);
-      setFarmers(frs.filter((u) => u.role === 'farmer'));
-    } catch (err) {
-      console.error('[AdminFarms] Load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [days]);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [frms, frs] = await Promise.all([getAllFarms(), getAllUsers()]);
+        if (mounted) { setFarms(frms); setFarmers(frs.filter((u) => u.role === 'farmer')); }
+      } catch (err) {
+        console.error('[AdminFarms] Load error:', err);
+      } finally {
+        if (mounted) setFarmLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const farmRows = farms.map((farm) => {
     const farmReports = reports.filter((r) => r.farmId === farm.farmId);
@@ -59,6 +54,7 @@ export function AdminFarmsPage() {
   return (
     <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="mgmt-page-header">
           <h2>Farm Management</h2>
           <DateFilter days={days} onChange={setDays} />

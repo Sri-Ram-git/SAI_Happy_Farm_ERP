@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
@@ -7,11 +7,12 @@ import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
-import { getReportsByFarm, type ReportDoc } from '../../services/reportDataService';
+import { type ReportDoc } from '../../services/reportDataService';
 import { getFarmById, type FarmDoc } from '../../services/farmDataService';
 import { getUserByUid, type UserDoc } from '../../services/userDataService';
 import { getIstDate, getDaysAgo, formatDisplayDate, formatTime } from '../../utils/dateUtils';
 import { calcProductionRate, calcMortalityRate, calcFeedPerBird, aggregateReports } from '../../utils/kpiCalculations';
+import { useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { KPI_THRESHOLDS } from '../../config/kpiThresholds';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
@@ -22,35 +23,42 @@ export function AdminFarmDetailPage() {
   const profile = userProfile || mockProfile;
   const navigate = useNavigate();
   const [days, setDays] = useState(30);
-  const [loading, setLoading] = useState(true);
   const [farm, setFarm] = useState<FarmDoc | null>(null);
   const [farmer, setFarmer] = useState<UserDoc | null>(null);
-  const [reports, setReports] = useState<ReportDoc[]>([]);
+  const [farmLoading, setFarmLoading] = useState(true);
+  const farmIdArray = farmId ? [farmId] : [];
+  const { reports, loading: reportsLoading, error } = useDailyReportsByFarms(farmIdArray, getDaysAgo(days), getIstDate());
+  const loading = farmLoading || reportsLoading;
 
-  const loadData = useCallback(async () => {
+  useEffect(() => {
     if (!farmId) return;
-    setLoading(true);
-    try {
-      const startDate = getDaysAgo(days);
-      const endDate = getIstDate();
-      const [f, rpts] = await Promise.all([
-        getFarmById(farmId),
-        getReportsByFarm(farmId, startDate, endDate),
-      ]);
-      setFarm(f);
-      setReports(rpts);
-      if (rpts.length > 0 && rpts[0]) {
-        const u = await getUserByUid(rpts[0].submittedBy);
-        setFarmer(u);
+    let mounted = true;
+    (async () => {
+      try {
+        const f = await getFarmById(farmId);
+        if (mounted) setFarm(f);
+      } catch (err) {
+        console.error('[AdminFarmDetail] Load error:', err);
+      } finally {
+        if (mounted) setFarmLoading(false);
       }
-    } catch (err) {
-      console.error('[AdminFarmDetail] Load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [farmId, days]);
+    })();
+    return () => { mounted = false; };
+  }, [farmId]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (!farmId || reports.length === 0) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const u = await getUserByUid(reports[0].submittedBy);
+        if (mounted) setFarmer(u);
+      } catch (err) {
+        console.error('[AdminFarmDetail] Farmer load error:', err);
+      }
+    })();
+    return () => { mounted = false; };
+  }, [farmId, reports.length > 0 ? reports[0].submittedBy : '']);
 
   const chartData = reports.map((r) => ({
     date: r.submissionDate.slice(5),
@@ -75,6 +83,7 @@ export function AdminFarmDetailPage() {
   return (
     <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <button className="btn-back" onClick={() => navigate('/admin/farms')}>&#8592; Back to Farms</button>
 
         <div className="farm-detail-header">

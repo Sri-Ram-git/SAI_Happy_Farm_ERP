@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
@@ -6,7 +6,8 @@ import { KpiCard } from '../../components/dashboard/KpiCard';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
-import { getReportsByFarms, type ReportDoc } from '../../services/reportDataService';
+import { type ReportDoc } from '../../services/reportDataService';
+import { useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { getFarmsByIds, type FarmDoc } from '../../services/farmDataService';
 import { getActiveFarmers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
@@ -18,34 +19,21 @@ export function SupervisorDashboard() {
   const mockProfile = useMockProfile('supervisor');
   const profile = userProfile || mockProfile;
   const [days, setDays] = useState(7);
-  const [loading, setLoading] = useState(true);
-  const [reports, setReports] = useState<ReportDoc[]>([]);
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [farmers, setFarmers] = useState<UserDoc[]>([]);
 
   const assignedFarmIds = profile?.farmIds ?? [];
+  const { reports, loading, error } = useDailyReportsByFarms(assignedFarmIds, getDaysAgo(days), getIstDate());
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const startDate = getDaysAgo(days);
-      const endDate = getIstDate();
-      const [rpts, frms, frs] = await Promise.all([
-        getReportsByFarms(assignedFarmIds, startDate, endDate),
-        getFarmsByIds(assignedFarmIds),
-        getActiveFarmers(),
-      ]);
-      setReports(rpts);
-      setFarms(frms);
-      setFarmers(frs.filter((f) => f.farmIds.some((id) => assignedFarmIds.includes(id))));
-    } catch (err) {
-      console.error('[SupervisorDashboard] Load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [days, assignedFarmIds]);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (assignedFarmIds.length === 0) return;
+    Promise.all([getFarmsByIds(assignedFarmIds), getActiveFarmers()])
+      .then(([frms, frs]) => {
+        setFarms(frms);
+        setFarmers(frs.filter((f) => f.farmIds.some((id) => assignedFarmIds.includes(id))));
+      })
+      .catch((err) => console.error('[SupervisorDashboard] Load error:', err));
+  }, [assignedFarmIds.join(',')]);
 
   const today = getIstDate();
   const todayReports = reports.filter((r) => r.submissionDate === today);
@@ -81,6 +69,8 @@ export function SupervisorDashboard() {
           <h2>Supervisor Overview</h2>
           <DateFilter days={days} onChange={setDays} />
         </div>
+
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
 
         <div className="kpi-grid">
           <KpiCard title="Assigned Farms" value={assignedFarmIds.length} icon="&#127968;" />

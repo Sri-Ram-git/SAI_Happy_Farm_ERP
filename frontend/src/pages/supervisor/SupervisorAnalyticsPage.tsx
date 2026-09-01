@@ -1,14 +1,15 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
-import { getReportsByFarms, type ReportDoc } from '../../services/reportDataService';
+import { type ReportDoc } from '../../services/reportDataService';
+import { useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { getFarmsByIds } from '../../services/farmDataService';
 import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
-import { calcProductionRate, calcMortalityRate, calcFeedPerBird, calcSelectionRate, aggregateReports } from '../../utils/kpiCalculations';
+import { calcProductionRate, calcMortalityRate, calcFeedPerBird, calcSelectionRate, calcAverage, aggregateReports } from '../../utils/kpiCalculations';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 
 export function SupervisorAnalyticsPage() {
@@ -16,31 +17,17 @@ export function SupervisorAnalyticsPage() {
   const mockProfile = useMockProfile('supervisor');
   const profile = userProfile || mockProfile;
   const [days, setDays] = useState(30);
-  const [loading, setLoading] = useState(true);
-  const [reports, setReports] = useState<ReportDoc[]>([]);
   const [farms, setFarms] = useState<{ id: string; name: string }[]>([]);
 
   const assignedFarmIds = profile?.farmIds ?? [];
+  const { reports, loading, error } = useDailyReportsByFarms(assignedFarmIds, getDaysAgo(days), getIstDate());
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const startDate = getDaysAgo(days);
-      const endDate = getIstDate();
-      const [rpts, frms] = await Promise.all([
-        getReportsByFarms(assignedFarmIds, startDate, endDate),
-        getFarmsByIds(assignedFarmIds),
-      ]);
-      setReports(rpts);
-      setFarms(frms.map((f) => ({ id: f.farmId, name: f.name || f.farmId })));
-    } catch (err) {
-      console.error('[SupervisorAnalytics] Load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [days, assignedFarmIds]);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    if (assignedFarmIds.length === 0) return;
+    getFarmsByIds(assignedFarmIds)
+      .then((frms) => setFarms(frms.map((f) => ({ id: f.farmId, name: f.name || f.farmId }))))
+      .catch((err) => console.error('[SupervisorAnalytics] Load error:', err));
+  }, [assignedFarmIds.join(',')]);
 
   const chartData = (() => {
     const byDate: Record<string, ReportDoc[]> = {};
@@ -75,6 +62,8 @@ export function SupervisorAnalyticsPage() {
           <h2>Analytics</h2>
           <DateFilter days={days} onChange={setDays} />
         </div>
+
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
 
         {chartData.length === 0 ? (
           <EmptyState message="No data available for analytics." />
@@ -142,10 +131,4 @@ export function SupervisorAnalyticsPage() {
       </div>
     </DashboardLayout>
   );
-}
-
-function calcAverage(values: (number | undefined | null)[]): number {
-  const valid = values.filter((v): v is number => v != null && !isNaN(v) && isFinite(v));
-  if (valid.length === 0) return 0;
-  return parseFloat((valid.reduce((a, b) => a + b, 0) / valid.length).toFixed(1));
 }

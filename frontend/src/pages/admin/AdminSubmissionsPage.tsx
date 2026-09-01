@@ -1,44 +1,41 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useMockProfile } from '../../utils/useMockProfile';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
-import { getReportsByDate, type ReportDoc } from '../../services/reportDataService';
+import { type ReportDoc } from '../../services/reportDataService';
 import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { getAllUsers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils';
+import { useDailyReportsByDate } from '../../hooks/useDailyReports';
 
 export function AdminSubmissionsPage() {
   const { userProfile } = useAuth();
   const mockProfile = useMockProfile('admin');
   const profile = userProfile || mockProfile;
   const [date, setDate] = useState(getIstDate());
-  const [loading, setLoading] = useState(true);
-  const [reports, setReports] = useState<ReportDoc[]>([]);
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [farmers, setFarmers] = useState<UserDoc[]>([]);
+  const [farmLoading, setFarmLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const { reports, loading: reportsLoading, error } = useDailyReportsByDate(date);
+  const loading = farmLoading || reportsLoading;
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [rpts, frms, frs] = await Promise.all([
-        getReportsByDate(date),
-        getAllFarms(),
-        getAllUsers(),
-      ]);
-      setReports(rpts);
-      setFarms(frms);
-      setFarmers(frs.filter((u) => u.role === 'farmer'));
-    } catch (err) {
-      console.error('[AdminSubmissions] Load error:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [date]);
-
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const [frms, frs] = await Promise.all([getAllFarms(), getAllUsers()]);
+        if (mounted) { setFarms(frms); setFarmers(frs.filter((u) => u.role === 'farmer')); }
+      } catch (err) {
+        console.error('[AdminSubmissions] Load error:', err);
+      } finally {
+        if (mounted) setFarmLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   const rows = farms.map((farm) => {
     const report = reports.find((r) => r.farmId === farm.farmId);
@@ -57,6 +54,7 @@ export function AdminSubmissionsPage() {
   return (
     <DashboardLayout role="admin" userName={profile?.name}>
       <div className="mgmt-page">
+        {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="mgmt-page-header">
           <h2>Submissions - {formatDisplayDate(date)}</h2>
           <div className="header-controls">
