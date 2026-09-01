@@ -1,0 +1,36 @@
+const f = (window as any).firebase;
+
+export interface FarmDoc {
+  farmId: string;
+  name: string;
+  location: string;
+  active: boolean;
+}
+
+export async function getFarmById(farmId: string): Promise<FarmDoc | null> {
+  const db = f.firestore();
+  const doc = await db.collection('farms').doc(farmId).get();
+  if (!doc.exists) return null;
+  return doc.data() as FarmDoc;
+}
+
+export async function getFarmsByIds(farmIds: string[]): Promise<FarmDoc[]> {
+  if (farmIds.length === 0) return [];
+  const db = f.firestore();
+  const results: FarmDoc[] = [];
+  const batchSize = 10;
+  for (let i = 0; i < farmIds.length; i += batchSize) {
+    const batch = farmIds.slice(i, i + batchSize);
+    const snap = await db.collection('farms').where('__name__', 'in', batch).get();
+    for (const doc of snap.docs) {
+      results.push(doc.data() as FarmDoc);
+    }
+  }
+  return results;
+}
+
+export async function getAllFarms(): Promise<FarmDoc[]> {
+  const db = f.firestore();
+  const snap = await db.collection('farms').get();
+  return snap.docs.map((doc: any) => doc.data() as FarmDoc);
+}
