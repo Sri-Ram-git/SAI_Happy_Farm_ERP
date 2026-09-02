@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { KpiCard } from '../../components/dashboard/KpiCard';
@@ -7,9 +7,9 @@ import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
 import { DetailDrawer } from '../../components/dashboard/DetailDrawer';
 import { type ReportDoc } from '../../services/reportDataService';
-import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
-import { getAllUsers, type UserDoc } from '../../services/userDataService';
-import { getBirdInventory, type BirdInventory } from '../../services/inventoryService';
+import { type FarmDoc, subscribeToAllFarms } from '../../services/farmDataService';
+import { type UserDoc, subscribeToAllUsers } from '../../services/userDataService';
+import { type BirdInventory, subscribeToAllBirdInventories } from '../../services/inventoryService';
 import { getIstDate, getDaysAgo, formatDisplayDate, formatTime } from '../../utils/dateUtils';
 import {
   calcProductionRate,
@@ -32,40 +32,44 @@ export function AdminDashboard() {
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [users, setUsers] = useState<UserDoc[]>([]);
   const [farmInventories, setFarmInventories] = useState<Map<string, BirdInventory>>(new Map());
-  const [farmLoading, setFarmLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [drawer, setDrawer] = useState<DrawerType>(null);
   const { reports, loading: reportsLoading, error } = useAllDailyReports(getDaysAgo(days), getIstDate());
-  const loading = farmLoading || reportsLoading;
+  const unsubRefs = useRef<(() => void)[]>([]);
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const [frms, usrs] = await Promise.all([getAllFarms(), getAllUsers()]);
-        if (!mounted) return;
-        setFarms(frms);
-        setUsers(usrs);
+    setDataLoading(true);
+    let initialDataLoaded = false;
 
-        const invMap = new Map<string, BirdInventory>();
-        await Promise.all(
-          frms.filter((f) => f.active).map(async (farm) => {
-            try {
-              const inv = await getBirdInventory(farm.farmId);
-              if (inv && mounted) invMap.set(farm.farmId, inv);
-            } catch (err) {
-              console.warn(`[AdminDashboard] Failed to load inventory for ${farm.farmId}:`, err);
-            }
-          })
-        );
-        if (mounted) setFarmInventories(invMap);
-      } catch (err) {
-        console.error('[AdminDashboard] Load error:', err);
-      } finally {
-        if (mounted) setFarmLoading(false);
+    const unsubFarms = subscribeToAllFarms((frms) => {
+      setFarms(frms);
+      if (!initialDataLoaded) {
+        const activeFarmIds = frms.filter((f) => f.active).map((f) => f.farmId);
+        if (activeFarmIds.length > 0) {
+          unsubRefs.current.push(
+            subscribeToAllBirdInventories(activeFarmIds, (invMap) => {
+              setFarmInventories(invMap);
+            })
+          );
+        }
       }
-    })();
-    return () => { mounted = false; };
+    });
+    unsubRefs.current.push(unsubFarms);
+
+    const unsubUsers = subscribeToAllUsers((usrs) => {
+      setUsers(usrs);
+      initialDataLoaded = true;
+      setDataLoading(false);
+    });
+    unsubRefs.current.push(unsubUsers);
+
+    return () => {
+      unsubRefs.current.forEach((u) => u());
+      unsubRefs.current = [];
+    };
   }, []);
+
+  const loading = dataLoading || reportsLoading;
 
   const today = getIstDate();
   const todayReports = reports.filter((r) => r.submissionDate === today);
@@ -459,7 +463,7 @@ export function AdminDashboard() {
           </thead>
           <tbody>
             {[...reports].reverse().map((r) => (
-              <tr key={r.id}>
+              <tr key={`${r.farmId}_${r.submissionDate}`}>
                 <td>{formatDisplayDate(r.submissionDate)}</td>
                 <td className="td-bold">{r.farmId}</td>
                 <td>{(r.eggsProduced ?? 0).toLocaleString()}</td>

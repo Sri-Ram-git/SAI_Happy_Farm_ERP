@@ -22,6 +22,7 @@ export function formatDisplayDate(isoDate: string): string {
 
 export interface SubmitReportInput {
   farmId: string;
+  birdCount: number;
   feedKg: number;
   mortality: number;
   culling: number;
@@ -43,25 +44,16 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
 
   const parentRef = db.collection('dailyReports').doc(userId);
   const dailyLogRef = db.collection('dailyReports').doc(userId).collection('dailyLogs').doc(submissionDate);
-  const birdsRef = db.collection('farms').doc(input.farmId).collection('inventory').doc('birds');
-  const feedRef = db.collection('farms').doc(input.farmId).collection('inventory').doc('feed');
 
   await db.runTransaction(async (transaction: any) => {
-    const [existingLog, birdsSnap, feedSnap] = await Promise.all([
-      transaction.get(dailyLogRef),
-      transaction.get(birdsRef),
-      transaction.get(feedRef),
-    ]);
+    const existingLog = await transaction.get(dailyLogRef);
 
     if (existingLog.exists) {
       throw new Error('DUPLICATE_REPORT');
     }
 
-    const openingBirdCount = birdsSnap.exists ? Number(birdsSnap.data().currentBirdCount ?? 0) : 0;
+    const openingBirdCount = input.birdCount;
     const closingBirdCount = openingBirdCount - input.mortality - input.culling;
-
-    const currentFeedStock = feedSnap.exists ? Number(feedSnap.data().currentFeedStockKg ?? 0) : 0;
-    const newFeedStock = currentFeedStock - input.feedKg;
 
     transaction.set(parentRef, {
       userId,
@@ -93,24 +85,8 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
       ammoniaPpm: input.ammoniaPpm,
     }, { merge: true });
 
-    if (birdsSnap.exists) {
-      transaction.set(birdsRef, {
-        currentBirdCount: closingBirdCount,
-        lastUpdated: now,
-        lastReportDate: submissionDate,
-      }, { merge: true });
-    }
-
-    if (feedSnap.exists) {
-      transaction.set(feedRef, {
-        currentFeedStockKg: newFeedStock,
-        lastUpdated: now,
-        lastTransactionDate: submissionDate,
-      }, { merge: true });
-    }
-
     if (input.mortality > 0) {
-      const birdTxRef = db.collection('farms').doc(input.farmId).collection('inventory').doc('birdTransactions').collection('records').doc();
+      const birdTxRef = db.collection('farms').doc(input.farmId).collection('birdTransactions').doc();
       transaction.set(birdTxRef, {
         farmId: input.farmId,
         type: 'MORTALITY',
@@ -122,7 +98,7 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
     }
 
     if (input.culling > 0) {
-      const birdTxRef = db.collection('farms').doc(input.farmId).collection('inventory').doc('birdTransactions').collection('records').doc();
+      const birdTxRef = db.collection('farms').doc(input.farmId).collection('birdTransactions').doc();
       transaction.set(birdTxRef, {
         farmId: input.farmId,
         type: 'CULLING',
@@ -134,7 +110,7 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
     }
 
     if (input.feedKg > 0) {
-      const feedTxRef = db.collection('farms').doc(input.farmId).collection('inventory').doc('feedTransactions').collection('records').doc();
+      const feedTxRef = db.collection('farms').doc(input.farmId).collection('feedTransactions').doc();
       transaction.set(feedTxRef, {
         farmId: input.farmId,
         type: 'FEED_USAGE',

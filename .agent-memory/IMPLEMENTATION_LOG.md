@@ -134,3 +134,103 @@
 - `.agent-memory/AGENT_RULES.md`
 
 **Result:** ✅ Success
+
+---
+
+## 2026-09-02 — Fix Admin Portal Crash + Data Flow Audit
+
+**Task:** Fix "farmsLoading is not defined" crash and audit entire frontend data flow
+
+**Files changed:**
+- `frontend/src/pages/admin/AdminDashboard.tsx` — Removed diagnostic console.log block containing `farmsLoading` typo; fixed React key collision in All Reports table
+- `frontend/src/services/reportDataService.ts` — Fixed `newQFailed` bug: `subscribeToCollectionGroup` now accepts `onError` callback; `newQFailed` flag properly set when collectionGroup fails
+
+**Root cause:** A diagnostic `console.log` block (added during previous debugging) referenced `farmsLoading` (plural) but the variable was named `farmLoading` (singular). This caused a `ReferenceError` that crashed the entire AdminDashboard component.
+
+**Additional fixes:**
+- React key collision: Changed `key={r.id}` to `key={r.farmId}_${r.submissionDate}` in All Reports table (line 462)
+- Error propagation: `subscribeToCollectionGroup` now accepts optional `onError` callback; `subscribeToAllDailyReports` and `subscribeToDailyReportsByFarms` properly set `newQFailed = true` when collectionGroup query fails
+
+**Full audit results:**
+- No other `farmsLoading` references found
+- All `reportsLoading` / `loading` variables properly defined
+- Old dailyReports queries correctly handled by `isParentDoc()` filter
+- Minor issues noted: `ProtectedRoute.tsx` logs on every render (performance), `userService.ts` logs user data to console (security)
+- All admin and supervisor pages verified clean
+
+**Result:** ✅ Success — Build compiles clean (`npx tsc --noEmit` passes)
+
+---
+
+## 2026-09-02 — Create Farmer Feature
+
+**Task:** Add "Create Farmer" feature to Admin Users page with secure backend
+
+**Files changed (backend):**
+- `src/validators/farmer.validator.ts` (created) — Zod schema for farmer creation validation
+- `src/services/farmer.service.ts` (created) — Business logic: Firebase Auth creation, Firestore user document, farm validation, audit logging, cleanup on failure
+- `src/controllers/farmer.controller.ts` (created) — Request handler for POST /api/v1/admin/users/farmer
+- `src/routes/admin.routes.ts` — Added POST /users/farmer route with auth + role + validation middleware
+
+**Files changed (frontend):**
+- `frontend/src/services/userDataService.ts` — Added `createFarmer()` function that calls backend API with Firebase ID token
+- `frontend/src/pages/admin/AdminUsersPage.tsx` — Added "Create Farmer" button, DetailDrawer form with name/email/phone/password/farm selection, validation, error handling, success confirmation
+- `frontend/src/styles.css` — Added CSS for farm checkbox group and alert variants
+
+**Architecture:**
+- Admin clicks "Create Farmer" → opens DetailDrawer form
+- Admin fills form, selects farm(s), clicks "Create Farmer Account"
+- Frontend gets Firebase ID token from current user (`firebaseUser.getIdToken()`)
+- Frontend calls `POST /api/v1/admin/users/farmer` with Bearer token
+- Backend verifies token via `authMiddleware`, checks admin role via `requireRole(UserRole.ADMIN)`
+- Backend validates input via Zod schema
+- Backend creates Firebase Auth user via `admin.auth().createUser()`
+- Backend creates Firestore document at `users/{authUid}`
+- Backend writes audit log to `auditLogs`
+- On Firestore failure: backend deletes the Firebase Auth user (cleanup)
+- Frontend refreshes user list on success
+
+**User document schema:**
+```json
+{
+  "name": "<form value>",
+  "email": "<form value>",
+  "phone_no": "<form value>",
+  "role": "farmer",
+  "farmIds": ["<selected farm IDs>"],
+  "active": true,
+  "createdAt": "<ISO timestamp>",
+  "updatedAt": "<ISO timestamp>"
+}
+```
+
+**Security:**
+- Firebase Auth creation happens ONLY on backend (Firebase Admin SDK)
+- Frontend never has access to service account credentials
+- Backend independently verifies caller authentication and admin role
+- No client-side privilege escalation possible
+
+**Result:** ✅ Success — Backend and frontend compile clean
+
+---
+
+## 2026-09-02 — Admin Dashboard Real-Time Sync Fix
+
+**Task:** Fix Admin Dashboard not syncing with Firestore in real-time
+
+**Problem:** Admin Dashboard loaded farms/users/inventory via one-time `await` fetches on mount. Only reports used real-time `onSnapshot` listeners. Any Firestore changes (new users, inventory updates) were not reflected until page refresh.
+
+**Files changed:**
+- `frontend/src/services/userDataService.ts` — Added `subscribeToAllUsers()` real-time listener
+- `frontend/src/services/farmDataService.ts` — Added `subscribeToAllFarms()` real-time listener
+- `frontend/src/services/inventoryService.ts` — Added `subscribeToAllBirdInventories()` real-time listener
+- `frontend/src/pages/admin/AdminDashboard.tsx` — Replaced one-time fetches with real-time subscriptions
+
+**Architecture:**
+- `subscribeToAllFarms()` listens to `farms` collection changes
+- `subscribeToAllUsers()` listens to `users` collection changes
+- `subscribeToAllBirdInventories()` listens to each active farm's `inventory/birds` document
+- All listeners clean up properly on unmount
+- Reports still use existing `useAllDailyReports` hook
+
+**Result:** ✅ Success — All data now syncs in real-time

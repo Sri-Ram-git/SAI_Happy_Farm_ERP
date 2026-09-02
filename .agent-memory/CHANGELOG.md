@@ -6,6 +6,32 @@
 
 ## 2026-09-02
 
+### Create Farmer Feature
+- Added POST `/api/v1/admin/users/farmer` backend endpoint
+- Added Zod validation schema for farmer creation
+- Added Firebase Auth user creation via Admin SDK (secure backend)
+- Added Firestore user document creation at `users/{authUid}`
+- Added farm validation (ensures assigned farms exist)
+- Added duplicate email detection
+- Added audit logging (USER_CREATED event)
+- Added rollback on partial failure (deletes Auth user if Firestore write fails)
+- Added "Create Farmer" button and form to Admin Users page
+- Added DetailDrawer-based form with name/email/phone/password/farm selection
+- Added client-side and server-side validation
+- Added success confirmation with auto-close
+- Added error display with field-level errors
+
+### Admin Dashboard Real-Time Sync
+- Added `subscribeToAllUsers()` real-time listener
+- Added `subscribeToAllFarms()` real-time listener
+- Added `subscribeToAllBirdInventories()` real-time listener
+- Replaced one-time fetches with real-time subscriptions in AdminDashboard
+
+### Admin Portal Fix
+- Fixed "farmsLoading is not defined" crash by removing diagnostic console.log block
+- Fixed React key collision in All Reports table (duplicate keys when multiple farms submit same date)
+- Fixed collectionGroup error propagation (`newQFailed` flag now properly set)
+
 ### Authentication System
 - Implemented Firebase email/password authentication
 - Added role-based route protection (farmer, supervisor, admin)

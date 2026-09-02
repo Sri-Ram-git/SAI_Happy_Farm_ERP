@@ -34,3 +34,16 @@ export async function getAllFarms(): Promise<FarmDoc[]> {
   const snap = await db.collection('farms').get();
   return snap.docs.map((doc: any) => doc.data() as FarmDoc);
 }
+
+export function subscribeToAllFarms(callback: (farms: FarmDoc[]) => void): () => void {
+  const db = f.firestore();
+  return db.collection('farms').onSnapshot(
+    (snap: any) => {
+      const farms = snap.docs.map((doc: any) => doc.data() as FarmDoc);
+      callback(farms);
+    },
+    (err: any) => {
+      console.error('[farmDataService] subscribeToAllFarms error:', err.message || err);
+    },
+  );
+}

@@ -1,4 +1,5 @@
 export interface FarmFormData {
+  birdCount: string;
   feedQuantity: string;
   feedUnit: 'kg' | 'g';
   mortality: string;
@@ -17,6 +18,7 @@ export interface FarmFormData {
 }
 
 export const INITIAL_FARM_FORM_DATA: FarmFormData = {
+  birdCount: '',
   feedQuantity: '',
   feedUnit: 'kg',
   mortality: '',
@@ -49,6 +51,10 @@ export function validateStep(step: number, data: FarmFormData, birdCount: number
 
   switch (step) {
     case 0: {
+      const bc = Number(data.birdCount);
+      if (data.birdCount === '') errors.birdCount = 'Required';
+      else if (!Number.isInteger(bc) || bc < 0) errors.birdCount = 'Enter a valid non-negative whole number';
+
       const fq = Number(data.feedQuantity);
       if (data.feedQuantity === '') errors.feedQuantity = 'Required';
       else if (fq < 0 || isNaN(fq)) errors.feedQuantity = 'Enter a valid non-negative number';

@@ -1650,3 +1650,55 @@ textarea:focus {
   border-radius: 4px;
   font-size: 12px;
 }
+
+/* ─── Create Farmer Form ─── */
+.create-farmer-form {
+  padding: 4px 0;
+}
+
+.farm-checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.farm-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.farm-checkbox:hover {
+  background: var(--gray-50);
+  border-color: var(--gray-300);
+}
+
+.farm-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--green-700);
+}
+
+.farm-checkbox-label {
+  font-size: 14px;
+  color: var(--gray-700);
+}
+
+.alert--success {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.alert--error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}

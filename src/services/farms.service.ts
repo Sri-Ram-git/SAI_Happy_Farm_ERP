@@ -11,10 +11,10 @@ export class FarmsService {
 
   async getAuthorizedFarms(user: AuthenticatedUser, requestId: string): Promise<Farm[]> {
     if (user.role === UserRole.ADMIN || user.role === UserRole.OFFICE_STAFF) {
-      return this.farmsRepository.getFarmsByIds(
-        user.farmIds.length > 0 ? user.farmIds : [],
-        requestId,
-      );
+      if (user.farmIds.length === 0) {
+        return this.farmsRepository.getAllFarms(requestId);
+      }
+      return this.farmsRepository.getFarmsByIds(user.farmIds, requestId);
     }
 
     return this.farmsRepository.getFarmsByIds(user.farmIds, requestId);

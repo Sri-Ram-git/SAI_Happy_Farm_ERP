@@ -60,6 +60,19 @@ export class FarmsRepository {
     }
   }
 
+  async getAllFarms(requestId: string): Promise<Farm[]> {
+    try {
+      const snapshot = await this.db.collection('farms').get();
+      return snapshot.docs.map((doc) => doc.data() as Farm);
+    } catch (error) {
+      logger.error('Failed to fetch all farms', {
+        requestId,
+        errorName: error instanceof Error ? error.name : 'Unknown',
+      });
+      throw new InternalError('Failed to fetch all farms');
+    }
+  }
+
   async validateFarmExists(farmId: string, requestId: string): Promise<boolean> {
     try {
       const doc = await this.db.collection('farms').doc(farmId).get();

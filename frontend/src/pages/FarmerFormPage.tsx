@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { logoutUser } from '../services/authService';
 import { submitReport, getIstDate, formatDisplayDate } from '../services/reportService';
-import { getBirdInventory } from '../services/inventoryService';
 import {
   FarmFormData,
   INITIAL_FARM_FORM_DATA,
@@ -66,7 +65,7 @@ function VerifyScreen({ data, farmId, reportDate, birdCount, mortalityPct, culli
       </VerifyCard>
 
       <VerifyCard title="Bird Data" onEdit={() => onEdit(0)}>
-        <VerifyRow label="Current Birds (from inventory)" value={birdCount.toLocaleString()} />
+        <VerifyRow label="Current Birds" value={birdCount.toLocaleString()} />
         <VerifyRow label="Closing Birds (after mortality/culling)" value={`${(birdCount - Number(data.mortality || 0) - Number(data.culling || 0)).toLocaleString()}`} />
       </VerifyCard>
 
@@ -132,11 +131,16 @@ function renderStep(
   if (step === 0) {
     return (
       <>
-        {birdCount > 0 && (
-          <div className="calc-value" style={{ marginBottom: 12, fontSize: 15, fontWeight: 600 }}>
-            Current Bird Count: {birdCount.toLocaleString()}
-          </div>
-        )}
+        <Field label="Bird Count" error={errors.birdCount}>
+          <input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            value={data.birdCount}
+            onChange={(e) => onChange('birdCount', e.target.value)}
+            placeholder="e.g. 1000"
+          />
+        </Field>
 
         <Field label="Feed Quantity" error={errors.feedQuantity}>
           <input
@@ -369,35 +373,10 @@ export function FarmerFormPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  const [birdCount, setBirdCount] = useState(0);
-  const [birdCountLoading, setBirdCountLoading] = useState(true);
-  const [birdCountError, setBirdCountError] = useState('');
 
   const farmId = userProfile?.farmIds?.[0] ?? '';
   const reportDate = getIstDate();
-
-  useEffect(() => {
-    if (!farmId) return;
-    let mounted = true;
-    (async () => {
-      try {
-        const inv = await getBirdInventory(farmId);
-        if (mounted) {
-          if (inv) {
-            setBirdCount(inv.currentBirdCount);
-          } else {
-            setBirdCountError('Inventory not found. Contact admin to initialize your farm inventory.');
-          }
-        }
-      } catch (err) {
-        console.error('[FarmForm] Failed to load bird inventory:', err);
-        if (mounted) setBirdCountError('Failed to load bird count from inventory.');
-      } finally {
-        if (mounted) setBirdCountLoading(false);
-      }
-    })();
-    return () => { mounted = false; };
-  }, [farmId]);
+  const birdCount = Number(data.birdCount) || 0;
 
   const handleChange = (field: keyof FarmFormData, value: string) => {
     setData((prev) => ({ ...prev, [field]: value }));
@@ -435,6 +414,7 @@ export function FarmerFormPage() {
       const feedKg = data.feedUnit === 'kg' ? Number(data.feedQuantity) : Number(data.feedQuantity) / 1000;
       await submitReport({
         farmId,
+        birdCount,
         feedKg,
         mortality: Number(data.mortality),
         culling: Number(data.culling),
@@ -538,13 +518,6 @@ export function FarmerFormPage() {
           </div>
         </div>
 
-        {birdCountLoading && (
-          <div className="alert alert--info" style={{ marginBottom: 16 }}>Loading bird inventory...</div>
-        )}
-        {birdCountError && (
-          <div className="alert alert--error" style={{ marginBottom: 16 }}>{birdCountError}</div>
-        )}
-
         <div className="form-progress">
           <div className="form-progress-text">
             {step < 3 ? `Step ${step + 1} of 3 — ${STEP_NAMES[step]}` : 'Verify & Submit'}
@@ -585,7 +558,7 @@ export function FarmerFormPage() {
             </button>
           )}
           {step < 3 ? (
-            <button className="btn btn--primary" onClick={handleNext} style={{ flex: 1 }} disabled={birdCountLoading || !!birdCountError}>
+            <button className="btn btn--primary" onClick={handleNext} style={{ flex: 1 }}>
               {step === 2 ? 'Verify' : 'Next'}
             </button>
           ) : (

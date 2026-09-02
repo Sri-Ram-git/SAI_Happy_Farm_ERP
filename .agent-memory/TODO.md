@@ -43,6 +43,10 @@
 
 ## COMPLETED
 
+- [x] Create Farmer feature (admin can create farmer accounts via backend API)
+- [x] Fix "farmsLoading is not defined" crash (AdminDashboard.tsx)
+- [x] Fix React key collision in Admin All Reports table
+- [x] Fix collectionGroup error propagation (newQFailed flag)
 - [x] Farmer login + daily report submission
 - [x] Admin dashboard with 10 interactive KPI cards + detail drawers
 - [x] Supervisor dashboard with farm-filtered KPIs

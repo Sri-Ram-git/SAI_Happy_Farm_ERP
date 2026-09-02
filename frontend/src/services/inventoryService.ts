@@ -34,26 +34,28 @@ export interface FeedTransaction {
 
 export async function getBirdInventory(farmId: string): Promise<BirdInventory | null> {
   const db = f.firestore();
-  const snap = await db.collection('farms').doc(farmId).collection('inventory').doc('birds').get();
+  const snap = await db.collection('farms').doc(farmId).get();
   if (!snap.exists) return null;
   const data = snap.data();
+  if (data.currentBirdCount === undefined && data.initialBirdCount === undefined) return null;
   return {
     initialBirdCount: Number(data.initialBirdCount ?? 0),
     currentBirdCount: Number(data.currentBirdCount ?? 0),
-    lastUpdated: String(data.lastUpdated ?? ''),
+    lastUpdated: String(data.inventoryUpdatedAt ?? data.updatedAt ?? ''),
     lastReportDate: String(data.lastReportDate ?? ''),
   };
 }
 
 export async function getFeedInventory(farmId: string): Promise<FeedInventory | null> {
   const db = f.firestore();
-  const snap = await db.collection('farms').doc(farmId).collection('inventory').doc('feed').get();
+  const snap = await db.collection('farms').doc(farmId).get();
   if (!snap.exists) return null;
   const data = snap.data();
+  if (data.currentFeedKg === undefined && data.initialFeedKg === undefined) return null;
   return {
-    currentFeedStockKg: Number(data.currentFeedStockKg ?? 0),
+    currentFeedStockKg: Number(data.currentFeedKg ?? 0),
     totalFeedLoadedKg: Number(data.totalFeedLoadedKg ?? 0),
-    lastUpdated: String(data.lastUpdated ?? ''),
+    lastUpdated: String(data.inventoryUpdatedAt ?? data.updatedAt ?? ''),
     lastTransactionDate: String(data.lastTransactionDate ?? ''),
   };
 }
@@ -61,22 +63,26 @@ export async function getFeedInventory(farmId: string): Promise<FeedInventory | 
 export async function initBirdInventory(farmId: string, initialCount: number): Promise<void> {
   const db = f.firestore();
   const now = new Date().toISOString();
-  await db.collection('farms').doc(farmId).collection('inventory').doc('birds').set({
+  await db.collection('farms').doc(farmId).set({
     initialBirdCount: initialCount,
     currentBirdCount: initialCount,
-    lastUpdated: now,
-    lastReportDate: '',
+    inventoryInitialized: true,
+    inventoryUpdatedAt: now,
+    updatedAt: now,
   }, { merge: true });
 }
 
 export async function initFeedInventory(farmId: string, initialStockKg: number): Promise<void> {
   const db = f.firestore();
   const now = new Date().toISOString();
-  await db.collection('farms').doc(farmId).collection('inventory').doc('feed').set({
-    currentFeedStockKg: initialStockKg,
+  await db.collection('farms').doc(farmId).set({
+    initialFeedKg: initialStockKg,
+    currentFeedKg: initialStockKg,
     totalFeedLoadedKg: initialStockKg,
-    lastUpdated: now,
-    lastTransactionDate: '',
+    totalFeedConsumedKg: 0,
+    inventoryInitialized: true,
+    inventoryUpdatedAt: now,
+    updatedAt: now,
   }, { merge: true });
 }
 
@@ -87,10 +93,11 @@ export async function updateBirdInventory(
 ): Promise<void> {
   const db = f.firestore();
   const now = new Date().toISOString();
-  await db.collection('farms').doc(farmId).collection('inventory').doc('birds').set({
+  await db.collection('farms').doc(farmId).set({
     currentBirdCount: newCurrentBirdCount,
-    lastUpdated: now,
     lastReportDate: reportDate,
+    inventoryUpdatedAt: now,
+    updatedAt: now,
   }, { merge: true });
 }
 
@@ -101,10 +108,11 @@ export async function updateFeedInventory(
 ): Promise<void> {
   const db = f.firestore();
   const now = new Date().toISOString();
-  await db.collection('farms').doc(farmId).collection('inventory').doc('feed').set({
-    currentFeedStockKg: newFeedStockKg,
-    lastUpdated: now,
+  await db.collection('farms').doc(farmId).set({
+    currentFeedKg: newFeedStockKg,
     lastTransactionDate: reportDate,
+    inventoryUpdatedAt: now,
+    updatedAt: now,
   }, { merge: true });
 }
 
@@ -118,25 +126,26 @@ export async function addFeedLoad(
   const now = new Date().toISOString();
   const reportDate = getIstDate();
 
-  const feedRef = db.collection('farms').doc(farmId).collection('inventory').doc('feed');
-  const txRef = db.collection('farms').doc(farmId).collection('inventory').doc('feedTransactions').collection('records').doc();
+  const farmRef = db.collection('farms').doc(farmId);
 
   await db.runTransaction(async (transaction: any) => {
-    const feedSnap = await transaction.get(feedRef);
-    if (!feedSnap.exists) {
-      throw new Error('FEED_INVENTORY_NOT_FOUND');
+    const farmSnap = await transaction.get(farmRef);
+    if (!farmSnap.exists) {
+      throw new Error('FARM_NOT_FOUND');
     }
-    const feedData = feedSnap.data();
-    const currentStock = Number(feedData.currentFeedStockKg ?? 0);
-    const totalLoaded = Number(feedData.totalFeedLoadedKg ?? 0);
+    const farmData = farmSnap.data();
+    const currentStock = Number(farmData.currentFeedKg ?? 0);
+    const totalLoaded = Number(farmData.totalFeedLoadedKg ?? 0);
 
-    transaction.set(feedRef, {
-      currentFeedStockKg: currentStock + feedLoadKg,
+    transaction.set(farmRef, {
+      currentFeedKg: currentStock + feedLoadKg,
       totalFeedLoadedKg: totalLoaded + feedLoadKg,
-      lastUpdated: now,
+      inventoryUpdatedAt: now,
       lastTransactionDate: reportDate,
+      updatedAt: now,
     }, { merge: true });
 
+    const txRef = db.collection('farms').doc(farmId).collection('feedTransactions').doc();
     transaction.set(txRef, {
       farmId,
       type: 'FEED_LOAD',
@@ -161,4 +170,44 @@ function getIstDate(): string {
   const m = parts.find((p) => p.type === 'month')?.value ?? '';
   const d = parts.find((p) => p.type === 'day')?.value ?? '';
   return `${y}-${m}-${d}`;
+}
+
+export function subscribeToAllBirdInventories(
+  farmIds: string[],
+  callback: (inventories: Map<string, BirdInventory>) => void,
+): () => void {
+  const db = f.firestore();
+  const unsubscribes: (() => void)[] = [];
+  const results = new Map<string, BirdInventory>();
+  let loadedCount = 0;
+
+  if (farmIds.length === 0) {
+    callback(results);
+    return () => {};
+  }
+
+  for (const farmId of farmIds) {
+    const unsub = db.collection('farms').doc(farmId).onSnapshot((snap: any) => {
+      if (snap.exists) {
+        const data = snap.data();
+        if (data.currentBirdCount !== undefined || data.initialBirdCount !== undefined) {
+          results.set(farmId, {
+            initialBirdCount: Number(data.initialBirdCount ?? 0),
+            currentBirdCount: Number(data.currentBirdCount ?? 0),
+            lastUpdated: String(data.inventoryUpdatedAt ?? data.updatedAt ?? ''),
+            lastReportDate: String(data.lastReportDate ?? ''),
+          });
+        }
+      }
+      loadedCount++;
+      if (loadedCount === farmIds.length) {
+        callback(new Map(results));
+      }
+    });
+    unsubscribes.push(unsub);
+  }
+
+  return () => {
+    unsubscribes.forEach((unsub) => unsub());
+  };
 }

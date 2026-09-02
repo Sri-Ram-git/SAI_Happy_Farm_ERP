@@ -30,7 +30,7 @@ export async function authMiddleware(
       throw new AuthenticationError('Missing ID token');
     }
 
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const decodedToken = await admin.auth().verifyIdToken(idToken, true);
 
     const db = getFirestore();
     const userDoc = await db.collection('users').doc(decodedToken.uid).get();

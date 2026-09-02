@@ -97,6 +97,7 @@ function subscribeToCollectionGroup(
   startDate: string,
   endDate: string,
   callback: (reports: NormalizedReport[]) => void,
+  onError?: (error: Error) => void,
 ): () => void {
   const db = f.firestore();
   let q: any;
@@ -106,6 +107,7 @@ function subscribeToCollectionGroup(
       .where('submissionDate', '<=', endDate);
   } catch (err: any) {
     console.error('[reportDataService] Failed to create collectionGroup query:', err.message || err);
+    onError?.(new Error(`collectionGroup query creation failed: ${err.message}`));
     callback([]);
     return () => {};
   }
@@ -123,6 +125,7 @@ function subscribeToCollectionGroup(
         console.error('[reportDataService] Go to Firebase Console > Firestore > Indexes > Add Index');
         console.error('[reportDataService] Collection: dailyLogs, Fields: submissionDate ASC');
       }
+      onError?.(new Error(`collectionGroup query failed: ${err.message}`));
       callback([]);
     },
   );
@@ -186,6 +189,12 @@ export function subscribeToAllDailyReports(
         allReports.set(key, r);
       }
       emit();
+    },
+    (err) => {
+      newQFailed = true;
+      if (oldQFailed && allReports.size === 0) {
+        onError?.(err);
+      }
     },
   );
 
@@ -263,6 +272,12 @@ export function subscribeToDailyReportsByFarms(
         allReports.set(key, r);
       }
       emit();
+    },
+    (err) => {
+      newQFailed = true;
+      if (oldQFailed && allReports.size === 0) {
+        onError?.(err);
+      }
     },
   );
 

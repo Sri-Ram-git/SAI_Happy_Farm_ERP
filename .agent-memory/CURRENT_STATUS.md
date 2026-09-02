@@ -29,6 +29,14 @@
 - ✅ Detail drawers for all KPIs (farms, farmers, supervisors, submitted, missing, birds, production, mortality, reports)
 - ✅ Date range filtering (Today, 7, 30, 90 days)
 
+### Admin User Management
+- ✅ User list with role filtering
+- ✅ Activate/Deactivate users
+- ✅ Create Farmer via backend API (Firebase Auth + Firestore)
+- ✅ Farm assignment from existing farms collection
+- ✅ Duplicate email detection
+- ✅ Audit logging (USER_CREATED event)
+
 ### Supervisor Dashboard
 - ✅ 8 KPI cards + 9 today's summary cards
 - ✅ Farm-filtered data (only assigned farms)
@@ -42,6 +50,7 @@
 - ✅ Real-time `onSnapshot` listeners
 - ✅ `isParentDoc()` filter to exclude parent documents
 - ✅ Error logging with Firestore index hints
+- ✅ Error propagation fixed (`newQFailed` now properly set)
 
 ### Inventory
 - ✅ Bird inventory at `farms/{farmId}/inventory/birds`
@@ -60,23 +69,19 @@
 - ✅ Supervisor Farms, Farm Detail, Analytics, Rankings, Submissions pages
 - ✅ Feed Load page (shared admin/supervisor)
 
-## CURRENTLY BROKEN
+## CURRENTLY FIXED
 
-- ⚠️ **"Submitted Today: 0 / 1" issue** — May still occur if:
-  - No inventory documents exist for farms (bird count shows "--")
-  - collectionGroup query fails silently (missing Firestore index)
-  - Active farmer denominator not matching actual farm count
+- ✅ **"farmsLoading is not defined" error** — Removed diagnostic console.log block that referenced undefined `farmsLoading` variable (was typo for `farmLoading`)
+- ✅ **React key collision** — Fixed duplicate keys in All Reports table (`key={r.id}` → `key={r.farmId}_${r.submissionDate}`)
+- ✅ **collectionGroup error propagation** — `subscribeToCollectionGroup` now accepts `onError` callback; `newQFailed` flag properly set when collectionGroup fails
+
+## REMAINING KNOWN ISSUES
 
 - ⚠️ **collectionGroup query may require Firestore index** — If `dailyLogs` collection group query fails:
   - Check Firebase Console → Firestore → Indexes
   - Create index: Collection `dailyLogs`, Field `submissionDate` ASC
   - Console will log `HINT:` messages with exact instructions
-
-## CURRENT HIGH PRIORITY
-
-1. Verify collectionGroup query works (check Firestore security rules and indexes)
-2. Verify inventory documents exist for all active farms
-3. Test full daily submission → dashboard update flow
+- ⚠️ **No Firestore Security Rules file in repository** — Rules may exist in Firebase Console but are not tracked in code
 
 ## CURRENT TEST ENVIRONMENT STATUS
 
