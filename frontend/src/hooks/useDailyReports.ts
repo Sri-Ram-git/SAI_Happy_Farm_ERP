@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   subscribeToAllDailyReports,
   subscribeToDailyReportsByFarms,
@@ -20,9 +20,11 @@ export function useAllDailyReports(startDate: string, endDate: string): UseDaily
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const mountedRef = useRef(true);
+  const gotDataRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
+    gotDataRef.current = false;
     setLoading(true);
     setError(null);
 
@@ -31,14 +33,17 @@ export function useAllDailyReports(startDate: string, endDate: string): UseDaily
       endDate,
       (data) => {
         if (mountedRef.current) {
+          gotDataRef.current = true;
           setReports(data);
           setLastUpdated(new Date());
           setLoading(false);
+          setError(null);
         }
       },
       (err) => {
-        if (mountedRef.current) {
-          setError('Unable to load reports. Please try again.');
+        if (mountedRef.current && !gotDataRef.current) {
+          console.error('[useAllDailyReports] Error:', err.message);
+          setError(`Report query failed: ${err.message}. Check browser console for Firestore index/permission errors.`);
           setLoading(false);
         }
       },
@@ -63,13 +68,16 @@ export function useDailyReportsByFarms(
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const mountedRef = useRef(true);
+  const gotDataRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
+    gotDataRef.current = false;
 
     if (farmIds.length === 0) {
       setReports([]);
       setLoading(false);
+      setError(null);
       return () => {};
     }
 
@@ -82,14 +90,17 @@ export function useDailyReportsByFarms(
       endDate,
       (data) => {
         if (mountedRef.current) {
+          gotDataRef.current = true;
           setReports(data);
           setLastUpdated(new Date());
           setLoading(false);
+          setError(null);
         }
       },
       (err) => {
-        if (mountedRef.current) {
-          setError('Unable to load reports. Please try again.');
+        if (mountedRef.current && !gotDataRef.current) {
+          console.error('[useDailyReportsByFarms] Error:', err.message);
+          setError(`Report query failed: ${err.message}. Check browser console for details.`);
           setLoading(false);
         }
       },
@@ -110,9 +121,11 @@ export function useDailyReportsByDate(submissionDate: string): UseDailyReportsRe
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const mountedRef = useRef(true);
+  const gotDataRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
+    gotDataRef.current = false;
     setLoading(true);
     setError(null);
 
@@ -120,14 +133,17 @@ export function useDailyReportsByDate(submissionDate: string): UseDailyReportsRe
       submissionDate,
       (data) => {
         if (mountedRef.current) {
+          gotDataRef.current = true;
           setReports(data);
           setLastUpdated(new Date());
           setLoading(false);
+          setError(null);
         }
       },
       (err) => {
-        if (mountedRef.current) {
-          setError('Unable to load reports. Please try again.');
+        if (mountedRef.current && !gotDataRef.current) {
+          console.error('[useDailyReportsByDate] Error:', err.message);
+          setError(`Report query failed: ${err.message}. Check browser console for details.`);
           setLoading(false);
         }
       },

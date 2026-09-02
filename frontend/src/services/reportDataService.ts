@@ -15,8 +15,8 @@ function dedupeAndSort(reports: NormalizedReport[]): NormalizedReport[] {
   return Array.from(seen.values()).sort((a, b) => a.submissionDate.localeCompare(b.submissionDate));
 }
 
-function isOldFormatDoc(docData: Record<string, unknown>): boolean {
-  return !docData.userId && !docData.submittedBy && !docData.submissionDate;
+function isParentDoc(data: Record<string, unknown>): boolean {
+  return !!(data.userId && data.lastSubmissionDate && !data.submissionDate);
 }
 
 async function fetchOldFormatReports(
@@ -26,7 +26,7 @@ async function fetchOldFormatReports(
 ): Promise<NormalizedReport[]> {
   const db = f.firestore();
   try {
-    let q = db.collection('dailyReports')
+    const q = db.collection('dailyReports')
       .where('submissionDate', '>=', startDate)
       .where('submissionDate', '<=', endDate);
 
@@ -34,8 +34,9 @@ async function fetchOldFormatReports(
     let reports = snap.docs
       .map((d: any) => {
         const data = d.data();
-        if (data.userId || data.lastSubmissionDate) return null;
-        return normalizeReport(d.id, data);
+        if (isParentDoc(data)) return null;
+        if (data.submissionDate) return normalizeReport(d.id, data);
+        return null;
       })
       .filter((r: NormalizedReport | null): r is NormalizedReport => r !== null);
 
@@ -45,8 +46,8 @@ async function fetchOldFormatReports(
     }
 
     return reports;
-  } catch (err) {
-    console.warn('[reportDataService] Old format query failed:', err);
+  } catch (err: any) {
+    console.warn('[reportDataService] Old format query failed:', err.message || err);
     return [];
   }
 }
@@ -67,12 +68,15 @@ async function fetchNewFormatReports(
 
     if (farmIds && farmIds.length > 0) {
       const farmSet = new Set(farmIds);
-      reports = reports.filter((r: NormalizedReport) => farmSet.has(r.farmId));
+      reports = reports.filter((r) => farmSet.has(r.farmId));
     }
 
     return reports;
   } catch (err: any) {
     console.error('[reportDataService] collectionGroup(dailyLogs) query FAILED:', err.message || err);
+    if (err.message?.includes('index')) {
+      console.error('[reportDataService] HINT: Create a Firestore index for dailyLogs collection group on submissionDate field.');
+    }
     return [];
   }
 }
@@ -93,7 +97,6 @@ function subscribeToCollectionGroup(
   startDate: string,
   endDate: string,
   callback: (reports: NormalizedReport[]) => void,
-  onError?: (error: Error) => void,
 ): () => void {
   const db = f.firestore();
   let q: any;
@@ -110,12 +113,17 @@ function subscribeToCollectionGroup(
   return q.onSnapshot(
     (snap: any) => {
       const reports = snap.docs.map((d: any) => normalizeReport(d.id, d.data()));
+      console.log(`[reportDataService] collectionGroup dailyLogs returned ${reports.length} reports`);
       callback(reports);
     },
-    (err: Error) => {
+    (err: any) => {
       console.error('[reportDataService] collectionGroup onSnapshot ERROR:', err.message || err);
+      if (err.message?.includes('index')) {
+        console.error('[reportDataService] HINT: Create a Firestore composite index for dailyLogs collection group.');
+        console.error('[reportDataService] Go to Firebase Console > Firestore > Indexes > Add Index');
+        console.error('[reportDataService] Collection: dailyLogs, Fields: submissionDate ASC');
+      }
       callback([]);
-      if (onError) onError(err);
     },
   );
 }
@@ -128,6 +136,8 @@ export function subscribeToAllDailyReports(
 ): () => void {
   const db = f.firestore();
   const allReports = new Map<string, NormalizedReport>();
+  let oldQFailed = false;
+  let newQFailed = false;
 
   const emit = () => {
     callback(dedupeAndSort(Array.from(allReports.values())));
@@ -146,7 +156,8 @@ export function subscribeToAllDailyReports(
     (snap: any) => {
       for (const docChange of snap.docChanges()) {
         const data = docChange.doc.data();
-        if (data.userId || data.lastSubmissionDate) continue;
+        if (isParentDoc(data)) continue;
+        if (!data.submissionDate) continue;
         const report = normalizeReport(docChange.doc.id, data);
         const key = `${report.farmId}_${report.submissionDate}`;
         if (docChange.type === 'removed') {
@@ -157,10 +168,14 @@ export function subscribeToAllDailyReports(
       }
       emit();
     },
-    (err: Error) => {
+    (err: any) => {
       console.warn('[reportDataService] Old format snapshot error:', err.message || err);
+      oldQFailed = true;
+      if (oldQFailed && newQFailed && allReports.size === 0) {
+        onError?.(new Error('All report queries failed. Check console for details.'));
+      }
     },
-  ) : () => {};
+  ) : () => { oldQFailed = true; };
 
   const unsubNew = subscribeToCollectionGroup(
     startDate,
@@ -172,7 +187,6 @@ export function subscribeToAllDailyReports(
       }
       emit();
     },
-    onError,
   );
 
   return () => { unsubOld(); unsubNew(); };
@@ -193,6 +207,8 @@ export function subscribeToDailyReportsByFarms(
   const db = f.firestore();
   const farmSet = new Set(farmIds);
   const allReports = new Map<string, NormalizedReport>();
+  let oldQFailed = false;
+  let newQFailed = false;
 
   const emit = () => {
     callback(dedupeAndSort(Array.from(allReports.values())));
@@ -217,7 +233,8 @@ export function subscribeToDailyReportsByFarms(
       (snap: any) => {
         for (const docChange of snap.docChanges()) {
           const data = docChange.doc.data();
-          if (data.userId || data.lastSubmissionDate) continue;
+          if (isParentDoc(data)) continue;
+          if (!data.submissionDate) continue;
           const report = normalizeReport(docChange.doc.id, data);
           const key = `${report.farmId}_${report.submissionDate}`;
           if (docChange.type === 'removed') {
@@ -228,8 +245,9 @@ export function subscribeToDailyReportsByFarms(
         }
         emit();
       },
-      (err: Error) => {
+      (err: any) => {
         console.warn('[reportDataService] Old format batch error:', err.message || err);
+        oldQFailed = true;
       },
     );
     unsubs.push(unsub);
@@ -246,7 +264,6 @@ export function subscribeToDailyReportsByFarms(
       }
       emit();
     },
-    onError,
   );
 
   unsubs.push(unsubNew);
