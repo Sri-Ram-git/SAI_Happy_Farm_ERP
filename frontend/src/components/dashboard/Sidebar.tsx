@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { logoutUser } from '../../services/authService';
 
@@ -25,7 +26,19 @@ const ADMIN_NAV = [
 export function Sidebar({ role, userName }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  const [loggingOut, setLoggingOut] = useState(false);
   const items = role === 'admin' ? ADMIN_NAV : SUPERVISOR_NAV;
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await logoutUser();
+    } catch (err) {
+      console.error('[Sidebar] Logout error:', err);
+    } finally {
+      window.location.href = '/management/login';
+    }
+  };
 
   return (
     <>
@@ -53,8 +66,8 @@ export function Sidebar({ role, userName }: SidebarProps) {
 
         <div className="sidebar-footer">
           {userName && <div className="sidebar-user">{userName}</div>}
-          <button className="sidebar-link sidebar-link--logout" onClick={() => { logoutUser(); navigate('/management/login'); }}>
-            Logout
+          <button className="sidebar-link sidebar-link--logout" onClick={handleLogout} disabled={loggingOut}>
+            {loggingOut ? 'Signing out...' : 'Logout'}
           </button>
         </div>
       </aside>
@@ -70,9 +83,9 @@ export function Sidebar({ role, userName }: SidebarProps) {
             <span>{item.label}</span>
           </button>
         ))}
-        <button className="mobile-nav-link" onClick={() => { logoutUser(); navigate('/management/login'); }}>
+        <button className="mobile-nav-link" onClick={handleLogout} disabled={loggingOut}>
           <span>&#10140;</span>
-          <span>Exit</span>
+          <span>{loggingOut ? 'Signing out...' : 'Exit'}</span>
         </button>
       </nav>
     </>
