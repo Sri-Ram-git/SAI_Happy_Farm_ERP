@@ -1,17 +1,33 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getUserByUid } from '../../services/userDataService';
 import { normalizeRole } from '../../utils/normalizeRole';
+import { useAuth } from '../../context/AuthContext';
 
 const f = (window as any).firebase;
 
 export function ManagementLoginPage() {
+  const { isAuthenticated, role, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<'supervisor' | 'admin'>('supervisor');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (isAuthenticated && role === 'admin') {
+      navigate('/admin', { replace: true });
+    } else if (isAuthenticated && role === 'supervisor') {
+      navigate('/supervisor', { replace: true });
+    }
+  }, [isAuthenticated, role, authLoading, navigate]);
+
+  const handleLogout = async () => {
+    await f.auth().signOut();
+    window.location.reload();
+  };
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -71,6 +87,44 @@ export function ManagementLoginPage() {
       setLoading(false);
     }
   };
+
+  if (authLoading) {
+    return (
+      <div className="auth-page">
+        <div className="auth-container">
+          <div className="loading-state">
+            <div className="spinner" />
+            <p>Loading...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isAuthenticated) {
+    return (
+      <div className="auth-page">
+        <div className="auth-container">
+          <div className="brand">
+            <img src="/happy_farm_logo.jpg" alt="SAI Happy Farms" className="brand-logo" />
+            <h1>SAI Happy Farms</h1>
+            <p>Management Portal</p>
+          </div>
+          <div className="auth-card" style={{ textAlign: 'center' }}>
+            <p style={{ marginBottom: 16, color: '#374151' }}>
+              You are already logged in as <strong>{role}</strong>.
+            </p>
+            <button className="btn btn--primary btn--full" onClick={() => navigate(role === 'admin' ? '/admin' : '/supervisor')}>
+              Go to Dashboard
+            </button>
+            <button className="btn btn--outline btn--full" style={{ marginTop: 10 }} onClick={handleLogout}>
+              Logout &amp; Sign In as Different User
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="auth-page">
