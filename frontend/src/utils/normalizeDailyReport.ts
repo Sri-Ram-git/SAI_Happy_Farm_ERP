@@ -1,6 +1,7 @@
 export interface NormalizedReport {
   id: string;
   reportId: string;
+  userId: string;
   farmId: string;
   birdCount: number;
   feedKg: number;
@@ -43,6 +44,7 @@ export function normalizeReport(docId: string, data: Record<string, unknown>): N
   return {
     id: docId,
     reportId: String(data.reportId ?? docId),
+    userId: String(data.userId ?? data.submittedBy ?? ''),
     farmId: String(data.farmId ?? ''),
     birdCount: toNum(data.birdCount),
     feedKg: toNum(data.feedKg),
@@ -58,6 +60,6 @@ export function normalizeReport(docId: string, data: Record<string, unknown>): N
     submittedBy: String(data.submittedBy ?? ''),
     submissionDate: String(data.submissionDate ?? ''),
     submissionMethod: String(data.submissionMethod ?? ''),
-    createdAt: String(data.createdAt ?? ''),
+    createdAt: String(data.createdAt ?? data.submittedAt ?? ''),
   };
 }

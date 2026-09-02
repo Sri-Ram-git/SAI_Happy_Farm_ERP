@@ -1,16 +1,5 @@
 const f = (window as any).firebase;
 
-function generateId(): string {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
 export function getIstDate(): string {
   const now = new Date();
   const parts = new Intl.DateTimeFormat('en-GB', {
@@ -49,49 +38,47 @@ export interface SubmitReportInput {
 
 export async function submitReport(input: SubmitReportInput): Promise<{ reportId: string }> {
   const db = f.firestore();
-  const reportId = generateId();
+  const userId = input.submittedBy;
   const submissionDate = getIstDate();
-  const createdAt = new Date().toISOString();
-  const lockDocId = `${input.farmId}_${submissionDate}`;
+  const now = new Date().toISOString();
 
-  const report = {
-    reportId,
-    farmId: input.farmId,
-    birdCount: input.birdCount,
-    feedKg: input.feedKg,
-    mortality: input.mortality,
-    culling: input.culling,
-    eggsProduced: input.eggsProduced,
-    selectionEggs: input.selectionEggs,
-    temperature: input.temperature,
-    eggWeight: input.eggWeight,
-    bodyWeight: input.bodyWeight,
-    remarks: input.remarks,
-    ammoniaPpm: input.ammoniaPpm,
-    submittedBy: input.submittedBy,
-    submissionDate,
-    submissionMethod: 'DIGITAL_FORM',
-    createdAt,
-  };
+  const parentRef = db.collection('dailyReports').doc(userId);
+  const dailyLogRef = db.collection('dailyReports').doc(userId).collection('dailyLogs').doc(submissionDate);
 
   await db.runTransaction(async (transaction: any) => {
-    const lockRef = db.collection('dailyReportLocks').doc(lockDocId);
-    const lockDoc = await transaction.get(lockRef);
-
-    if (lockDoc.exists) {
+    const existingLog = await transaction.get(dailyLogRef);
+    if (existingLog.exists) {
       throw new Error('DUPLICATE_REPORT');
     }
 
-    transaction.set(lockRef, {
+    transaction.set(parentRef, {
+      userId,
+      farmId: input.farmId,
+      lastSubmissionDate: submissionDate,
+      updatedAt: now,
+    }, { merge: true });
+
+    transaction.set(dailyLogRef, {
+      userId,
+      submittedBy: userId,
       farmId: input.farmId,
       submissionDate,
-      reportId,
-      createdAt,
-    });
-
-    const reportRef = db.collection('dailyReports').doc(reportId);
-    transaction.set(reportRef, report);
+      submissionMethod: 'DIGITAL_FORM',
+      submittedAt: now,
+      updatedAt: now,
+      birdCount: input.birdCount,
+      feedKg: input.feedKg,
+      mortality: input.mortality,
+      culling: input.culling,
+      eggsProduced: input.eggsProduced,
+      selectionEggs: input.selectionEggs,
+      temperature: input.temperature,
+      eggWeight: input.eggWeight,
+      bodyWeight: input.bodyWeight,
+      remarks: input.remarks,
+      ammoniaPpm: input.ammoniaPpm,
+    }, { merge: true });
   });
 
-  return { reportId };
+  return { reportId: `${userId}_${submissionDate}` };
 }
