@@ -13,6 +13,7 @@ const SUPERVISOR_NAV = [
   { path: '/supervisor/analytics', label: 'Analytics', icon: '&#9650;' },
   { path: '/supervisor/rankings', label: 'Rankings', icon: '&#9733;' },
   { path: '/supervisor/submissions', label: 'Submissions', icon: '&#9776;' },
+  { path: '/supervisor/feed-load', label: 'Feed Load', icon: '&#127838;' },
 ];
 
 const ADMIN_NAV = [
@@ -21,6 +22,7 @@ const ADMIN_NAV = [
   { path: '/admin/farms', label: 'Farms', icon: '&#9635;' },
   { path: '/admin/analytics', label: 'Analytics', icon: '&#9650;' },
   { path: '/admin/submissions', label: 'Submissions', icon: '&#9776;' },
+  { path: '/admin/feed-load', label: 'Feed Load', icon: '&#127838;' },
 ];
 
 export function Sidebar({ role, userName }: SidebarProps) {

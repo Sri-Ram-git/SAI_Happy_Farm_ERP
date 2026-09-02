@@ -4,6 +4,8 @@ export interface NormalizedReport {
   userId: string;
   farmId: string;
   birdCount: number;
+  openingBirdCount: number;
+  closingBirdCount: number;
   feedKg: number;
   mortality: number;
   culling: number;
@@ -41,12 +43,18 @@ function toWeightObj(v: unknown): { min: number; max: number; avg: number } {
 }
 
 export function normalizeReport(docId: string, data: Record<string, unknown>): NormalizedReport {
+  const birdCount = toNum(data.birdCount);
+  const openingBirdCount = toNum(data.openingBirdCount);
+  const closingBirdCount = toNum(data.closingBirdCount);
+
   return {
     id: docId,
     reportId: String(data.reportId ?? docId),
     userId: String(data.userId ?? data.submittedBy ?? ''),
     farmId: String(data.farmId ?? ''),
-    birdCount: toNum(data.birdCount),
+    birdCount,
+    openingBirdCount,
+    closingBirdCount,
     feedKg: toNum(data.feedKg),
     mortality: toNum(data.mortality),
     culling: toNum(data.culling),
