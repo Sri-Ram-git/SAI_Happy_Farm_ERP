@@ -1,33 +1,17 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getUserByUid } from '../../services/userDataService';
 import { normalizeRole } from '../../utils/normalizeRole';
-import { useAuth } from '../../context/AuthContext';
 
 const f = (window as any).firebase;
 
 export function ManagementLoginPage() {
-  const { isAuthenticated, role, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<'supervisor' | 'admin'>('supervisor');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    if (authLoading) return;
-    if (isAuthenticated && role === 'admin') {
-      navigate('/admin', { replace: true });
-    } else if (isAuthenticated && role === 'supervisor') {
-      navigate('/supervisor', { replace: true });
-    }
-  }, [isAuthenticated, role, authLoading, navigate]);
-
-  const handleLogout = async () => {
-    await f.auth().signOut();
-    window.location.reload();
-  };
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -37,18 +21,28 @@ export function ManagementLoginPage() {
     try {
       const result = await f.auth().signInWithEmailAndPassword(email, password);
       const uid = result.user.uid;
-      const profile = await getUserByUid(uid);
+
+      let profile;
+      try {
+        profile = await getUserByUid(uid);
+      } catch (fsErr: any) {
+        console.error('[ManagementLogin] Firestore read error:', fsErr);
+        await f.auth().signOut();
+        setError('Could not load your profile. Please try again.');
+        setLoading(false);
+        return;
+      }
 
       if (!profile) {
         await f.auth().signOut();
-        setError('Your account profile is not configured. Please contact the administrator.');
+        setError('No profile found for this account. Contact the administrator.');
         setLoading(false);
         return;
       }
 
       if (!profile.active) {
         await f.auth().signOut();
-        setError('Your account has been disabled. Please contact the administrator.');
+        setError('This account is disabled. Contact the administrator.');
         setLoading(false);
         return;
       }
@@ -66,20 +60,20 @@ export function ManagementLoginPage() {
       if (normalizedRole !== expectedRole) {
         await f.auth().signOut();
         const friendly = expectedRole === 'supervisor' ? 'Supervisor' : 'Administrator';
-        setError(`This account does not have ${friendly} access.`);
+        setError(`This account is not a ${friendly}.`);
         setLoading(false);
         return;
       }
 
       navigate(expectedRole === 'admin' ? '/admin' : '/supervisor', { replace: true });
     } catch (err: any) {
-      console.error('[ManagementLogin] Error:', err.code);
+      console.error('[ManagementLogin] Auth error:', err.code, err.message);
       if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
         setError('Email or password is incorrect.');
       } else if (err.code === 'auth/invalid-email') {
         setError('Invalid email address.');
       } else if (err.code === 'auth/too-many-requests') {
-        setError('Too many attempts. Please try again later.');
+        setError('Too many attempts. Try again later.');
       } else {
         setError('Login failed. Please try again.');
       }
@@ -88,43 +82,12 @@ export function ManagementLoginPage() {
     }
   };
 
-  if (authLoading) {
-    return (
-      <div className="auth-page">
-        <div className="auth-container">
-          <div className="loading-state">
-            <div className="spinner" />
-            <p>Loading...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (isAuthenticated) {
-    return (
-      <div className="auth-page">
-        <div className="auth-container">
-          <div className="brand">
-            <img src="/happy_farm_logo.jpg" alt="SAI Happy Farms" className="brand-logo" />
-            <h1>SAI Happy Farms</h1>
-            <p>Management Portal</p>
-          </div>
-          <div className="auth-card" style={{ textAlign: 'center' }}>
-            <p style={{ marginBottom: 16, color: '#374151' }}>
-              You are already logged in as <strong>{role}</strong>.
-            </p>
-            <button className="btn btn--primary btn--full" onClick={() => navigate(role === 'admin' ? '/admin' : '/supervisor')}>
-              Go to Dashboard
-            </button>
-            <button className="btn btn--outline btn--full" style={{ marginTop: 10 }} onClick={handleLogout}>
-              Logout &amp; Sign In as Different User
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const handleQuickLogout = async () => {
+    try {
+      await f.auth().signOut();
+    } catch (_) {}
+    window.location.reload();
+  };
 
   return (
     <div className="auth-page">
@@ -162,6 +125,7 @@ export function ManagementLoginPage() {
                 placeholder="you@example.com"
                 required
                 disabled={loading}
+                autoComplete="email"
               />
             </div>
             <div className="field">
@@ -175,6 +139,7 @@ export function ManagementLoginPage() {
                   placeholder="Enter password"
                   required
                   disabled={loading}
+                  autoComplete="current-password"
                 />
               </div>
             </div>
@@ -185,6 +150,12 @@ export function ManagementLoginPage() {
           </form>
 
           {error && <div className="alert alert--error" style={{ marginTop: 16 }}>{error}</div>}
+
+          <p style={{ textAlign: 'center', marginTop: 16, fontSize: 12, color: '#9ca3af' }}>
+            <button type="button" onClick={handleQuickLogout} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', textDecoration: 'underline', fontSize: 12, padding: 0 }}>
+              Stuck? Clear session
+            </button>
+          </p>
         </div>
 
         <p style={{ textAlign: 'center', marginTop: 16, fontSize: 13, color: '#6b7280' }}>
