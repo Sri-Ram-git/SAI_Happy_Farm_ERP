@@ -7,12 +7,16 @@ export type ReportDoc = NormalizedReport;
 function dedupeAndSort(reports: NormalizedReport[]): NormalizedReport[] {
   const seen = new Map<string, NormalizedReport>();
   for (const r of reports) {
-    const key = `${r.userId}_${r.submissionDate}_${r.farmId}`;
+    const key = `${r.farmId}_${r.submissionDate}`;
     if (!seen.has(key)) {
       seen.set(key, r);
     }
   }
   return Array.from(seen.values()).sort((a, b) => a.submissionDate.localeCompare(b.submissionDate));
+}
+
+function isOldFormatDoc(docData: Record<string, unknown>): boolean {
+  return !docData.userId && !docData.submittedBy && !docData.submissionDate;
 }
 
 async function fetchOldFormatReports(
@@ -21,21 +25,30 @@ async function fetchOldFormatReports(
   farmIds?: string[],
 ): Promise<NormalizedReport[]> {
   const db = f.firestore();
-  let q = db.collection('dailyReports')
-    .where('submissionDate', '>=', startDate)
-    .where('submissionDate', '<=', endDate);
+  try {
+    let q = db.collection('dailyReports')
+      .where('submissionDate', '>=', startDate)
+      .where('submissionDate', '<=', endDate);
 
-  const snap = await q.get();
-  let reports = snap.docs
-    .map((d: any) => normalizeReport(d.id, d.data()))
-    .filter((r: NormalizedReport) => r.submissionDate && !r.userId);
+    const snap = await q.get();
+    let reports = snap.docs
+      .map((d: any) => {
+        const data = d.data();
+        if (data.userId || data.lastSubmissionDate) return null;
+        return normalizeReport(d.id, data);
+      })
+      .filter((r: NormalizedReport | null): r is NormalizedReport => r !== null);
 
-  if (farmIds && farmIds.length > 0) {
-    const farmSet = new Set(farmIds);
-    reports = reports.filter((r: NormalizedReport) => farmSet.has(r.farmId));
+    if (farmIds && farmIds.length > 0) {
+      const farmSet = new Set(farmIds);
+      reports = reports.filter((r: NormalizedReport) => farmSet.has(r.farmId));
+    }
+
+    return reports;
+  } catch (err) {
+    console.warn('[reportDataService] Old format query failed:', err);
+    return [];
   }
-
-  return reports;
 }
 
 async function fetchNewFormatReports(
@@ -50,7 +63,7 @@ async function fetchNewFormatReports(
       .where('submissionDate', '<=', endDate);
 
     const snap = await q.get();
-    let reports = snap.docs.map((d: any) => normalizeReport(d.id, d.data()));
+    let reports: NormalizedReport[] = snap.docs.map((d: any) => normalizeReport(d.id, d.data()));
 
     if (farmIds && farmIds.length > 0) {
       const farmSet = new Set(farmIds);
@@ -58,8 +71,8 @@ async function fetchNewFormatReports(
     }
 
     return reports;
-  } catch (err) {
-    console.warn('[reportDataService] collectionGroup query failed, falling back to empty:', err);
+  } catch (err: any) {
+    console.error('[reportDataService] collectionGroup(dailyLogs) query FAILED:', err.message || err);
     return [];
   }
 }
@@ -88,7 +101,8 @@ function subscribeToCollectionGroup(
     q = db.collectionGroup('dailyLogs')
       .where('submissionDate', '>=', startDate)
       .where('submissionDate', '<=', endDate);
-  } catch (err) {
+  } catch (err: any) {
+    console.error('[reportDataService] Failed to create collectionGroup query:', err.message || err);
     callback([]);
     return () => {};
   }
@@ -99,8 +113,9 @@ function subscribeToCollectionGroup(
       callback(reports);
     },
     (err: Error) => {
-      console.warn('[reportDataService] collectionGroup snapshot error:', err);
+      console.error('[reportDataService] collectionGroup onSnapshot ERROR:', err.message || err);
       callback([]);
+      if (onError) onError(err);
     },
   );
 }
@@ -112,22 +127,28 @@ export function subscribeToAllDailyReports(
   onError?: (error: Error) => void,
 ): () => void {
   const db = f.firestore();
-  const oldQ = db.collection('dailyReports')
-    .where('submissionDate', '>=', startDate)
-    .where('submissionDate', '<=', endDate);
-
   const allReports = new Map<string, NormalizedReport>();
 
   const emit = () => {
     callback(dedupeAndSort(Array.from(allReports.values())));
   };
 
-  const unsubOld = oldQ.onSnapshot(
+  let oldQ: any;
+  try {
+    oldQ = db.collection('dailyReports')
+      .where('submissionDate', '>=', startDate)
+      .where('submissionDate', '<=', endDate);
+  } catch (err) {
+    oldQ = null;
+  }
+
+  const unsubOld = oldQ ? oldQ.onSnapshot(
     (snap: any) => {
       for (const docChange of snap.docChanges()) {
-        const report = normalizeReport(docChange.doc.id, docChange.doc.data());
-        if (report.userId) continue;
-        const key = `${report.userId}_${report.submissionDate}_${report.farmId}`;
+        const data = docChange.doc.data();
+        if (data.userId || data.lastSubmissionDate) continue;
+        const report = normalizeReport(docChange.doc.id, data);
+        const key = `${report.farmId}_${report.submissionDate}`;
         if (docChange.type === 'removed') {
           allReports.delete(key);
         } else {
@@ -137,16 +158,16 @@ export function subscribeToAllDailyReports(
       emit();
     },
     (err: Error) => {
-      console.warn('[reportDataService] Old format snapshot error:', err);
+      console.warn('[reportDataService] Old format snapshot error:', err.message || err);
     },
-  );
+  ) : () => {};
 
   const unsubNew = subscribeToCollectionGroup(
     startDate,
     endDate,
     (newReports) => {
       for (const r of newReports) {
-        const key = `${r.userId}_${r.submissionDate}_${r.farmId}`;
+        const key = `${r.farmId}_${r.submissionDate}`;
         allReports.set(key, r);
       }
       emit();
@@ -182,17 +203,23 @@ export function subscribeToDailyReportsByFarms(
 
   for (let i = 0; i < farmIds.length; i += batchSize) {
     const batch = farmIds.slice(i, i + batchSize);
-    const q = db.collection('dailyReports')
-      .where('farmId', 'in', batch)
-      .where('submissionDate', '>=', startDate)
-      .where('submissionDate', '<=', endDate);
+    let q: any;
+    try {
+      q = db.collection('dailyReports')
+        .where('farmId', 'in', batch)
+        .where('submissionDate', '>=', startDate)
+        .where('submissionDate', '<=', endDate);
+    } catch (err) {
+      continue;
+    }
 
     const unsub = q.onSnapshot(
       (snap: any) => {
         for (const docChange of snap.docChanges()) {
-          const report = normalizeReport(docChange.doc.id, docChange.doc.data());
-          if (report.userId) continue;
-          const key = `${report.userId}_${report.submissionDate}_${report.farmId}`;
+          const data = docChange.doc.data();
+          if (data.userId || data.lastSubmissionDate) continue;
+          const report = normalizeReport(docChange.doc.id, data);
+          const key = `${report.farmId}_${report.submissionDate}`;
           if (docChange.type === 'removed') {
             allReports.delete(key);
           } else {
@@ -202,7 +229,7 @@ export function subscribeToDailyReportsByFarms(
         emit();
       },
       (err: Error) => {
-        console.warn('[reportDataService] Old format batch error:', err);
+        console.warn('[reportDataService] Old format batch error:', err.message || err);
       },
     );
     unsubs.push(unsub);
@@ -214,7 +241,7 @@ export function subscribeToDailyReportsByFarms(
     (newReports) => {
       for (const r of newReports) {
         if (!farmSet.has(r.farmId)) continue;
-        const key = `${r.userId}_${r.submissionDate}_${r.farmId}`;
+        const key = `${r.farmId}_${r.submissionDate}`;
         allReports.set(key, r);
       }
       emit();

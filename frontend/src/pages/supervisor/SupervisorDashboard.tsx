@@ -9,8 +9,14 @@ import { type ReportDoc } from '../../services/reportDataService';
 import { useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { getFarmsByIds, type FarmDoc } from '../../services/farmDataService';
 import { getActiveFarmers, type UserDoc } from '../../services/userDataService';
-import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
-import { calcProductionRate, calcMortalityRate, calcAverage } from '../../utils/kpiCalculations';
+import { getIstDate, getDaysAgo, formatDisplayDate } from '../../utils/dateUtils';
+import {
+  calcProductionRate,
+  calcMortalityRate,
+  calcFeedPerBird,
+  calcAverage,
+  aggregateReports,
+} from '../../utils/kpiCalculations';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 
 export function SupervisorDashboard() {
@@ -39,6 +45,15 @@ export function SupervisorDashboard() {
   const avgProd = reports.length > 0 ? calcAverage(reports.map((r) => calcProductionRate(r.eggsProduced ?? 0, r.birdCount ?? 0))) : 0;
   const avgMort = reports.length > 0 ? calcAverage(reports.map((r) => calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0))) : 0;
   const avgFeed = reports.length > 0 ? calcAverage(reports.map((r) => r.birdCount > 0 ? (r.feedKg * 1000) / r.birdCount : 0)) : 0;
+
+  const todayAgg = aggregateReports(todayReports);
+  const totalBirdsToday = todayReports.reduce((sum, r) => sum + (r.birdCount ?? 0), 0);
+  const totalEggsToday = todayReports.reduce((sum, r) => sum + (r.eggsProduced ?? 0), 0);
+  const totalMortalityToday = todayReports.reduce((sum, r) => sum + (r.mortality ?? 0), 0);
+  const totalCullingToday = todayReports.reduce((sum, r) => sum + (r.culling ?? 0), 0);
+  const totalFeedToday = todayReports.reduce((sum, r) => sum + (r.feedKg ?? 0), 0);
+  const totalSelectionToday = todayReports.reduce((sum, r) => sum + (r.selectionEggs ?? 0), 0);
+  const avgEggsPerFarm = submittedToday > 0 ? (totalEggsToday / submittedToday).toFixed(0) : '0';
 
   const chartData = (() => {
     const byDate: Record<string, ReportDoc[]> = {};
@@ -79,6 +94,23 @@ export function SupervisorDashboard() {
           <KpiCard title="Avg Feed/Bird" value={`${avgFeed.toFixed(0)}g`} icon="&#127838;" />
           <KpiCard title="Attention Needed" value={missingToday + (avgMort > 10 ? 1 : 0)} icon="&#128680;" color="#dc2626" />
         </div>
+
+        {todayReports.length > 0 && (
+          <div className="section-card" style={{ marginTop: 20 }}>
+            <h3>Today's Summary - {formatDisplayDate(today)}</h3>
+            <div className="kpi-grid">
+              <KpiCard title="Total Birds" value={totalBirdsToday.toLocaleString()} icon="&#129418;" />
+              <KpiCard title="Eggs Produced" value={totalEggsToday.toLocaleString()} icon="&#129370;" />
+              <KpiCard title="Avg Eggs/Farm" value={avgEggsPerFarm} icon="&#128202;" />
+              <KpiCard title="Mortality" value={totalMortalityToday.toLocaleString()} icon="&#128196;" color={todayAgg.avgMortalityRate > 5 ? '#dc2626' : undefined} />
+              <KpiCard title="Culling" value={totalCullingToday.toLocaleString()} icon="&#9940;" />
+              <KpiCard title="Feed Used (kg)" value={totalFeedToday.toLocaleString()} icon="&#127838;" />
+              <KpiCard title="Selection Eggs" value={totalSelectionToday.toLocaleString()} icon="&#128142;" />
+              <KpiCard title="Avg Temp" value={`${todayAgg.avgTemperature}°C`} icon="&#127777;" color={todayAgg.avgTemperature > 38 ? '#dc2626' : undefined} />
+              <KpiCard title="Avg Ammonia" value={`${todayAgg.avgAmmonia} PPM`} icon="&#9762;" color={todayAgg.avgAmmonia > 50 ? '#dc2626' : undefined} />
+            </div>
+          </div>
+        )}
 
         {chartData.length > 0 && (
           <div className="chart-grid">

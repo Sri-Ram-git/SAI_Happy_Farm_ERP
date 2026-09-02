@@ -8,8 +8,13 @@ import { DateFilter } from '../../components/dashboard/DateFilter';
 import { type ReportDoc } from '../../services/reportDataService';
 import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { getAllUsers, type UserDoc } from '../../services/userDataService';
-import { getIstDate, getDaysAgo } from '../../utils/dateUtils';
-import { calcProductionRate, calcMortalityRate, calcAverage } from '../../utils/kpiCalculations';
+import { getIstDate, getDaysAgo, formatDisplayDate } from '../../utils/dateUtils';
+import {
+  calcProductionRate,
+  calcMortalityRate,
+  calcAverage,
+  aggregateReports,
+} from '../../utils/kpiCalculations';
 import { useAllDailyReports } from '../../hooks/useDailyReports';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts';
 
@@ -41,7 +46,13 @@ export function AdminDashboard() {
   const todayReports = reports.filter((r) => r.submissionDate === today);
   const submittedToday = new Set(todayReports.map((r) => r.farmId)).size;
   const farmers = users.filter((u) => u.role === 'farmer' && u.active);
-  const supervisors = users.filter((u) => u.role === 'supervisor');
+  const supervisors = users.filter((u) => normalizeRole(u.role) === 'supervisor');
+
+  const todayAgg = aggregateReports(todayReports);
+  const totalBirdsToday = todayReports.reduce((sum, r) => sum + (r.birdCount ?? 0), 0);
+  const submissionPct = farms.length > 0 ? ((submittedToday / farms.length) * 100).toFixed(0) : '0';
+  const avgEggsPerFarm = submittedToday > 0 ? (todayReports.reduce((s, r) => s + (r.eggsProduced ?? 0), 0) / submittedToday).toFixed(0) : '0';
+
   const avgProd = reports.length > 0 ? calcAverage(reports.map((r) => calcProductionRate(r.eggsProduced ?? 0, r.birdCount ?? 0))) : 0;
   const avgMort = reports.length > 0 ? calcAverage(reports.map((r) => calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0))) : 0;
 
@@ -77,11 +88,29 @@ export function AdminDashboard() {
           <KpiCard title="Active Farmers" value={farmers.length} icon="&#128100;" />
           <KpiCard title="Supervisors" value={supervisors.length} icon="&#128188;" />
           <KpiCard title="Submitted Today" value={`${submittedToday} / ${farms.length}`} icon="&#9989;" />
+          <KpiCard title="Submission Rate" value={`${submissionPct}%`} icon="&#128200;" color={Number(submissionPct) >= 80 ? '#15803d' : '#d97706'} />
           <KpiCard title="Missing Today" value={Math.max(0, farms.length - submittedToday)} icon="&#9888;" color="#dc2626" />
+          <KpiCard title="Total Birds Today" value={totalBirdsToday.toLocaleString()} icon="&#129418;" />
           <KpiCard title="Avg Production" value={`${avgProd}%`} icon="&#128002;" />
           <KpiCard title="Avg Mortality" value={`${avgMort}%`} icon="&#128196;" color={avgMort > 10 ? '#dc2626' : undefined} />
           <KpiCard title="Total Reports" value={reports.length} icon="&#128196;" />
         </div>
+
+        {todayReports.length > 0 && (
+          <div className="section-card" style={{ marginTop: 20 }}>
+            <h3>Today's Summary - {formatDisplayDate(today)}</h3>
+            <div className="kpi-grid">
+              <KpiCard title="Eggs Produced" value={todayReports.reduce((s, r) => s + (r.eggsProduced ?? 0), 0).toLocaleString()} icon="&#129370;" />
+              <KpiCard title="Mortality" value={todayReports.reduce((s, r) => s + (r.mortality ?? 0), 0).toLocaleString()} icon="&#128196;" color={todayAgg.avgMortalityRate > 5 ? '#dc2626' : undefined} />
+              <KpiCard title="Culling" value={todayReports.reduce((s, r) => s + (r.culling ?? 0), 0).toLocaleString()} icon="&#9940;" />
+              <KpiCard title="Feed Used (kg)" value={todayReports.reduce((s, r) => s + (r.feedKg ?? 0), 0).toLocaleString()} icon="&#127838;" />
+              <KpiCard title="Selection Eggs" value={todayReports.reduce((s, r) => s + (r.selectionEggs ?? 0), 0).toLocaleString()} icon="&#128142;" />
+              <KpiCard title="Avg Temp" value={`${todayAgg.avgTemperature}°C`} icon="&#127777;" color={todayAgg.avgTemperature > 38 ? '#dc2626' : undefined} />
+              <KpiCard title="Avg Ammonia" value={`${todayAgg.avgAmmonia} PPM`} icon="&#9762;" color={todayAgg.avgAmmonia > 50 ? '#dc2626' : undefined} />
+              <KpiCard title="Avg Eggs/Farm" value={avgEggsPerFarm} icon="&#128202;" />
+            </div>
+          </div>
+        )}
 
         {chartData.length > 0 && (
           <div className="chart-grid">
@@ -118,4 +147,8 @@ export function AdminDashboard() {
       </div>
     </DashboardLayout>
   );
+}
+
+function normalizeRole(role: string | undefined | null): string {
+  return (role ?? '').trim().toLowerCase();
 }
