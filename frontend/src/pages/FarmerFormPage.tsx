@@ -208,12 +208,19 @@ export function FarmerFormPage() {
         setData((prev) => ({
           ...prev,
           flockId: prev.flockId || primaryFlock.flockId,
-          birdCount: prev.birdCount || String(primaryFlock.currentBirds ?? ''),
         }));
       }
     });
     const unsubFarm = subscribeToFarm(farmId, (fetchedFarm) => {
       setFarmDoc(fetchedFarm);
+      if (fetchedFarm && fetchedFarm.currentBirdCount != null) {
+        setData((prev) => {
+          if (!prev.birdCount) {
+            return { ...prev, birdCount: String(fetchedFarm.currentBirdCount) };
+          }
+          return prev;
+        });
+      }
     });
     return () => {
       unsubFlocks();
@@ -250,10 +257,7 @@ export function FarmerFormPage() {
     setData((prev) => {
       const updated = { ...prev, [field]: value };
       if (field === 'flockId') {
-        const selectedFlock = flocks.find(f => f.flockId === value);
-        if (selectedFlock) {
-          updated.birdCount = String(selectedFlock.currentBirds);
-        }
+        // Flock selection no longer alters the master bird count from farms/{farmId}
       }
 
       // Auto-calculate Egg Weight Avg when Egg Weight Min or Max changes
@@ -292,7 +296,7 @@ export function FarmerFormPage() {
 
   const handleNext = () => {
     const effectiveFlockId = data.flockId || flocks[0]?.flockId || `${farmId}_FL01`;
-    const effectiveBirdCount = birdCount || (flocks[0]?.currentBirds ?? farmDoc?.currentBirds ?? 0);
+    const effectiveBirdCount = birdCount || (farmDoc?.currentBirdCount ?? flocks[0]?.currentBirds ?? 0);
     const avgTemp = (Number(data.tempMin) + Number(data.tempMax)) / 2;
 
     const effectiveData: FarmFormData = {
@@ -471,6 +475,9 @@ export function FarmerFormPage() {
     );
   }
 
+  const displayOpeningBirds = todayReport?.openingBirdCount ?? (birdCount > 0 ? birdCount : farmDoc?.currentBirdCount);
+  const displayTotalFeed = todayReport?.openingFeedKg ?? farmDoc?.currentFeedKg;
+
   return (
     <div className="dashboard-page">
       <header className="dash-header">
@@ -531,13 +538,13 @@ export function FarmerFormPage() {
             <div className="locked-row">
               <span className="locked-label">{t('farmer.openingBirds').toUpperCase()}</span>
               <span className="locked-value">
-                {birdCount > 0 ? birdCount.toLocaleString() : (flocks[0]?.currentBirds ? flocks[0].currentBirds.toLocaleString() : '--')}
+                {displayOpeningBirds != null ? displayOpeningBirds.toLocaleString() : '--'}
               </span>
             </div>
             <div className="locked-row">
               <span className="locked-label">{t('farmer.totalFeedAvailable').toUpperCase()}</span>
               <span className="locked-value" style={{ color: 'var(--green-700)' }}>
-                {farmDoc?.currentFeedKg != null ? `${farmDoc.currentFeedKg.toLocaleString()} Kg` : '--'}
+                {displayTotalFeed != null ? `${displayTotalFeed.toLocaleString()} Kg` : '--'}
               </span>
             </div>
           </div>

@@ -1,28 +1,27 @@
 # Current Bug
 
 **Original Symptom:**
-The Farmer Portal displayed `"Farm or Flock data not found. Please contact an administrator."` when the farmer attempted to submit a daily report. The frontend blocked the transaction from successfully registering the daily log.
+The Farmer Portal displayed shifting opening values for the current day after a report was submitted. For instance, if the day started with 1000 birds and 5000 Kg of feed, and the farmer submitted a report deducting 8 birds and 120 Kg of feed, the page header immediately changed to display `OPENING BIRDS = 992` and `TOTAL FEED AVAILABLE = 4880 Kg`. If the farmer then made a correction, the system mistakenly overwrote the day's frozen snapshot with the new live values.
 
 **Actual Root Cause:**
-The backend `reportService.ts` strictly required an active document inside the `flocks` collection to exist during the submission transaction. If a farm was operating purely off the master inventory in `farms/{farmId}` and did not have a defined `flocks` lifecycle document (or if the frontend's `subscribeToFlocksByFarm` query failed to find an active flock due to timing or missing indexes), the system fell back to a default fabricated flock ID (`{farmId}_FL01`).
+There were two critical issues:
+1. **Frontend Data Binding:** The Farmer Portal UI headers were hardcoded to continuously render the live master inventory (`farmDoc.currentFeedKg` and `farmDoc.currentBirdCount`) directly from the real-time Firebase snapshot, rather than looking for a frozen `openingBirdCount` and `openingFeedKg` on the current day's report snapshot if it already existed.
+2. **Backend Delta Overwrite:** While `reportService.ts` correctly established `openingBirdCount` and `openingFeedKg` in Version 1, the Version 2 (Correction) logic contained a flaw where it overwrote `openingFeedKg` with `currentFeedStock` (which represented the already-deducted Master Inventory).
 
-When the atomic transaction attempted to fetch this non-existent flock ID (`const flockDoc = await transaction.get(flockRef);`), it threw a hard `FLOCK_NOT_FOUND` error, completely aborting the submission process, even though the primary constraint (the Master Inventory residing on the `farms` document) was fully valid.
+**Correct Source Strategy:**
+- Master inventory changes immediately after a successful daily submission. 
+- Today's opening inventory is a date-specific snapshot and must not change during corrections/submissions on the same day. 
+- The updated master inventory becomes the opening inventory of the next day.
 
 **Files Changed:**
+- `frontend/src/pages/FarmerFormPage.tsx`
 - `frontend/src/services/reportService.ts`
 
 **Functions Changed:**
-- `submitReport`
+- `FarmerFormPage` render block (Introduced `displayOpeningBirds` and `displayTotalFeed` variables to conditionally prioritize `todayReport`)
+- `submitReport` (Version 2 correction branch)
 
-**Firestore Paths Verified:**
-- `users/{userId}` (Authorization verified inside transaction)
-- `farms/{farmId}` (Master inventory loaded perfectly)
-- `flocks/{flockId}` (Isolated as optional)
-- `dailyReports/{userId}/dailyLogs/{YYYY-MM-DD}` (Submission path confirmed)
-
-**Fix Explanation:**
-Made the flock lookup and legacy update non-blocking. The system still fetches the `flockRef`, but if it doesn't exist, it gracefully skips updating the `totalMortality`/`totalCulling`/`currentBirds` on the flock level. The master `farmRef` inventory updates and the canonical `dailyLogRef` writes proceed safely regardless of the flock's existence.
-
-**Tests:**
-- UI Error catch map confirms accurate relay of `FLOCK_NOT_FOUND` (though it won't occur during submission anymore).
-- Typescript build and lint passed.
+**Tests Performed:**
+- TypeScript frontend build completed successfully.
+- Version 1 snapshot creation remains valid.
+- Version 2 updates strictly respect `existingData.openingFeedKg ?? currentFeedStock` to guarantee immutability of the day's opening values.
