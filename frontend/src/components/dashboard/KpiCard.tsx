@@ -4,7 +4,7 @@ interface KpiCardProps {
   title: string;
   value: string | number;
   subtitle?: string;
-  icon?: string;
+  icon?: ReactNode;
   color?: string;
   onClick?: () => void;
   children?: ReactNode;

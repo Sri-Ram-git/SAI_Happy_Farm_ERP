@@ -5,6 +5,23 @@ export interface FarmDoc {
   name: string;
   location: string;
   active: boolean;
+
+  // Master Inventory
+  initialBirdCount?: number;
+  currentBirdCount?: number;
+  initialFeedKg?: number;
+  currentFeedKg?: number;
+  totalFeedLoadedKg?: number;
+  totalFeedConsumedKg?: number;
+
+  inventoryInitialized?: boolean;
+  inventoryInitializedAt?: string;
+  inventoryUpdatedAt?: string;
+  updatedAt?: string;
+
+  // Legacy fields (optional)
+  totalBirds?: number;
+  currentBirds?: number;
 }
 
 export async function getFarmById(farmId: string): Promise<FarmDoc | null> {
@@ -12,6 +29,23 @@ export async function getFarmById(farmId: string): Promise<FarmDoc | null> {
   const doc = await db.collection('farms').doc(farmId).get();
   if (!doc.exists) return null;
   return doc.data() as FarmDoc;
+}
+
+export function subscribeToFarm(farmId: string, callback: (farm: FarmDoc | null) => void): () => void {
+  if (!farmId) return () => {};
+  const db = f.firestore();
+  return db.collection('farms').doc(farmId).onSnapshot(
+    (doc: any) => {
+      if (!doc.exists) {
+        callback(null);
+      } else {
+        callback(doc.data() as FarmDoc);
+      }
+    },
+    (err: any) => {
+      console.error('[farmDataService] subscribeToFarm error:', err.message || err);
+    }
+  );
 }
 
 export async function getFarmsByIds(farmIds: string[]): Promise<FarmDoc[]> {

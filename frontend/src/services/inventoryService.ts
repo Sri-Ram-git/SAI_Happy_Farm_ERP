@@ -60,27 +60,22 @@ export async function getFeedInventory(farmId: string): Promise<FeedInventory | 
   };
 }
 
-export async function initBirdInventory(farmId: string, initialCount: number): Promise<void> {
+export async function initializeFarmInventory(
+  farmId: string,
+  initialBirdCount: number,
+  initialFeedKg: number
+): Promise<void> {
   const db = f.firestore();
   const now = new Date().toISOString();
   await db.collection('farms').doc(farmId).set({
-    initialBirdCount: initialCount,
-    currentBirdCount: initialCount,
-    inventoryInitialized: true,
-    inventoryUpdatedAt: now,
-    updatedAt: now,
-  }, { merge: true });
-}
-
-export async function initFeedInventory(farmId: string, initialStockKg: number): Promise<void> {
-  const db = f.firestore();
-  const now = new Date().toISOString();
-  await db.collection('farms').doc(farmId).set({
-    initialFeedKg: initialStockKg,
-    currentFeedKg: initialStockKg,
-    totalFeedLoadedKg: initialStockKg,
+    initialBirdCount,
+    currentBirdCount: initialBirdCount,
+    initialFeedKg,
+    currentFeedKg: initialFeedKg,
+    totalFeedLoadedKg: initialFeedKg,
     totalFeedConsumedKg: 0,
     inventoryInitialized: true,
+    inventoryInitializedAt: now,
     inventoryUpdatedAt: now,
     updatedAt: now,
   }, { merge: true });
@@ -179,7 +174,6 @@ export function subscribeToAllBirdInventories(
   const db = f.firestore();
   const unsubscribes: (() => void)[] = [];
   const results = new Map<string, BirdInventory>();
-  let loadedCount = 0;
 
   if (farmIds.length === 0) {
     callback(results);
@@ -199,10 +193,8 @@ export function subscribeToAllBirdInventories(
           });
         }
       }
-      loadedCount++;
-      if (loadedCount === farmIds.length) {
-        callback(new Map(results));
-      }
+      // Emit on EVERY snapshot change so dashboard updates in real-time
+      callback(new Map(results));
     });
     unsubscribes.push(unsub);
   }

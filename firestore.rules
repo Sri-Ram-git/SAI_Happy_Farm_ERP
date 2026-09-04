@@ -66,6 +66,13 @@ service cloud.firestore {
       }
     }
 
+    // Flocks Collection
+    match /flocks/{flockId} {
+      allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId);
+      allow create, delete: if isAdmin();
+      allow update: if isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId);
+    }
+
     // Daily Reports (Root Collection & Subcollections)
     match /dailyReports/{reportOrUserId} {
       allow read: if isAuthenticated() && isUserActive() && (

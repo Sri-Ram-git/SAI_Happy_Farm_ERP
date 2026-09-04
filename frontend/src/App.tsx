@@ -20,6 +20,8 @@ import { AdminFarmDetailPage } from './pages/admin/AdminFarmDetailPage';
 import { AdminAnalyticsPage } from './pages/admin/AdminAnalyticsPage';
 import { AdminSubmissionsPage } from './pages/admin/AdminSubmissionsPage';
 import { FeedLoadPage } from './pages/admin/FeedLoadPage';
+import { AdminFlocksPage } from './pages/admin/AdminFlocksPage';
+import { PredictionPage } from './pages/admin/PredictionPage';
 import { LoadingScreen } from './components/LoadingScreen';
 import { getRouteForRole } from './utils/routeByRole';
 import './styles.css';
@@ -100,6 +102,16 @@ function AppRoutes() {
       <Route path="/admin/farms/:farmId" element={
         <ProtectedManagementRoute allowedRoles={['admin']}>
           <ErrorBoundary><AdminFarmDetailPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/admin/flocks" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminFlocksPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/admin/prediction" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><PredictionPage /></ErrorBoundary>
         </ProtectedManagementRoute>
       } />
       <Route path="/admin/analytics" element={

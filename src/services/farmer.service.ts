@@ -26,11 +26,14 @@ export class FarmerService {
     createdByUid: string,
     requestId: string,
   ): Promise<CreatedFarmer> {
-    // 1. Validate assigned farms exist
-    await this.validateFarmsExist(input.farmIds, requestId);
+    // 1. Check for duplicate farm name in existing farms
+    await this.checkDuplicateFarmName(input.farmName, requestId);
 
     // 2. Check for duplicate email in existing users
     await this.checkDuplicateEmail(input.email, requestId);
+
+    // 2.5 Check for duplicate phone number
+    await this.checkDuplicatePhone(input.phone_no, requestId);
 
     // 3. Create Firebase Auth user
     let authUser: admin.auth.UserRecord;
@@ -60,29 +63,106 @@ export class FarmerService {
       throw err;
     }
 
-    // 4. Create Firestore user document
+    // 4. Create Firestore user and farm document using a Transaction to generate safe Farm ID
+    let newFarmId = '';
     try {
-      const now = new Date().toISOString();
-      const userDoc = {
-        name: input.name,
-        email: input.email,
-        phone_no: input.phone_no,
-        role: 'farmer',
-        farmIds: input.farmIds,
-        active: true,
-        createdAt: now,
-        updatedAt: now,
-      };
+      await this.db.runTransaction(async (t) => {
+        // Read all farms to find max suffix and detect pattern dynamically
+        const farmsSnapshot = await t.get(this.db.collection('farms'));
+        
+        let detectedPrefix: string | null = null;
+        let detectedPadding: number | null = null;
+        let maxNumber = 0;
+        let validFarmsCount = 0;
 
-      await this.db.collection('users').doc(authUser.uid).set(userDoc);
+        for (const doc of farmsSnapshot.docs) {
+          if (doc.data().name?.toLowerCase() === input.farmName.toLowerCase()) {
+            throw new DuplicateError('A farm with this name already exists.');
+          }
+          
+          const id = doc.id;
+          const match = id.match(/^(.*?)(\d+)$/);
+          
+          if (!match) {
+            continue; // Skip farms that don't match the sequential pattern
+          }
+          
+          validFarmsCount++;
+          const prefix = match[1] || '';
+          const numStr = match[2] || '';
+          const num = parseInt(numStr, 10);
+          const padding = numStr.startsWith('0') ? numStr.length : 0;
 
-      logger.info('Firestore user document created', {
+          if (detectedPrefix === null) {
+            detectedPrefix = prefix;
+            detectedPadding = padding;
+          } else if (detectedPrefix !== prefix) {
+            throw new Error(`Ambiguous Farm ID pattern detected. Found conflicting prefixes: '${detectedPrefix}' and '${prefix}'.`);
+          } else if (detectedPadding !== null && detectedPadding !== padding && numStr.startsWith('0')) {
+            detectedPadding = Math.max(detectedPadding, padding);
+          }
+
+          if (num > maxNumber) {
+            maxNumber = num;
+          }
+        }
+
+        if (validFarmsCount === 0 || detectedPrefix === null) {
+          throw new Error('Cannot detect Farm ID pattern: No existing farms have a sequential numeric suffix to derive the format from.');
+        }
+
+        const nextNumber = maxNumber + 1;
+        let nextNumberStr = nextNumber.toString();
+        
+        if (detectedPadding !== null && detectedPadding > 0) {
+          nextNumberStr = nextNumberStr.padStart(detectedPadding, '0');
+        }
+
+        newFarmId = `${detectedPrefix}${nextNumberStr}`;
+
+        const farmRef = this.db.collection('farms').doc(newFarmId);
+        const userRef = this.db.collection('users').doc(authUser.uid);
+
+        const farmDoc = {
+          farmId: newFarmId,
+          name: input.farmName,
+          location: '',
+          active: true,
+          initialBirdCount: input.initialBirdCount ?? 0,
+          currentBirdCount: input.initialBirdCount ?? 0,
+          initialFeedKg: input.initialFeedKg ?? 0,
+          currentFeedKg: input.initialFeedKg ?? 0,
+          totalFeedLoadedKg: input.initialFeedKg ?? 0,
+          totalFeedConsumedKg: 0,
+          inventoryInitialized: true,
+          inventoryInitializedAt: admin.firestore.FieldValue.serverTimestamp(),
+          inventoryUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        const userDoc = {
+          name: input.name,
+          email: input.email,
+          phone_no: Number(input.phone_no),
+          role: 'farmer',
+          farmIds: [newFarmId],
+          active: true,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        t.set(farmRef, farmDoc);
+        t.set(userRef, userDoc);
+      });
+
+      logger.info('Firestore user and farm documents created', {
         requestId,
         newUserId: authUser.uid,
+        newFarmId,
         role: 'farmer',
       });
     } catch (err: any) {
-      // Firestore write failed after Auth creation — attempt cleanup
+      // Transaction or Firestore write failed after Auth creation — attempt cleanup
       logger.error('Firestore user creation failed, attempting Auth cleanup', {
         requestId,
         newUserId: authUser.uid,
@@ -114,7 +194,7 @@ export class FarmerService {
       requestId,
       metadata: {
         createdUserRole: 'farmer',
-        assignedFarmIds: input.farmIds,
+        assignedFarmIds: [newFarmId],
       },
     });
 
@@ -124,15 +204,36 @@ export class FarmerService {
     };
   }
 
-  private async validateFarmsExist(farmIds: string[], _requestId: string): Promise<void> {
-    const farmDocs = await Promise.all(
-      farmIds.map((farmId) => this.db.collection('farms').doc(farmId).get()),
-    );
+  private async checkDuplicateFarmName(farmName: string, requestId: string): Promise<void> {
+    const snapshot = await this.db.collection('farms')
+      .where('name', '==', farmName)
+      .limit(1)
+      .get();
+      
+    if (!snapshot.empty) {
+      logger.warn('Farm name duplicate check failed', { requestId, farmName });
+      throw new DuplicateError('A farm with this name already exists.');
+    }
+  }
 
-    const missingFarms = farmIds.filter((_farmId, i) => !farmDocs[i]!.exists);
+  private async checkDuplicatePhone(phone_no: string, requestId: string): Promise<void> {
+    const usersRef = this.db.collection('users');
+    
+    // Check string match
+    const snapshotStr = await usersRef.where('phone_no', '==', phone_no).limit(1).get();
+    if (!snapshotStr.empty) {
+      logger.warn('Phone duplicate check failed (string match)', { requestId, phone_no });
+      throw new DuplicateError('This phone number is already associated with an existing user.');
+    }
 
-    if (missingFarms.length > 0) {
-      throw new NotFoundError(`Farm(s) not found: ${missingFarms.join(', ')}`);
+    // Also check number match for backward compatibility
+    const phoneNum = Number(phone_no);
+    if (!isNaN(phoneNum)) {
+      const snapshotNum = await usersRef.where('phone_no', '==', phoneNum).limit(1).get();
+      if (!snapshotNum.empty) {
+        logger.warn('Phone duplicate check failed (number match)', { requestId, phone_no });
+        throw new DuplicateError('This phone number is already associated with an existing user.');
+      }
     }
   }
 

@@ -10,6 +10,7 @@ import { rateLimitMiddleware } from './middleware/rateLimit.middleware';
 import reportsRouter from './routes/reports.routes';
 import farmsRouter from './routes/farms.routes';
 import adminRouter from './routes/admin.routes';
+import flockRouter from './routes/flock.routes';
 import { logger } from './utils/logger';
 
 function createApp(): express.Express {
@@ -42,6 +43,7 @@ function createApp(): express.Express {
 
   app.use('/api/v1/reports', reportsRouter);
   app.use('/api/v1/farms', farmsRouter);
+  app.use('/api/v1/flocks', flockRouter);
   app.use('/api/v1/admin', adminRouter);
 
   app.get('/health', (_req, res) => {

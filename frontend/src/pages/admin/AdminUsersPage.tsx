@@ -12,7 +12,10 @@ interface FarmerForm {
   email: string;
   phone_no: string;
   password: string;
-  farmIds: string[];
+  confirmPassword: string;
+  farmName: string;
+  initialBirdCount: string;
+  initialFeedKg: string;
 }
 
 const emptyForm: FarmerForm = {
@@ -20,7 +23,10 @@ const emptyForm: FarmerForm = {
   email: '',
   phone_no: '',
   password: '',
-  farmIds: [],
+  confirmPassword: '',
+  farmName: '',
+  initialBirdCount: '0',
+  initialFeedKg: '0',
 };
 
 export function AdminUsersPage() {
@@ -31,7 +37,6 @@ export function AdminUsersPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [form, setForm] = useState<FarmerForm>(emptyForm);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -52,21 +57,6 @@ export function AdminUsersPage() {
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
-  const loadFarms = useCallback(async () => {
-    try {
-      const frms = await getAllFarms();
-      setFarms(frms.filter((f) => f.active));
-    } catch (err) {
-      console.error('[AdminUsers] Failed to load farms:', err);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (showCreateForm) {
-      loadFarms();
-    }
-  }, [showCreateForm, loadFarms]);
-
   const handleToggleStatus = async (uid: string, currentActive: boolean) => {
     setActionLoading(uid);
     try {
@@ -82,13 +72,22 @@ export function AdminUsersPage() {
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
 
-    if (!form.name.trim()) errors.name = 'Name is required';
-    if (!form.email.trim()) errors.email = 'Email is required';
+    if (!form.name.trim()) errors.name = 'Full name is required';
+    if (!form.email.trim()) errors.email = 'Email address is required';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = 'Invalid email format';
+    
     if (!form.phone_no.trim()) errors.phone_no = 'Phone number is required';
+    
     if (!form.password) errors.password = 'Password is required';
     else if (form.password.length < 6) errors.password = 'Password must be at least 6 characters';
-    if (form.farmIds.length === 0) errors.farmIds = 'At least one farm must be assigned';
+    
+    if (!form.confirmPassword) errors.confirmPassword = 'Please confirm password';
+    else if (form.password !== form.confirmPassword) errors.confirmPassword = 'Passwords do not match';
+    
+    if (!form.farmName.trim()) errors.farmName = 'Farm name is required';
+    
+    if (form.initialBirdCount && Number(form.initialBirdCount) < 0) errors.initialBirdCount = 'Cannot be negative';
+    if (form.initialFeedKg && Number(form.initialFeedKg) < 0) errors.initialFeedKg = 'Cannot be negative';
 
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
@@ -107,7 +106,9 @@ export function AdminUsersPage() {
         email: form.email.trim(),
         phone_no: form.phone_no.trim(),
         password: form.password,
-        farmIds: form.farmIds,
+        farmName: form.farmName.trim(),
+        initialBirdCount: Number(form.initialBirdCount || 0),
+        initialFeedKg: Number(form.initialFeedKg || 0),
       };
 
       const result = await createFarmer(payload);
@@ -130,22 +131,6 @@ export function AdminUsersPage() {
       }
     } finally {
       setFormSubmitting(false);
-    }
-  };
-
-  const handleFarmToggle = (farmId: string) => {
-    setForm((prev) => {
-      const farmIds = prev.farmIds.includes(farmId)
-        ? prev.farmIds.filter((id) => id !== farmId)
-        : [...prev.farmIds, farmId];
-      return { ...prev, farmIds };
-    });
-    if (formErrors.farmIds) {
-      setFormErrors((prev) => {
-        const next = { ...prev };
-        delete next.farmIds;
-        return next;
-      });
     }
   };
 
@@ -283,27 +268,69 @@ export function AdminUsersPage() {
           </div>
 
           <div className="field">
-            <label>Assigned Farm(s) *</label>
-            <div className="farm-checkbox-group">
-              {farms.map((farm) => (
-                <label key={farm.farmId} className="farm-checkbox">
-                  <input
-                    type="checkbox"
-                    checked={form.farmIds.includes(farm.farmId)}
-                    onChange={() => handleFarmToggle(farm.farmId)}
-                    disabled={formSubmitting}
-                  />
-                  <span className="farm-checkbox-label">
-                    <span className="td-bold">{farm.farmId}</span>
-                    {farm.name && <span style={{ color: '#6b7280', marginLeft: 6 }}>({farm.name})</span>}
-                  </span>
-                </label>
-              ))}
-              {farms.length === 0 && (
-                <div style={{ color: '#9ca3af', fontSize: 13 }}>Loading farms...</div>
-              )}
-            </div>
-            {formErrors.farmIds && <div className="field-error">{formErrors.farmIds}</div>}
+            <label htmlFor="farmer-confirm-password">Confirm Password *</label>
+            <input
+              id="farmer-confirm-password"
+              type="password"
+              placeholder="Re-enter password"
+              value={form.confirmPassword}
+              onChange={(e) => setForm((p) => ({ ...p, confirmPassword: e.target.value }))}
+              disabled={formSubmitting}
+            />
+            {formErrors.confirmPassword && <div className="field-error">{formErrors.confirmPassword}</div>}
+          </div>
+
+          <div className="field">
+            <label htmlFor="farmer-farm-name">Farm Name *</label>
+            <input
+              id="farmer-farm-name"
+              type="text"
+              placeholder="Enter farm name"
+              value={form.farmName}
+              onChange={(e) => setForm((p) => ({ ...p, farmName: e.target.value }))}
+              disabled={formSubmitting}
+            />
+            {formErrors.farmName && <div className="field-error">{formErrors.farmName}</div>}
+          </div>
+
+          <div className="field">
+            <label htmlFor="farmer-initial-birds">Initial Bird Count</label>
+            <input
+              id="farmer-initial-birds"
+              type="number"
+              min="0"
+              placeholder="Enter initial birds"
+              value={form.initialBirdCount}
+              onChange={(e) => setForm((p) => ({ ...p, initialBirdCount: e.target.value }))}
+              disabled={formSubmitting}
+            />
+            {formErrors.initialBirdCount && <div className="field-error">{formErrors.initialBirdCount}</div>}
+          </div>
+
+          <div className="field">
+            <label htmlFor="farmer-initial-feed">Initial Feed Stock (Kg)</label>
+            <input
+              id="farmer-initial-feed"
+              type="number"
+              min="0"
+              step="any"
+              placeholder="Enter initial feed in kg"
+              value={form.initialFeedKg}
+              onChange={(e) => setForm((p) => ({ ...p, initialFeedKg: e.target.value }))}
+              disabled={formSubmitting}
+            />
+            {formErrors.initialFeedKg && <div className="field-error">{formErrors.initialFeedKg}</div>}
+          </div>
+
+          <div className="field">
+            <label htmlFor="farmer-farm-id">Farm ID</label>
+            <input
+              id="farmer-farm-id"
+              type="text"
+              placeholder="Automatically assigned based on the latest Farm ID."
+              disabled={true}
+              style={{ backgroundColor: '#f9fafb', color: '#6b7280', cursor: 'not-allowed' }}
+            />
           </div>
 
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>

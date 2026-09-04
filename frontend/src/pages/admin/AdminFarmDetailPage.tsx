@@ -14,6 +14,7 @@ import { calcProductionRate, calcMortalityRate, calcFeedPerBird, aggregateReport
 import { useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { KPI_THRESHOLDS } from '../../config/kpiThresholds';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { ArrowLeft, AlertTriangle, Activity, HeartPulse, Package, Thermometer, Egg, FileText } from 'lucide-react';
 
 export function AdminFarmDetailPage() {
   const { farmId } = useParams<{ farmId: string }>();
@@ -81,25 +82,29 @@ export function AdminFarmDetailPage() {
     <DashboardLayout role="admin" userName={userProfile?.name}>
       <div className="mgmt-page">
         {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
-        <button className="btn-back" onClick={() => navigate('/admin/farms')}>&#8592; Back to Farms</button>
+        <button className="btn-back" onClick={() => navigate('/admin/farms')}>
+          <ArrowLeft size={16} /> <span>Back to Farms</span>
+        </button>
 
         <div className="farm-detail-header">
           <h2>{farm.farmId}</h2>
           <p>{farm.name || 'Unnamed Farm'} | Farmer: {farmer?.name || 'Unknown'}</p>
           {attentionItems.length > 0 && (
-            <div className="attention-banner">&#9888; Attention: {attentionItems.join(', ')}</div>
+            <div className="attention-banner" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle size={16} /> <span>Attention: {attentionItems.join(', ')}</span>
+            </div>
           )}
         </div>
 
         <DateFilter days={days} onChange={setDays} />
 
         <div className="kpi-grid">
-          <KpiCard title="Avg Production" value={`${agg.avgProductionRate}%`} icon="&#128002;" />
-          <KpiCard title="Avg Mortality" value={`${agg.avgMortalityRate}%`} icon="&#128196;" color={agg.avgMortalityRate > 10 ? '#dc2626' : undefined} />
-          <KpiCard title="Avg Feed/Bird" value={`${agg.avgFeedPerBird}g`} icon="&#127838;" />
-          <KpiCard title="Avg Temperature" value={`${agg.avgTemperature}°C`} icon="&#127777;" />
-          <KpiCard title="Avg Egg Weight" value={`${agg.avgEggWeight}g`} icon="&#129370;" />
-          <KpiCard title="Reports" value={agg.totalReports} icon="&#128196;" />
+          <KpiCard title="Avg Production" value={`${agg.avgProductionRate}%`} icon={<Activity size={18} />} />
+          <KpiCard title="Avg Mortality" value={`${agg.avgMortalityRate}%`} icon={<HeartPulse size={18} />} color={agg.avgMortalityRate > 10 ? '#dc2626' : undefined} />
+          <KpiCard title="Avg Feed/Bird" value={`${agg.avgFeedPerBird}g`} icon={<Package size={18} />} />
+          <KpiCard title="Avg Temperature" value={`${agg.avgTemperature}°C`} icon={<Thermometer size={18} />} />
+          <KpiCard title="Avg Egg Weight" value={`${agg.avgEggWeight}g`} icon={<Egg size={18} />} />
+          <KpiCard title="Reports" value={agg.totalReports} icon={<FileText size={18} />} />
         </div>
 
         {chartData.length > 0 && (

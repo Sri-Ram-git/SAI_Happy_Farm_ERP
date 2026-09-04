@@ -132,7 +132,9 @@ export interface CreateFarmerPayload {
   email: string;
   phone_no: string;
   password: string;
-  farmIds: string[];
+  farmName: string;
+  initialBirdCount?: number;
+  initialFeedKg?: number;
 }
 
 export interface CreateFarmerResult {

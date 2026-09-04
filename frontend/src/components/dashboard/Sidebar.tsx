@@ -1,6 +1,18 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { logoutUser } from '../../services/authService';
+import {
+  LayoutDashboard,
+  Home,
+  Users,
+  Layers,
+  BarChart3,
+  Trophy,
+  ClipboardList,
+  Package,
+  Sparkles,
+  LogOut,
+} from 'lucide-react';
 
 interface SidebarProps {
   role: 'supervisor' | 'admin';
@@ -8,21 +20,23 @@ interface SidebarProps {
 }
 
 const SUPERVISOR_NAV = [
-  { path: '/supervisor', label: 'Overview', icon: '&#9632;' },
-  { path: '/supervisor/farms', label: 'Farms', icon: '&#9635;' },
-  { path: '/supervisor/analytics', label: 'Analytics', icon: '&#9650;' },
-  { path: '/supervisor/rankings', label: 'Rankings', icon: '&#9733;' },
-  { path: '/supervisor/submissions', label: 'Submissions', icon: '&#9776;' },
-  { path: '/supervisor/feed-load', label: 'Feed Load', icon: '&#127838;' },
+  { path: '/supervisor', label: 'Overview', icon: LayoutDashboard },
+  { path: '/supervisor/farms', label: 'Farms', icon: Home },
+  { path: '/supervisor/analytics', label: 'Analytics', icon: BarChart3 },
+  { path: '/supervisor/rankings', label: 'Rankings', icon: Trophy },
+  { path: '/supervisor/submissions', label: 'Submissions', icon: ClipboardList },
+  { path: '/supervisor/feed-load', label: 'Feed Load', icon: Package },
 ];
 
 const ADMIN_NAV = [
-  { path: '/admin', label: 'Overview', icon: '&#9632;' },
-  { path: '/admin/users', label: 'Users', icon: '&#9787;' },
-  { path: '/admin/farms', label: 'Farms', icon: '&#9635;' },
-  { path: '/admin/analytics', label: 'Analytics', icon: '&#9650;' },
-  { path: '/admin/submissions', label: 'Submissions', icon: '&#9776;' },
-  { path: '/admin/feed-load', label: 'Feed Load', icon: '&#127838;' },
+  { path: '/admin', label: 'Overview', icon: LayoutDashboard },
+  { path: '/admin/users', label: 'Users', icon: Users },
+  { path: '/admin/farms', label: 'Farms', icon: Home },
+  { path: '/admin/flocks', label: 'Flocks', icon: Layers },
+  { path: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
+  { path: '/admin/submissions', label: 'Submissions', icon: ClipboardList },
+  { path: '/admin/feed-load', label: 'Feed Load', icon: Package },
+  { path: '/admin/prediction', label: 'Prediction', icon: Sparkles },
 ];
 
 export function Sidebar({ role, userName }: SidebarProps) {
@@ -54,40 +68,49 @@ export function Sidebar({ role, userName }: SidebarProps) {
         </div>
 
         <nav className="sidebar-nav">
-          {items.map((item) => (
-            <button
-              key={item.path}
-              className={`sidebar-link ${location.pathname === item.path ? 'sidebar-link--active' : ''}`}
-              onClick={() => navigate(item.path)}
-            >
-              <span dangerouslySetInnerHTML={{ __html: item.icon }} />
-              {item.label}
-            </button>
-          ))}
+          {items.map((item) => {
+            const Icon = item.icon;
+            const isActive = location.pathname === item.path;
+            return (
+              <button
+                key={item.path}
+                className={`sidebar-link ${isActive ? 'sidebar-link--active' : ''}`}
+                onClick={() => navigate(item.path)}
+              >
+                <Icon size={18} className="sidebar-icon" />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
         </nav>
 
         <div className="sidebar-footer">
           {userName && <div className="sidebar-user">{userName}</div>}
           <button className="sidebar-link sidebar-link--logout" onClick={handleLogout} disabled={loggingOut}>
-            {loggingOut ? 'Signing out...' : 'Logout'}
+            <LogOut size={18} className="sidebar-icon" />
+            <span>{loggingOut ? 'Signing out...' : 'Logout'}</span>
           </button>
         </div>
       </aside>
 
       <nav className="mobile-nav">
-        {items.map((item) => (
-          <button
-            key={item.path}
-            className={`mobile-nav-link ${location.pathname === item.path ? 'mobile-nav-link--active' : ''}`}
-            onClick={() => navigate(item.path)}
-          >
-            <span dangerouslySetInnerHTML={{ __html: item.icon }} />
-            <span>{item.label}</span>
-          </button>
-        ))}
+        {items.map((item) => {
+          const Icon = item.icon;
+          const isActive = location.pathname === item.path;
+          return (
+            <button
+              key={item.path}
+              className={`mobile-nav-link ${isActive ? 'mobile-nav-link--active' : ''}`}
+              onClick={() => navigate(item.path)}
+            >
+              <Icon size={20} />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
         <button className="mobile-nav-link" onClick={handleLogout} disabled={loggingOut}>
-          <span>&#10140;</span>
-          <span>{loggingOut ? 'Signing out...' : 'Exit'}</span>
+          <LogOut size={20} />
+          <span>{loggingOut ? 'Exit' : 'Exit'}</span>
         </button>
       </nav>
     </>

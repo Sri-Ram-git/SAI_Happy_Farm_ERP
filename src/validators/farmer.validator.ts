@@ -18,10 +18,12 @@ export const CreateFarmerSchema = z
       .string()
       .min(6, 'Password must be at least 6 characters')
       .max(128, 'Password must be 128 characters or fewer'),
-    farmIds: z
-      .array(z.string().min(1, 'Farm ID cannot be empty'))
-      .min(1, 'At least one farm must be assigned')
-      .max(10, 'Cannot assign more than 10 farms'),
+    farmName: z
+      .string()
+      .min(1, 'Farm Name is required')
+      .max(100, 'Farm Name must be 100 characters or fewer'),
+    initialBirdCount: z.number().nonnegative('Must be 0 or positive').optional(),
+    initialFeedKg: z.number().nonnegative('Must be 0 or positive').optional(),
   })
   .strict();
 

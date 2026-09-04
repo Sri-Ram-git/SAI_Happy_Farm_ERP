@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { X } from 'lucide-react';
 
 interface DetailDrawerProps {
   open: boolean;
@@ -38,7 +39,9 @@ export function DetailDrawer({ open, title, onClose, children }: DetailDrawerPro
       >
         <div className="drawer-header">
           <h3 className="drawer-title">{title}</h3>
-          <button className="drawer-close" onClick={onClose}>&#10005;</button>
+          <button className="drawer-close" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
         </div>
         <div className="drawer-body">
           {children}

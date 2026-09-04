@@ -7,9 +7,19 @@ export type ReportDoc = NormalizedReport;
 function dedupeAndSort(reports: NormalizedReport[]): NormalizedReport[] {
   const seen = new Map<string, NormalizedReport>();
   for (const r of reports) {
-    const key = `${r.farmId}_${r.submissionDate}`;
-    if (!seen.has(key)) {
+    if (!r.submissionDate) continue; // Keep even if farmId is missing, we'll resolve it dynamically
+    const key = `${r.userId}_${r.submissionDate}_${r.flockId || 'noflock'}`;
+    const existing = seen.get(key);
+    if (!existing) {
       seen.set(key, r);
+    } else {
+      // Prioritize Version 2 (or higher) / latest canonical report
+      if (
+        (r.submissionVersion || 1) > (existing.submissionVersion || 1) ||
+        ((r.submissionVersion || 1) === (existing.submissionVersion || 1) && r.createdAt > existing.createdAt)
+      ) {
+        seen.set(key, r);
+      }
     }
   }
   return Array.from(seen.values()).sort((a, b) => a.submissionDate.localeCompare(b.submissionDate));
@@ -19,39 +29,6 @@ function isParentDoc(data: Record<string, unknown>): boolean {
   return !!(data.userId && data.lastSubmissionDate && !data.submissionDate);
 }
 
-async function fetchOldFormatReports(
-  startDate: string,
-  endDate: string,
-  farmIds?: string[],
-): Promise<NormalizedReport[]> {
-  const db = f.firestore();
-  try {
-    const q = db.collection('dailyReports')
-      .where('submissionDate', '>=', startDate)
-      .where('submissionDate', '<=', endDate);
-
-    const snap = await q.get();
-    let reports = snap.docs
-      .map((d: any) => {
-        const data = d.data();
-        if (isParentDoc(data)) return null;
-        if (data.submissionDate) return normalizeReport(d.id, data);
-        return null;
-      })
-      .filter((r: NormalizedReport | null): r is NormalizedReport => r !== null);
-
-    if (farmIds && farmIds.length > 0) {
-      const farmSet = new Set(farmIds);
-      reports = reports.filter((r: NormalizedReport) => farmSet.has(r.farmId));
-    }
-
-    return reports;
-  } catch (err: any) {
-    console.warn('[reportDataService] Old format query failed:', err.message || err);
-    return [];
-  }
-}
-
 async function fetchNewFormatReports(
   startDate: string,
   endDate: string,
@@ -59,12 +36,22 @@ async function fetchNewFormatReports(
 ): Promise<NormalizedReport[]> {
   const db = f.firestore();
   try {
-    const q = db.collectionGroup('dailyLogs')
-      .where('submissionDate', '>=', startDate)
-      .where('submissionDate', '<=', endDate);
-
-    const snap = await q.get();
-    let reports: NormalizedReport[] = snap.docs.map((d: any) => normalizeReport(d.id, d.data()));
+    const snap = await db.collectionGroup('dailyLogs').get();
+    let reports: NormalizedReport[] = [];
+    snap.docs.forEach((d: any) => {
+      const pathStr = d.ref.path || '';
+      const parts = pathStr.split('/');
+      let userIdOverride: string | undefined;
+      if (parts.length >= 4 && parts[parts.length - 3] === 'dailyReports') {
+        userIdOverride = parts[parts.length - 2];
+      }
+      
+      const r = normalizeReport(d.id, d.data(), userIdOverride, pathStr);
+      if (r.submissionDate && r.submissionDate >= startDate && r.submissionDate <= endDate) {
+        console.log(`[Daily Report Loaded] Path: ${pathStr}`);
+        reports.push(r);
+      }
+    });
 
     if (farmIds && farmIds.length > 0) {
       const farmSet = new Set(farmIds);
@@ -74,9 +61,6 @@ async function fetchNewFormatReports(
     return reports;
   } catch (err: any) {
     console.error('[reportDataService] collectionGroup(dailyLogs) query FAILED:', err.message || err);
-    if (err.message?.includes('index')) {
-      console.error('[reportDataService] HINT: Create a Firestore index for dailyLogs collection group on submissionDate field.');
-    }
     return [];
   }
 }
@@ -86,49 +70,8 @@ async function fetchAllReportsMerged(
   endDate: string,
   farmIds?: string[],
 ): Promise<NormalizedReport[]> {
-  const [oldReports, newReports] = await Promise.all([
-    fetchOldFormatReports(startDate, endDate, farmIds),
-    fetchNewFormatReports(startDate, endDate, farmIds),
-  ]);
-  return dedupeAndSort([...oldReports, ...newReports]);
-}
-
-function subscribeToCollectionGroup(
-  startDate: string,
-  endDate: string,
-  callback: (reports: NormalizedReport[]) => void,
-  onError?: (error: Error) => void,
-): () => void {
-  const db = f.firestore();
-  let q: any;
-  try {
-    q = db.collectionGroup('dailyLogs')
-      .where('submissionDate', '>=', startDate)
-      .where('submissionDate', '<=', endDate);
-  } catch (err: any) {
-    console.error('[reportDataService] Failed to create collectionGroup query:', err.message || err);
-    onError?.(new Error(`collectionGroup query creation failed: ${err.message}`));
-    callback([]);
-    return () => {};
-  }
-
-  return q.onSnapshot(
-    (snap: any) => {
-      const reports = snap.docs.map((d: any) => normalizeReport(d.id, d.data()));
-      console.log(`[reportDataService] collectionGroup dailyLogs returned ${reports.length} reports`);
-      callback(reports);
-    },
-    (err: any) => {
-      console.error('[reportDataService] collectionGroup onSnapshot ERROR:', err.message || err);
-      if (err.message?.includes('index')) {
-        console.error('[reportDataService] HINT: Create a Firestore composite index for dailyLogs collection group.');
-        console.error('[reportDataService] Go to Firebase Console > Firestore > Indexes > Add Index');
-        console.error('[reportDataService] Collection: dailyLogs, Fields: submissionDate ASC');
-      }
-      onError?.(new Error(`collectionGroup query failed: ${err.message}`));
-      callback([]);
-    },
-  );
+  const newReports = await fetchNewFormatReports(startDate, endDate, farmIds);
+  return dedupeAndSort(newReports);
 }
 
 export function subscribeToAllDailyReports(
@@ -139,66 +82,64 @@ export function subscribeToAllDailyReports(
 ): () => void {
   const db = f.firestore();
   const allReports = new Map<string, NormalizedReport>();
-  let oldQFailed = false;
-  let newQFailed = false;
 
   const emit = () => {
-    callback(dedupeAndSort(Array.from(allReports.values())));
+    const filtered = Array.from(allReports.values()).filter(
+      (r) => r.submissionDate >= startDate && r.submissionDate <= endDate
+    );
+    callback(dedupeAndSort(filtered));
   };
 
-  let oldQ: any;
+  // Single collectionGroup listener covers ALL dailyLogs across all users.
+  // Using doc.ref.path as the Map key guarantees uniqueness across users
+  // (path = "dailyReports/{userId}/dailyLogs/{date}_{flockId}").
   try {
-    oldQ = db.collection('dailyReports')
-      .where('submissionDate', '>=', startDate)
-      .where('submissionDate', '<=', endDate);
-  } catch (err) {
-    oldQ = null;
-  }
+    const unsub = db.collectionGroup('dailyLogs').onSnapshot(
+      (snap: any) => {
+        for (const docChange of snap.docChanges()) {
+          const data = docChange.doc.data();
+          if (isParentDoc(data)) continue;
+          
+          const pathStr = docChange.doc.ref.path || '';
+          const parts = pathStr.split('/');
+          let userIdOverride: string | undefined;
+          if (parts.length >= 4 && parts[parts.length - 3] === 'dailyReports') {
+            userIdOverride = parts[parts.length - 2];
+          }
 
-  const unsubOld = oldQ ? oldQ.onSnapshot(
-    (snap: any) => {
-      for (const docChange of snap.docChanges()) {
-        const data = docChange.doc.data();
-        if (isParentDoc(data)) continue;
-        if (!data.submissionDate) continue;
-        const report = normalizeReport(docChange.doc.id, data);
-        const key = `${report.farmId}_${report.submissionDate}`;
-        if (docChange.type === 'removed') {
-          allReports.delete(key);
-        } else {
-          allReports.set(key, report);
+          const report = normalizeReport(docChange.doc.id, data, userIdOverride, pathStr);
+          if (!report.submissionDate) continue;
+
+          console.log(`[Daily Report Loaded] Path: ${pathStr}`);
+
+          // Use full document path as key to avoid cross-user collisions.
+          const key = pathStr;
+          if (docChange.type === 'removed') {
+            allReports.delete(key);
+          } else {
+            allReports.set(key, report);
+          }
         }
-      }
-      emit();
-    },
-    (err: any) => {
-      console.warn('[reportDataService] Old format snapshot error:', err.message || err);
-      oldQFailed = true;
-      if (oldQFailed && newQFailed && allReports.size === 0) {
-        onError?.(new Error('All report queries failed. Check console for details.'));
-      }
-    },
-  ) : () => { oldQFailed = true; };
-
-  const unsubNew = subscribeToCollectionGroup(
-    startDate,
-    endDate,
-    (newReports) => {
-      for (const r of newReports) {
-        const key = `${r.farmId}_${r.submissionDate}`;
-        allReports.set(key, r);
-      }
-      emit();
-    },
-    (err) => {
-      newQFailed = true;
-      if (oldQFailed && allReports.size === 0) {
+        console.log(`[reportDataService] collectionGroup snapshot received: ${allReports.size} documents tracked`);
+        emit();
+      },
+      (err: any) => {
+        console.error('[reportDataService] collectionGroup(dailyLogs) listener error:', err.message || err);
+        if (err.message && err.message.includes('index')) {
+          console.error('[reportDataService] This error likely means a Firestore collection group index is required. Check the Firebase Console → Firestore → Indexes.');
+        }
         onError?.(err);
       }
-    },
-  );
+    );
 
-  return () => { unsubOld(); unsubNew(); };
+    return () => {
+      unsub();
+    };
+  } catch (err: any) {
+    console.error('[reportDataService] collectionGroup listener creation error:', err);
+    onError?.(err instanceof Error ? err : new Error(String(err)));
+    return () => {};
+  }
 }
 
 export function subscribeToDailyReportsByFarms(
@@ -213,77 +154,16 @@ export function subscribeToDailyReportsByFarms(
     return () => {};
   }
 
-  const db = f.firestore();
   const farmSet = new Set(farmIds);
-  const allReports = new Map<string, NormalizedReport>();
-  let oldQFailed = false;
-  let newQFailed = false;
-
-  const emit = () => {
-    callback(dedupeAndSort(Array.from(allReports.values())));
-  };
-
-  const batchSize = 10;
-  const unsubs: (() => void)[] = [];
-
-  for (let i = 0; i < farmIds.length; i += batchSize) {
-    const batch = farmIds.slice(i, i + batchSize);
-    let q: any;
-    try {
-      q = db.collection('dailyReports')
-        .where('farmId', 'in', batch)
-        .where('submissionDate', '>=', startDate)
-        .where('submissionDate', '<=', endDate);
-    } catch (err) {
-      continue;
-    }
-
-    const unsub = q.onSnapshot(
-      (snap: any) => {
-        for (const docChange of snap.docChanges()) {
-          const data = docChange.doc.data();
-          if (isParentDoc(data)) continue;
-          if (!data.submissionDate) continue;
-          const report = normalizeReport(docChange.doc.id, data);
-          const key = `${report.farmId}_${report.submissionDate}`;
-          if (docChange.type === 'removed') {
-            allReports.delete(key);
-          } else {
-            allReports.set(key, report);
-          }
-        }
-        emit();
-      },
-      (err: any) => {
-        console.warn('[reportDataService] Old format batch error:', err.message || err);
-        oldQFailed = true;
-      },
-    );
-    unsubs.push(unsub);
-  }
-
-  const unsubNew = subscribeToCollectionGroup(
+  return subscribeToAllDailyReports(
     startDate,
     endDate,
-    (newReports) => {
-      for (const r of newReports) {
-        if (!farmSet.has(r.farmId)) continue;
-        const key = `${r.farmId}_${r.submissionDate}`;
-        allReports.set(key, r);
-      }
-      emit();
+    (all) => {
+      const filtered = all.filter((r) => farmSet.has(r.farmId));
+      callback(filtered);
     },
-    (err) => {
-      newQFailed = true;
-      if (oldQFailed && allReports.size === 0) {
-        onError?.(err);
-      }
-    },
+    onError
   );
-
-  unsubs.push(unsubNew);
-
-  return () => { unsubs.forEach((u) => u()); };
 }
 
 export function subscribeToDailyReportsByFarm(
