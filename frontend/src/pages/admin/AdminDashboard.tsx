@@ -7,7 +7,7 @@ export function AdminDashboard() {
 
   return (
     <DashboardLayout role="admin" userName={userProfile?.name}>
-      <EnterpriseAnalyticsDashboard role="admin" />
+      <EnterpriseAnalyticsDashboard role="admin" variant="overview" />
     </DashboardLayout>
   );
 }

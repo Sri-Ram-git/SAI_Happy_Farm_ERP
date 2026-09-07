@@ -7,7 +7,7 @@ export function SupervisorAnalyticsPage() {
 
   return (
     <DashboardLayout role="supervisor" userName={userProfile?.name}>
-      <EnterpriseAnalyticsDashboard role="supervisor" />
+      <EnterpriseAnalyticsDashboard role="supervisor" variant="analytics" />
     </DashboardLayout>
   );
 }

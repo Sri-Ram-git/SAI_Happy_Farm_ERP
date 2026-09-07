@@ -39,9 +39,10 @@ function normalizeRole(role: string | undefined | null): string {
 
 interface EnterpriseAnalyticsDashboardProps {
   role: 'admin' | 'supervisor';
+  variant?: 'overview' | 'analytics' | 'full';
 }
 
-export function EnterpriseAnalyticsDashboard({ role }: EnterpriseAnalyticsDashboardProps) {
+export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: EnterpriseAnalyticsDashboardProps) {
   const { userProfile } = useAuth();
   const [days, setDays] = useState(7);
   const [selectedFarmId, setSelectedFarmId] = useState('');
@@ -530,139 +531,144 @@ export function EnterpriseAnalyticsDashboard({ role }: EnterpriseAnalyticsDashbo
       </div>
 
       {/* LEVEL 1: EXECUTIVE KPI SUMMARY GRID */}
-      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: 20 }}>
-        <KpiCard
-          title="Total Bird Population"
-          value={totalBirdsLive.toLocaleString()}
-          icon={<Layers size={20} />}
-          onClick={() => setExpandedMetric({ type: 'birds', title: 'Total Bird Population', sub: 'Current live bird inventory and net change' })}
-        />
-        <KpiCard
-          title="Avg Egg Production %"
-          value={avgProd !== null ? `${avgProd}%` : '--'}
-          icon={<Activity size={20} />}
-          color={avgProd !== null && avgProd >= 70 ? '#15803d' : '#d97706'}
-          onClick={() => setExpandedMetric({ type: 'production', title: 'Avg Egg Production %', sub: 'Calculated production rate against standard target' })}
-        />
-        <KpiCard
-          title="Avg Mortality %"
-          value={avgMort !== null ? `${avgMort}%` : '--'}
-          icon={<HeartPulse size={20} />}
-          color={avgMort !== null && avgMort > 2.0 ? '#dc2626' : '#15803d'}
-          onClick={() => setExpandedMetric({ type: 'mortality', title: 'Avg Mortality %', sub: 'Daily mortality rate and culling counts' })}
-        />
-        <KpiCard
-          title="Avg Feed / Bird"
-          value={avgFeedPerBirdGrams !== null ? `${avgFeedPerBirdGrams.toFixed(0)} g/day` : '--'}
-          icon={<Package size={20} />}
-          onClick={() => setExpandedMetric({ type: 'feed', title: 'Avg Feed / Bird', sub: 'Daily feed consumption per bird in grams' })}
-        />
-        <KpiCard
-          title="Avg Egg Weight"
-          value={avgEggWeight !== null ? `${avgEggWeight.toFixed(1)} g` : '--'}
-          icon={<Egg size={20} />}
-          onClick={() => setExpandedMetric({ type: 'eggQuality', title: 'Avg Egg Weight', sub: 'Average sampled egg weight and selection percentage' })}
-        />
-        <KpiCard
-          title="TOTAL SUBMISSION RATIO"
-          value={`${receivedSubmissionsPeriod} / ${expectedSubmissionsPeriod}`}
-          icon={<CheckCircle2 size={20} />}
-          color={missingSubmissionsPeriod === 0 ? '#15803d' : '#d97706'}
-          onClick={() => setExpandedMetric({ type: 'submission', title: 'Total Submission Ratio', sub: 'Submitted daily reports vs expected reports for active farms' })}
-        />
-      </div>
+      {(variant === 'overview' || variant === 'full') && (
+        <>
+          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: 20 }}>
+            <KpiCard
+              title="Total Bird Population"
+              value={totalBirdsLive.toLocaleString()}
+              icon={<Layers size={20} />}
+              onClick={() => setExpandedMetric({ type: 'birds', title: 'Total Bird Population', sub: 'Current live bird inventory and net change' })}
+            />
+            <KpiCard
+              title="Avg Egg Production %"
+              value={avgProd !== null ? `${avgProd}%` : '--'}
+              icon={<Activity size={20} />}
+              color={avgProd !== null && avgProd >= 70 ? '#15803d' : '#d97706'}
+              onClick={() => setExpandedMetric({ type: 'production', title: 'Avg Egg Production %', sub: 'Calculated production rate against standard target' })}
+            />
+            <KpiCard
+              title="Avg Mortality %"
+              value={avgMort !== null ? `${avgMort}%` : '--'}
+              icon={<HeartPulse size={20} />}
+              color={avgMort !== null && avgMort > 2.0 ? '#dc2626' : '#15803d'}
+              onClick={() => setExpandedMetric({ type: 'mortality', title: 'Avg Mortality %', sub: 'Daily mortality rate and culling counts' })}
+            />
+            <KpiCard
+              title="Avg Feed / Bird"
+              value={avgFeedPerBirdGrams !== null ? `${avgFeedPerBirdGrams.toFixed(0)} g/day` : '--'}
+              icon={<Package size={20} />}
+              onClick={() => setExpandedMetric({ type: 'feed', title: 'Avg Feed / Bird', sub: 'Daily feed consumption per bird in grams' })}
+            />
+            <KpiCard
+              title="Avg Egg Weight"
+              value={avgEggWeight !== null ? `${avgEggWeight.toFixed(1)} g` : '--'}
+              icon={<Egg size={20} />}
+              onClick={() => setExpandedMetric({ type: 'eggQuality', title: 'Avg Egg Weight', sub: 'Average sampled egg weight and selection percentage' })}
+            />
+            <KpiCard
+              title="TOTAL SUBMISSION RATIO"
+              value={`${receivedSubmissionsPeriod} / ${expectedSubmissionsPeriod}`}
+              icon={<CheckCircle2 size={20} />}
+              color={missingSubmissionsPeriod === 0 ? '#15803d' : '#d97706'}
+              onClick={() => setExpandedMetric({ type: 'submission', title: 'Total Submission Ratio', sub: 'Submitted daily reports vs expected reports for active farms' })}
+            />
+          </div>
 
-      {/* LEVEL 2: OPERATIONAL ALERTS & ATTENTION REQUIRED */}
-      {alerts.length > 0 && (
-        <div className="section-card" style={{ marginBottom: 24 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: 16, color: '#1e293b' }}>
-              <ShieldAlert size={18} style={{ color: '#dc2626' }} />
-              Operational Alerts ({alerts.length})
-            </h3>
-          </div>
-          <div className="ent-alerts-grid">
-            {alerts.slice(0, 4).map((a) => (
-              <div 
-                key={a.id} 
-                className={`ent-alert-card ent-alert-card--${a.type} ${a.id.startsWith('missing_') ? 'ent-alert-card--clickable' : ''}`}
-                onClick={a.id.startsWith('missing_') ? () => setExpandedMetric({ type: 'submission', title: 'Missing Submission Details', sub: 'Review expected report paths and assignment details' }) : undefined}
-                style={{ cursor: a.id.startsWith('missing_') ? 'pointer' : 'default' }}
-              >
-                <div className="ent-alert-top">
-                  <span className="ent-alert-title">{a.title}</span>
-                </div>
-                <p className="ent-alert-desc">{a.desc}</p>
+          {/* LEVEL 2: OPERATIONAL ALERTS & ATTENTION REQUIRED */}
+          {alerts.length > 0 && (
+            <div className="section-card" style={{ marginBottom: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: 16, color: '#1e293b' }}>
+                  <ShieldAlert size={18} style={{ color: '#dc2626' }} />
+                  Operational Alerts ({alerts.length})
+                </h3>
               </div>
-            ))}
+              <div className="ent-alerts-grid">
+                {alerts.slice(0, 4).map((a) => (
+                  <div 
+                    key={a.id} 
+                    className={`ent-alert-card ent-alert-card--${a.type} ${a.id.startsWith('missing_') ? 'ent-alert-card--clickable' : ''}`}
+                    onClick={a.id.startsWith('missing_') ? () => setExpandedMetric({ type: 'submission', title: 'Missing Submission Details', sub: 'Review expected report paths and assignment details' }) : undefined}
+                    style={{ cursor: a.id.startsWith('missing_') ? 'pointer' : 'default' }}
+                  >
+                    <div className="ent-alert-top">
+                      <span className="ent-alert-title">{a.title}</span>
+                    </div>
+                    <p className="ent-alert-desc">{a.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* LEVEL 3: FARM PERFORMANCE RANKING & COMPARISON TABLE */}
+          <div className="section-card" style={{ marginBottom: 24 }}>
+            <div className="ent-card-header">
+              <div>
+                <h3>Farm Performance Comparison</h3>
+                <p className="ent-card-sub">Ranked operational performance for the selected period</p>
+              </div>
+              <div className="ent-legend-bar">
+                <span className="ent-status-tag" style={{ background: '#dcfce7', color: '#15803d' }}>EXCELLENT</span>
+                <span className="ent-status-tag" style={{ background: '#ecfdf5', color: '#059669' }}>HEALTHY</span>
+                <span className="ent-status-tag" style={{ background: '#fffbeb', color: '#d97706' }}>NEEDS ATTENTION</span>
+                <span className="ent-status-tag" style={{ background: '#fef2f2', color: '#dc2626' }}>CRITICAL</span>
+              </div>
+            </div>
+
+            <div className="table-responsive">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Farm ID</th>
+                    <th>Name</th>
+                    <th>Birds</th>
+                    <th>Avg Production %</th>
+                    <th>Avg Mortality %</th>
+                    <th>Avg Feed (g/bird)</th>
+                    <th>Selection %</th>
+                    <th>Compliance %</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {farmRankings.map((fr, i) => (
+                    <tr key={fr.farmId}>
+                      <td style={{ fontWeight: 700, color: i === 0 ? '#d97706' : '#64748b' }}>#{i + 1}</td>
+                      <td className="td-bold">{fr.farmId}</td>
+                      <td>{fr.name}</td>
+                      <td>{fr.liveBirds.toLocaleString()}</td>
+                      <td style={{ fontWeight: 600, color: fr.pRate >= 70 ? '#15803d' : '#d97706' }}>{fr.pRate}%</td>
+                      <td style={{ color: fr.mRate > 2.0 ? '#dc2626' : '#15803d' }}>{fr.mRate}%</td>
+                      <td>{fr.fGrams > 0 ? `${fr.fGrams.toFixed(0)} g` : '--'}</td>
+                      <td>{fr.sRate > 0 ? `${fr.sRate}%` : '--'}</td>
+                      <td>{fr.compliance}%</td>
+                      <td>
+                        <span className="ent-status-tag" style={{ background: `${fr.statusColor}15`, color: fr.statusColor, border: `1px solid ${fr.statusColor}40` }}>
+                          {fr.statusLabel}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {farmRankings.length === 0 && (
+                    <tr>
+                      <td colSpan={10} style={{ textAlign: 'center', color: '#94a3b8', padding: '1.5rem' }}>
+                        No farm ranking data available for the selected period.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
-      {/* LEVEL 3: FARM PERFORMANCE RANKING & COMPARISON TABLE */}
-      <div className="section-card" style={{ marginBottom: 24 }}>
-        <div className="ent-card-header">
-          <div>
-            <h3>Farm Performance Comparison</h3>
-            <p className="ent-card-sub">Ranked operational performance for the selected period</p>
-          </div>
-          <div className="ent-legend-bar">
-            <span className="ent-status-tag" style={{ background: '#dcfce7', color: '#15803d' }}>EXCELLENT</span>
-            <span className="ent-status-tag" style={{ background: '#ecfdf5', color: '#059669' }}>HEALTHY</span>
-            <span className="ent-status-tag" style={{ background: '#fffbeb', color: '#d97706' }}>NEEDS ATTENTION</span>
-            <span className="ent-status-tag" style={{ background: '#fef2f2', color: '#dc2626' }}>CRITICAL</span>
-          </div>
-        </div>
-
-        <div className="table-responsive">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Rank</th>
-                <th>Farm ID</th>
-                <th>Name</th>
-                <th>Birds</th>
-                <th>Avg Production %</th>
-                <th>Avg Mortality %</th>
-                <th>Avg Feed (g/bird)</th>
-                <th>Selection %</th>
-                <th>Compliance %</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {farmRankings.map((fr, i) => (
-                <tr key={fr.farmId}>
-                  <td style={{ fontWeight: 700, color: i === 0 ? '#d97706' : '#64748b' }}>#{i + 1}</td>
-                  <td className="td-bold">{fr.farmId}</td>
-                  <td>{fr.name}</td>
-                  <td>{fr.liveBirds.toLocaleString()}</td>
-                  <td style={{ fontWeight: 600, color: fr.pRate >= 70 ? '#15803d' : '#d97706' }}>{fr.pRate}%</td>
-                  <td style={{ color: fr.mRate > 2.0 ? '#dc2626' : '#15803d' }}>{fr.mRate}%</td>
-                  <td>{fr.fGrams > 0 ? `${fr.fGrams.toFixed(0)} g` : '--'}</td>
-                  <td>{fr.sRate > 0 ? `${fr.sRate}%` : '--'}</td>
-                  <td>{fr.compliance}%</td>
-                  <td>
-                    <span className="ent-status-tag" style={{ background: `${fr.statusColor}15`, color: fr.statusColor, border: `1px solid ${fr.statusColor}40` }}>
-                      {fr.statusLabel}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {farmRankings.length === 0 && (
-                <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', color: '#94a3b8', padding: '1.5rem' }}>
-                    No farm ranking data available for the selected period.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
       {/* LEVEL 4: MULTI-DIMENSIONAL RECHARTS ANALYTICS GRID */}
-      <div className="ent-charts-grid">
+      {(variant === 'analytics' || variant === 'full') && (
+        <div className="ent-charts-grid">
         {/* GRAPH 1: PRODUCTION TREND VS STANDARD BASELINE */}
         <div
           className="ent-chart-card ent-chart-card--clickable"
@@ -902,6 +908,7 @@ export function EnterpriseAnalyticsDashboard({ role }: EnterpriseAnalyticsDashbo
           </ResponsiveContainer>
         </div>
       </div>
+      )}
 
       {/* UNIFIED METRIC & CHART DRILL-DOWN MODAL */}
       {expandedMetric && (

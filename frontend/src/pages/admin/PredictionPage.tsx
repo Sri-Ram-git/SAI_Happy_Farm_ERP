@@ -50,7 +50,6 @@ export function PredictionPage() {
     }
 
     const data: DailyDataPoint[] = reports
-      .filter((r) => r.flockId === selectedFlockId)
       .map((r) => {
         const birdCount = r.birdCount || r.closingBirdCount || 0;
         const eggsProduced = r.eggsProduced || 0;
@@ -70,9 +69,12 @@ export function PredictionPage() {
     if (!selectedFlock || historicalData.length === 0) return;
     setLoading(true);
 
+    const targetFarm = farms.find(f => f.farmId === selectedFlock.farmId);
+    const liveBirdCount = targetFarm?.currentBirdCount ?? selectedFlock.currentBirds;
+
     const predResult = generatePredictions({
       historicalData,
-      currentBirds: selectedFlock.currentBirds,
+      currentBirds: liveBirdCount,
       flockStartDate: selectedFlock.startDate,
       curveType: selectedFlock.productionCurve,
       forecastDays,
