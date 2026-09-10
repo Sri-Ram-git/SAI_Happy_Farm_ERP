@@ -13,6 +13,7 @@ const LANGUAGES: LanguageOption[] = [
   { code: 'te', label: 'Telugu', native: 'తెలుగు' },
   { code: 'ta', label: 'Tamil', native: 'தமிழ்' },
   { code: 'kn', label: 'Kannada', native: 'ಕನ್ನಡ' },
+  { code: 'hi', label: 'Hindi', native: 'हिन्दी' },
 ];
 
 export function LanguageSelector() {

@@ -6,6 +6,7 @@ import en from './en.json';
 import te from './te.json';
 import ta from './ta.json';
 import kn from './kn.json';
+import hi from './hi.json';
 
 i18n
   .use(LanguageDetector)
@@ -16,6 +17,7 @@ i18n
       te: { translation: te },
       ta: { translation: ta },
       kn: { translation: kn },
+      hi: { translation: hi },
     },
     fallbackLng: 'en',
     interpolation: {
