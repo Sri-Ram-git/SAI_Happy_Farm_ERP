@@ -9,6 +9,7 @@ export function ManagementLoginPage() {
   const [activeTab, setActiveTab] = useState<'supervisor' | 'admin'>('supervisor');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -101,13 +102,13 @@ export function ManagementLoginPage() {
         <div className="role-selector">
           <button
             className={`role-btn ${activeTab === 'supervisor' ? 'role-btn--active' : ''}`}
-            onClick={() => { setActiveTab('supervisor'); setError(''); }}
+            onClick={() => { setActiveTab('supervisor'); setError(''); setShowPassword(false); }}
           >
             Supervisor
           </button>
           <button
             className={`role-btn ${activeTab === 'admin' ? 'role-btn--active' : ''}`}
-            onClick={() => { setActiveTab('admin'); setError(''); }}
+            onClick={() => { setActiveTab('admin'); setError(''); setShowPassword(false); }}
           >
             Admin
           </button>
@@ -133,7 +134,7 @@ export function ManagementLoginPage() {
               <div className="password-wrap">
                 <input
                   id="mgmt-password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter password"
@@ -141,6 +142,15 @@ export function ManagementLoginPage() {
                   disabled={loading}
                   autoComplete="current-password"
                 />
+                <button
+                  type="button"
+                  className="pw-toggle"
+                  onClick={() => setShowPassword(!showPassword)}
+                  tabIndex={-1}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? '🙈' : '👁'}
+                </button>
               </div>
             </div>
 
