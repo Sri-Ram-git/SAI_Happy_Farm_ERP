@@ -33,7 +33,11 @@ export function LoginForm() {
 
   return (
     <div className="auth-card">
-      <form onSubmit={handleSubmit}>
+      <div className="auth-card-header">
+        <h2>Welcome Back</h2>
+        <p>Sign in to submit today's report</p>
+      </div>
+      <form onSubmit={handleSubmit} className="auth-form">
         <div className="field">
           <label htmlFor="email">Email Address</label>
           <input
@@ -66,21 +70,27 @@ export function LoginForm() {
               className="pw-toggle"
               onClick={() => setShowPassword(!showPassword)}
               tabIndex={-1}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? '🙈' : '👁'}
             </button>
           </div>
         </div>
 
+        <div className="auth-card-footer-info">
+          <span className="forgot-link">Forgot Password?</span>
+          <span className="contact-admin">Contact Farm Admin</span>
+        </div>
+
         <button
           type="submit"
-          className="btn btn--primary btn--full"
+          className="btn btn--primary btn--full btn--login"
           disabled={submitting}
         >
-          {submitting ? <span className="spinner" /> : 'Sign In'}
+          {submitting ? <span className="spinner" /> : 'SIGN IN'}
         </button>
 
-        {displayError && <div className="alert alert--error">{displayError}</div>}
+        {displayError && <div className="alert alert--error" style={{ marginTop: '16px' }}>{displayError}</div>}
       </form>
     </div>
   );

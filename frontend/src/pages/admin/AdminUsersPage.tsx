@@ -143,7 +143,7 @@ export function AdminUsersPage() {
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>User Management</h2>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div className="header-controls">
             <div className="filter-group">
               {['all', 'farmer', 'supervisor', 'admin'].map((r) => (
                 <button
@@ -164,7 +164,7 @@ export function AdminUsersPage() {
           </div>
         </div>
 
-        <div className="table-container">
+        <div className="table-container table-responsive">
           <table className="data-table">
             <thead>
               <tr>

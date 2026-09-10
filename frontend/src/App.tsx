@@ -43,7 +43,9 @@ function AppRoutes() {
         path="/farmer/form"
         element={
           <ProtectedRoute allowedRole="farmer">
-            <FarmerFormPage />
+            <ErrorBoundary>
+              <FarmerFormPage />
+            </ErrorBoundary>
           </ProtectedRoute>
         }
       />

@@ -12,10 +12,21 @@ export function getIstDate(): string {
   return `${y}-${m}-${d}`;
 }
 
-export function formatDisplayDate(isoDate: string): string {
-  const [y, m, d] = isoDate.split('-');
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${d} ${months[parseInt(m, 10) - 1]} ${y}`;
+export function formatDisplayDate(isoDate: any): string {
+  if (!isoDate) return '';
+  const str = typeof isoDate === 'string' ? isoDate : (isoDate.toDate ? isoDate.toDate().toISOString() : String(isoDate));
+  try {
+    const clean = str.split('T')[0];
+    const parts = clean.split('-');
+    if (parts.length < 3) return clean;
+    const [y, m, d] = parts;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const idx = parseInt(m, 10) - 1;
+    if (isNaN(idx) || idx < 0 || idx > 11) return clean;
+    return `${d} ${months[idx]} ${y}`;
+  } catch {
+    return String(isoDate);
+  }
 }
 
 export function formatTime(isoString: string): string {
@@ -69,8 +80,19 @@ export function generateDateArray(startDate: string, endDate: string): string[] 
   return dates;
 }
 
-export function getShortDate(isoDate: string): string {
-  const [, m, d] = isoDate.split('-');
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${parseInt(d)} ${months[parseInt(m, 10) - 1]}`;
+export function getShortDate(isoDate: any): string {
+  if (!isoDate) return '';
+  const str = typeof isoDate === 'string' ? isoDate : (isoDate.toDate ? isoDate.toDate().toISOString() : String(isoDate));
+  try {
+    const clean = str.split('T')[0];
+    const parts = clean.split('-');
+    if (parts.length < 3) return clean;
+    const [, m, d] = parts;
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const idx = parseInt(m, 10) - 1;
+    if (isNaN(idx) || idx < 0 || idx > 11) return clean;
+    return `${parseInt(d, 10)} ${months[idx]}`;
+  } catch {
+    return String(isoDate);
+  }
 }

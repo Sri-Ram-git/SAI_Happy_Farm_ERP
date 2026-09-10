@@ -9,6 +9,8 @@ import { getAllUsers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils';
 import { useDailyReportsByDate } from '../../hooks/useDailyReports';
 
+import { ExportReportsCard } from '../../components/dashboard/ExportReportsCard';
+
 export function AdminSubmissionsPage() {
   const { userProfile } = useAuth();
   const [date, setDate] = useState(getIstDate());
@@ -52,6 +54,7 @@ export function AdminSubmissionsPage() {
     <DashboardLayout role="admin" userName={userProfile?.name}>
       <div className="mgmt-page">
         {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
+        <ExportReportsCard />
         <div className="mgmt-page-header">
           <h2>Submissions - {formatDisplayDate(date)}</h2>
           <div className="header-controls">

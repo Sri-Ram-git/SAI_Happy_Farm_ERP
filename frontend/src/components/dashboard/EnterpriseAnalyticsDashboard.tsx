@@ -10,6 +10,7 @@ import { type UserDoc, subscribeToAllUsers } from '../../services/userDataServic
 import { type BirdInventory, subscribeToAllBirdInventories } from '../../services/inventoryService';
 import { type FlockDoc, subscribeToAllFlocks } from '../../services/flockDataService';
 import { DashboardMetricDetailModal } from './DashboardMetricDetailModal';
+import { ExportReportsCard } from './ExportReportsCard';
 import { type ChartType } from './ChartDataTable';
 import { useAllDailyReports, useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { getIstDate, getDaysAgo, generateDateArray, getShortDate, formatDisplayDate, formatTime } from '../../utils/dateUtils';
@@ -496,15 +497,14 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           <p className="welcome-subtitle">Real-time farm operations and performance analytics</p>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="mgmt-header-actions">
           <select
-            className="form-input form-input--sm"
+            className="form-input form-input--sm mgmt-filter-select"
             value={selectedFarmId}
             onChange={(e) => {
               setSelectedFarmId(e.target.value);
               setSelectedFlockId('');
             }}
-            style={{ width: '150px' }}
           >
             <option value="">All Farms ({farms.length})</option>
             {farms.map((f) => (
@@ -513,10 +513,9 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           </select>
 
           <select
-            className="form-input form-input--sm"
+            className="form-input form-input--sm mgmt-filter-select"
             value={selectedFlockId}
             onChange={(e) => setSelectedFlockId(e.target.value)}
-            style={{ width: '150px' }}
           >
             <option value="">All Flocks ({flocks.length})</option>
             {flocks
@@ -529,6 +528,9 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           <DateFilter days={days} onChange={setDays} />
         </div>
       </div>
+
+      {/* EXPORT DAILY REPORTS CARD FOR ADMIN ONLY */}
+      {role === 'admin' && <ExportReportsCard />}
 
       {/* LEVEL 1: EXECUTIVE KPI SUMMARY GRID */}
       {(variant === 'overview' || variant === 'full') && (

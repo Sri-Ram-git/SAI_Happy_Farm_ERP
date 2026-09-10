@@ -83,69 +83,61 @@ export function AdminFlocksPage() {
   return (
     <>
       <DashboardLayout role="admin" userName={userProfile?.name}>
-        <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="mgmt-page-header">
           <div>
-            <h1>{t('admin.flockManagement')}</h1>
-            <p style={{ color: 'var(--text-secondary)' }}>{t('admin.allFlocks')}</p>
+            <h2>{t('admin.flockManagement')}</h2>
+            <p className="welcome-subtitle">{t('admin.allFlocks')}</p>
           </div>
-          <div style={{ display: 'flex', gap: '1rem' }}>
+          <div className="header-controls">
             <LanguageSelector />
-            <button className="btn btn-primary" onClick={() => setIsCreateModalOpen(true)}>
+            <button className="btn btn--primary" onClick={() => setIsCreateModalOpen(true)}>
               {t('admin.createFlock')}
             </button>
           </div>
         </div>
 
-        <div className="table-card">
+        <div className="table-card table-responsive">
           {flocks.length === 0 ? (
             <div className="empty-state">{t('admin.noFlocksFound')}</div>
           ) : (
-            <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table className="data-table">
               <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid #eee' }}>
-                  <th style={{ padding: '1rem' }}>{t('flock.flockName')}</th>
-                  <th style={{ padding: '1rem' }}>{t('flock.farm')}</th>
-                  <th style={{ padding: '1rem' }}>{t('flock.initialBirds')}</th>
-                  <th style={{ padding: '1rem' }}>{t('flock.currentBirds')}</th>
-                  <th style={{ padding: '1rem' }}>{t('flock.startDate')} (Age)</th>
-                  <th style={{ padding: '1rem' }}>{t('flock.breedType')} / Curve</th>
-                  <th style={{ padding: '1rem' }}>{t('admin.status')}</th>
-                  <th style={{ padding: '1rem' }}>{t('admin.actions')}</th>
+                <tr>
+                  <th>{t('flock.flockName')}</th>
+                  <th>{t('flock.farm')}</th>
+                  <th>{t('flock.initialBirds')}</th>
+                  <th>{t('flock.currentBirds')}</th>
+                  <th>{t('flock.startDate')} (Age)</th>
+                  <th>{t('flock.breedType')} / Curve</th>
+                  <th>{t('admin.status')}</th>
+                  <th>{t('admin.actions')}</th>
                 </tr>
               </thead>
               <tbody>
                 {flocks.map(flock => (
-                  <tr key={flock.flockId} style={{ borderBottom: '1px solid #f5f5f5' }}>
-                    <td style={{ padding: '1rem', fontWeight: 500 }}>{flock.flockName}</td>
-                    <td style={{ padding: '1rem' }}>{getFarmName(flock.farmId)}</td>
-                    <td style={{ padding: '1rem' }}>{flock.initialBirds.toLocaleString()}</td>
-                    <td style={{ padding: '1rem' }}>{flock.currentBirds.toLocaleString()}</td>
-                    <td style={{ padding: '1rem' }}>
+                  <tr key={flock.flockId}>
+                    <td className="td-bold">{flock.flockName}</td>
+                    <td>{getFarmName(flock.farmId)}</td>
+                    <td>{flock.initialBirds.toLocaleString()}</td>
+                    <td>{flock.currentBirds.toLocaleString()}</td>
+                    <td>
                       {flock.startDate}
                       <br/>
                       <small style={{ color: '#888' }}>{flock.currentAgeWeeks} {t('flock.ageWeeks')}</small>
                     </td>
-                    <td style={{ padding: '1rem' }}>
+                    <td>
                       {flock.breedType}
                       <br/>
                       <small style={{ color: '#1976d2' }}>{flock.productionCurve}</small>
                     </td>
-                    <td style={{ padding: '1rem' }}>
-                      <span style={{ 
-                        display: 'inline-block', 
-                        padding: '0.25rem 0.5rem', 
-                        borderRadius: '4px',
-                        fontSize: '0.85rem',
-                        background: flock.status === 'active' ? '#e8f5e9' : '#eceff1',
-                        color: flock.status === 'active' ? '#2e7d32' : '#546e7a'
-                      }}>
+                    <td>
+                      <span className={`status-badge ${flock.status === 'active' ? 'status-badge--ok' : 'status-badge--warn'}`}>
                         {flock.status === 'active' ? t('flock.active') : t('flock.completed')}
                       </span>
                     </td>
-                    <td style={{ padding: '1rem' }}>
+                    <td>
                       <button 
-                        className="btn btn-secondary" 
-                        style={{ padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
+                        className="btn btn--sm" 
                         onClick={() => toggleFlockStatus(flock.flockId, flock.status)}
                       >
                         {flock.status === 'active' ? t('admin.deactivate') : t('admin.activate')}
@@ -160,8 +152,8 @@ export function AdminFlocksPage() {
 
         {/* Create Flock Modal */}
         {isCreateModalOpen && (
-          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-            <div style={{ background: '#fff', borderRadius: '12px', padding: '2rem', width: '90%', maxWidth: '500px', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div className="chart-modal-backdrop" onClick={() => setIsCreateModalOpen(false)}>
+            <div className="chart-modal-dialog" onClick={(e) => e.stopPropagation()} style={{ padding: '1.5rem', maxWidth: '500px' }}>
               <h2>{t('flock.create')}</h2>
               
               {error && <div className="alert alert-error" style={{ marginBottom: '1rem', color: '#d32f2f', background: '#ffebee', padding: '0.75rem', borderRadius: '4px' }}>{error}</div>}
