@@ -33,6 +33,10 @@ export function initializeFirebase(): admin.app.App {
     credentialObj = require(serviceAccountPath);
   }
 
+  if (credentialObj && typeof credentialObj.private_key === 'string') {
+    credentialObj.private_key = credentialObj.private_key.replace(/\\n/g, '\n');
+  }
+
   firebaseApp = admin.initializeApp({
     credential: admin.credential.cert(credentialObj),
     projectId: env.FIREBASE_PROJECT_ID,
