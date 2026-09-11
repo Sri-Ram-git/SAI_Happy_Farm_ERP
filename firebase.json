@@ -1,0 +1,24 @@
+{
+  "hosting": {
+    "public": "frontend/dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**",
+      "src/**",
+      ".env",
+      ".env.*",
+      "service-account.json",
+      "firestore.rules",
+      "docs/**",
+      "agent-memory/**",
+      "scripts/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
