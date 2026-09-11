@@ -121,6 +121,9 @@ export interface SubmitReportInput {
   ammoniaPpm: number;
   submittedBy: string;
   weekNumber?: number;
+  submissionDate?: string;
+  reportDate?: string;
+  submissionKey?: string;
 }
 
 function hasDataChanged(input: SubmitReportInput, existing: any): boolean {
@@ -168,10 +171,10 @@ export function subscribeToTodayReport(
 export async function submitReport(input: SubmitReportInput): Promise<{ reportId: string; version: number; isOffline?: boolean }> {
   const db = f.firestore();
   const userId = input.submittedBy;
-  const submissionDate = getIstDate();
+  const submissionDate = input.submissionDate || input.reportDate || getIstDate();
   const now = new Date().toISOString();
 
-  const submissionKey = `sub_${userId}_${input.farmId}_${submissionDate}`;
+  const submissionKey = input.submissionKey || `sub_${userId}_${input.farmId}_${submissionDate}`;
 
   // If browser is explicitly offline, save to pending queue immediately
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -180,7 +183,7 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
       userId,
       farmId: input.farmId,
       reportDate: submissionDate,
-      payload: input,
+      payload: { ...input, submissionDate, reportDate: submissionDate, submissionKey },
       createdAt: Date.now(),
       status: 'PENDING_SYNC',
     });
@@ -494,25 +497,54 @@ import {
   clearFarmerDraft,
 } from './offlineDraftService';
 
-export async function syncPendingSubmissions(userId: string): Promise<number> {
-  const pendingList = await getPendingSubmissions(userId);
-  if (!pendingList || pendingList.length === 0) return 0;
+let isSyncingPending = false;
 
-  let syncedCount = 0;
-  for (const item of pendingList) {
-    try {
-      const res = await submitReport(item.payload);
-      if (!res.isOffline) {
-        await removePendingSubmission(item.submissionKey);
-        await clearFarmerDraft(item.userId, item.farmId, item.reportDate);
-        syncedCount++;
-      }
-    } catch (err: any) {
-      console.warn('[reportService] syncPendingSubmissions item error:', err);
-      if (err.message === 'CORRECTION_LIMIT_REACHED' || err.message === 'USER_NOT_AUTHORIZED') {
-        await removePendingSubmission(item.submissionKey);
+export async function syncPendingSubmissions(userId: string): Promise<number> {
+  if (isSyncingPending) return 0;
+  isSyncingPending = true;
+
+  try {
+    const pendingList = await getPendingSubmissions(userId);
+    if (!pendingList || pendingList.length === 0) return 0;
+
+    let syncedCount = 0;
+    for (const item of pendingList) {
+      const targetDate: string = item.reportDate || item.payload.submissionDate || item.payload.reportDate || getIstDate();
+      const targetKey = item.submissionKey || `sub_${item.userId}_${item.farmId}_${targetDate}`;
+
+      const payloadWithMeta: SubmitReportInput = {
+        ...item.payload,
+        submissionDate: targetDate,
+        reportDate: targetDate,
+        submissionKey: targetKey,
+      };
+
+      try {
+        const res = await submitReport(payloadWithMeta);
+        if (!res.isOffline) {
+          await removePendingSubmission(targetKey);
+          await clearFarmerDraft(item.userId, item.farmId, targetDate);
+          syncedCount++;
+        }
+      } catch (err: any) {
+        console.warn('[reportService] syncPendingSubmissions item error:', err);
+        const nonRetryableErrors = [
+          'NO_CHANGES_DETECTED',
+          'CORRECTION_LIMIT_REACHED',
+          'USER_NOT_AUTHORIZED',
+          'USER_NOT_FOUND',
+          'FARM_NOT_ASSIGNED',
+          'INVENTORY_NOT_INITIALIZED',
+          'FARM_NOT_FOUND',
+        ];
+        if (nonRetryableErrors.includes(err.message)) {
+          await removePendingSubmission(targetKey);
+          await clearFarmerDraft(item.userId, item.farmId, targetDate);
+        }
       }
     }
+    return syncedCount;
+  } finally {
+    isSyncingPending = false;
   }
-  return syncedCount;
 }

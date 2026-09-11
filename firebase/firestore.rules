@@ -1,0 +1,126 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return getUserDoc().data;
+    }
+
+    function isUserActive() {
+      return isAuthenticated() && getUserData().active == true;
+    }
+
+    function hasRole(role) {
+      return isUserActive() && getUserData().role == role;
+    }
+
+    function isAdmin() {
+      return hasRole('admin');
+    }
+
+    function isSupervisor() {
+      return hasRole('supervisor') || isAdmin();
+    }
+
+    function hasFarmAccess(farmId) {
+      return isAdmin() || (isUserActive() && (farmId in getUserData().farmIds));
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isSupervisor());
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'farmIds', 'active']));
+    }
+
+    // Farms Collection
+    match /farms/{farmId} {
+      allow read: if isAuthenticated() && isUserActive();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (isUserActive() && hasFarmAccess(farmId));
+
+      // Subcollections: feedTransactions, birdTransactions
+      match /feedTransactions/{txId} {
+        allow read: if isAuthenticated() && hasFarmAccess(farmId);
+        allow create: if isAuthenticated() && hasFarmAccess(farmId);
+        allow update, delete: if isAdmin();
+      }
+
+      match /birdTransactions/{txId} {
+        allow read: if isAuthenticated() && hasFarmAccess(farmId);
+        allow create: if isAuthenticated() && hasFarmAccess(farmId);
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // Flocks Collection
+    match /flocks/{flockId} {
+      allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId);
+      allow create, delete: if isAdmin();
+      allow update: if isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId);
+    }
+
+// Daily Reports (Root Collection & Subcollections)
+    match /dailyReports/{reportOrUserId} {
+      allow read: if isAuthenticated() && isUserActive() && (
+        isOwner(reportOrUserId) ||
+        isAdmin() ||
+        (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+      );
+      allow create, update: if isAuthenticated() && isUserActive() && (
+        isAdmin() ||
+        hasFarmAccess(request.resource.data.farmId)
+      );
+      allow delete: if isAdmin();
+
+      // Subcollection: dailyLogs
+      match /dailyLogs/{logDate} {
+        allow read: if isAuthenticated() && isUserActive() && (
+          isOwner(reportOrUserId) ||
+          isAdmin() ||
+          (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+        );
+        allow create, update: if isAuthenticated() && isUserActive() && (
+          isAdmin() ||
+          hasFarmAccess(request.resource.data.farmId)
+        );
+        allow delete: if isAdmin();
+      }
+    }
+
+    // Collection Group Queries for dailyLogs
+    match /{path=**}/dailyLogs/{logDoc} {
+      allow read: if isAuthenticated() && isUserActive() && (
+        isAdmin() ||
+        (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+      );
+    }
+
+    // Daily Report Locks (Duplicate Prevention)
+    match /dailyReportLocks/{lockId} {
+      allow read: if isAuthenticated() && isUserActive();
+      allow create, update: if isAuthenticated() && isUserActive() && (isAdmin() || hasFarmAccess(request.resource.data.farmId));
+      allow delete: if isAuthenticated() && isUserActive() && (isAdmin() || hasFarmAccess(resource.data.farmId));
+    }
+
+    // Audit Logs
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+  }
+}

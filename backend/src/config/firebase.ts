@@ -11,11 +11,30 @@ export function initializeFirebase(): admin.app.App {
 
   const env = getEnv();
 
-  const serviceAccountPath = path.resolve(process.cwd(), env.FIREBASE_SERVICE_ACCOUNT_PATH);
-  const serviceAccount = require(serviceAccountPath);
+  let credentialObj: any = null;
+
+  if (process.env['FIREBASE_SERVICE_ACCOUNT_JSON']) {
+    try {
+      credentialObj = JSON.parse(process.env['FIREBASE_SERVICE_ACCOUNT_JSON']);
+    } catch {
+      credentialObj = null;
+    }
+  } else if (process.env['FIREBASE_SERVICE_ACCOUNT_BASE64']) {
+    try {
+      const decoded = Buffer.from(process.env['FIREBASE_SERVICE_ACCOUNT_BASE64'], 'base64').toString('utf8');
+      credentialObj = JSON.parse(decoded);
+    } catch {
+      credentialObj = null;
+    }
+  }
+
+  if (!credentialObj) {
+    const serviceAccountPath = path.resolve(process.cwd(), env.FIREBASE_SERVICE_ACCOUNT_PATH);
+    credentialObj = require(serviceAccountPath);
+  }
 
   firebaseApp = admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+    credential: admin.credential.cert(credentialObj),
     projectId: env.FIREBASE_PROJECT_ID,
   });
 

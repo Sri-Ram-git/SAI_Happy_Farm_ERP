@@ -252,6 +252,9 @@ export function FarmerFormPage() {
           if (typeof draft.step === 'number' && draft.step < 3) {
             setStep(draft.step);
           }
+        } else {
+          // Report for today is already submitted; clean up any lingering local draft
+          await clearFarmerDraft(userProfile!.uid, farmId, reportDate);
         }
       }
     }
@@ -414,6 +417,7 @@ export function FarmerFormPage() {
   };
 
   const handleSubmit = async () => {
+    if (submitting || submitted) return;
     setSubmitting(true);
     setSubmitError('');
     try {
@@ -453,6 +457,9 @@ export function FarmerFormPage() {
         ammoniaPpm: Number(data.ammoniaPpm) || 0,
         submittedBy: userProfile!.uid,
         weekNumber,
+        submissionDate: reportDate,
+        reportDate: reportDate,
+        submissionKey: `sub_${userProfile!.uid}_${farmId}_${reportDate}`,
       };
 
       for (const [key, val] of Object.entries(payload)) {
