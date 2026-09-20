@@ -1,8 +1,7 @@
 import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
 import { getUserProfile, type UserProfile } from '../services/userService';
 import { normalizeRole } from '../utils/normalizeRole';
-
-const f = (window as any).firebase;
+import { getFirebaseAuth } from '../config/firebase';
 
 interface AuthContextValue {
   firebaseUser: any;
@@ -38,7 +37,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     mountedRef.current = true;
 
-    const unsubscribe = f.auth().onAuthStateChanged(async (user: any) => {
+    const authInstance = getFirebaseAuth();
+    if (!authInstance) {
+      console.warn('[AuthContext] Firebase Auth not available yet. Retrying initialization...');
+      setLoading(false);
+      return;
+    }
+
+    const safeSignOut = async () => {
+      const a = getFirebaseAuth();
+      if (a && typeof a.signOut === 'function') {
+        try { await a.signOut(); } catch {}
+      }
+    };
+
+    const unsubscribe = authInstance.onAuthStateChanged(async (user: any) => {
       if (!mountedRef.current) return;
 
       if (!user) {
@@ -57,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!mountedRef.current) return;
 
         if (!profile) {
-          await f.auth().signOut();
+          await safeSignOut();
           setFirebaseUser(null);
           setUserProfile(null);
           setAuthError('User profile not found. Please contact the administrator.');
@@ -66,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (profile.active !== true) {
-          await f.auth().signOut();
+          await safeSignOut();
           setFirebaseUser(null);
           setUserProfile(null);
           setAuthError('Account is disabled. Please contact the administrator.');
@@ -75,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (!profile.role) {
-          await f.auth().signOut();
+          await safeSignOut();
           setFirebaseUser(null);
           setUserProfile(null);
           setAuthError('User role is not configured.');
@@ -86,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const normalizedRole = normalizeRole(profile.role);
 
         if (!normalizedRole) {
-          await f.auth().signOut();
+          await safeSignOut();
           setFirebaseUser(null);
           setUserProfile(null);
           setAuthError('User role is not configured.');
@@ -95,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         if (normalizedRole === 'farmer' && profile.farmIds.length === 0) {
-          await f.auth().signOut();
+          await safeSignOut();
           setFirebaseUser(null);
           setUserProfile(null);
           setAuthError('No farm access assigned to this account.');
@@ -109,7 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (err: any) {
         console.error('[Auth] Profile fetch error:', err.code, err.message);
         if (!mountedRef.current) return;
-        await f.auth().signOut();
+        await safeSignOut();
         setFirebaseUser(null);
         setUserProfile(null);
         setAuthError('Failed to load profile. Please try again.');
@@ -119,7 +132,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     return () => {
       mountedRef.current = false;
-      unsubscribe();
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
     };
   }, []);
 

@@ -1,4 +1,4 @@
-const f = (window as any).firebase;
+import { db } from '../config/firebase';
 
 export interface BirdInventory {
   initialBirdCount: number;
@@ -33,7 +33,6 @@ export interface FeedTransaction {
 }
 
 export async function getBirdInventory(farmId: string): Promise<BirdInventory | null> {
-  const db = f.firestore();
   const snap = await db.collection('farms').doc(farmId).get();
   if (!snap.exists) return null;
   const data = snap.data();
@@ -47,7 +46,6 @@ export async function getBirdInventory(farmId: string): Promise<BirdInventory | 
 }
 
 export async function getFeedInventory(farmId: string): Promise<FeedInventory | null> {
-  const db = f.firestore();
   const snap = await db.collection('farms').doc(farmId).get();
   if (!snap.exists) return null;
   const data = snap.data();
@@ -65,7 +63,6 @@ export async function initializeFarmInventory(
   initialBirdCount: number,
   initialFeedKg: number
 ): Promise<void> {
-  const db = f.firestore();
   const now = new Date().toISOString();
   await db.collection('farms').doc(farmId).set({
     initialBirdCount,
@@ -86,7 +83,6 @@ export async function updateBirdInventory(
   newCurrentBirdCount: number,
   reportDate: string,
 ): Promise<void> {
-  const db = f.firestore();
   const now = new Date().toISOString();
   await db.collection('farms').doc(farmId).set({
     currentBirdCount: newCurrentBirdCount,
@@ -101,7 +97,6 @@ export async function updateFeedInventory(
   newFeedStockKg: number,
   reportDate: string,
 ): Promise<void> {
-  const db = f.firestore();
   const now = new Date().toISOString();
   await db.collection('farms').doc(farmId).set({
     currentFeedKg: newFeedStockKg,
@@ -117,7 +112,6 @@ export async function addFeedLoad(
   loadedBy: string,
   notes: string = '',
 ): Promise<void> {
-  const db = f.firestore();
   const now = new Date().toISOString();
   const reportDate = getIstDate();
 
@@ -171,7 +165,6 @@ export function subscribeToAllBirdInventories(
   farmIds: string[],
   callback: (inventories: Map<string, BirdInventory>) => void,
 ): () => void {
-  const db = f.firestore();
   const unsubscribes: (() => void)[] = [];
   const results = new Map<string, BirdInventory>();
 

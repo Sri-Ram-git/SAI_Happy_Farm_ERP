@@ -1,4 +1,4 @@
-const f = (window as any).firebase;
+import { db } from '../config/firebase';
 
 export function getIstDate(): string {
   const now = new Date();
@@ -151,7 +151,6 @@ export function subscribeToTodayReport(
   submissionDate: string,
   callback: (report: any | null) => void,
 ): () => void {
-  const db = f.firestore();
   const dailyLogRef = db.collection('dailyReports').doc(userId).collection('dailyLogs').doc(submissionDate);
   return dailyLogRef.onSnapshot(
     (doc: any) => {
@@ -169,7 +168,6 @@ export function subscribeToTodayReport(
 }
 
 export async function submitReport(input: SubmitReportInput): Promise<{ reportId: string; version: number; isOffline?: boolean }> {
-  const db = f.firestore();
   const userId = input.submittedBy;
   const submissionDate = input.submissionDate || input.reportDate || getIstDate();
   const now = new Date().toISOString();

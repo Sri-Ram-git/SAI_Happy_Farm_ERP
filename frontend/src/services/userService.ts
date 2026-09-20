@@ -1,4 +1,4 @@
-const f = (window as any).firebase;
+import { db } from '../config/firebase';
 
 export interface UserProfile {
   uid: string;
@@ -12,7 +12,7 @@ export interface UserProfile {
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   console.log('[UserProfile] LOOKING FOR DOCUMENT: users/' + uid);
   try {
-    const snap = await f.firestore().collection('users').doc(uid).get();
+    const snap = await db.collection('users').doc(uid).get();
     console.log('[UserProfile] DOCUMENT EXISTS:', snap.exists);
     if (!snap.exists) return null;
 

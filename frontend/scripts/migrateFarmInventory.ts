@@ -1,5 +1,3 @@
-import { getFirestore, collection, getDocs, doc, writeBatch } from 'firebase/firestore';
-
 /**
  * Migration Script: Upgrades old `farms` documents to the new Master Inventory schema.
  * 
@@ -7,24 +5,46 @@ import { getFirestore, collection, getDocs, doc, writeBatch } from 'firebase/fir
  * - Never deletes data.
  * - Never overwrites initialized inventory.
  * - Supports DRY_RUN mode.
+ * 
+ * Usage in Browser Console (with frontend Firebase compat SDK):
+ *   import { migrateFarmInventory } from '../scripts/migrateFarmInventory';
+ *   migrateFarmInventory((window as any).firebase.firestore(), false);
  */
+
+export interface FarmDocSnapshot {
+  id: string;
+  data: () => Record<string, any>;
+  ref: any;
+}
+
 export async function migrateFarmInventory(db: any, dryRun: boolean = true): Promise<void> {
   console.log(`\n=== FARM INVENTORY MIGRATION STARTED [DRY_RUN=${dryRun}] ===`);
   
-  const farmsRef = collection(db, 'farms');
-  const snapshot = await getDocs(farmsRef);
+  if (!db) {
+    console.error('Firestore database instance (db) is required.');
+    return;
+  }
+
+  // Support Firebase compat SDK (db.collection) as well as modular SDK if provided
+  let snapshot: any;
+  if (typeof db.collection === 'function') {
+    snapshot = await db.collection('farms').get();
+  } else {
+    console.error('Unsupported Firestore instance format. Please pass window.firebase.firestore().');
+    return;
+  }
   
-  if (snapshot.empty) {
+  if (!snapshot || snapshot.empty) {
     console.log('No farms found to migrate.');
     return;
   }
 
-  const batch = writeBatch(db);
+  const batch = typeof db.batch === 'function' ? db.batch() : null;
   let migratedCount = 0;
   let skippedCount = 0;
   const now = new Date().toISOString();
 
-  snapshot.docs.forEach((farmDoc) => {
+  snapshot.docs.forEach((farmDoc: FarmDocSnapshot) => {
     const data = farmDoc.data();
     
     // Check if already initialized in the new schema
@@ -45,7 +65,7 @@ export async function migrateFarmInventory(db: any, dryRun: boolean = true): Pro
       
       initialFeedKg: legacyFeedKg,
       currentFeedKg: legacyFeedKg,
-      totalFeedLoadedKg: legacyFeedKg + legacyTotalFeedConsumed, // educated guess for history
+      totalFeedLoadedKg: legacyFeedKg + legacyTotalFeedConsumed,
       totalFeedConsumedKg: legacyTotalFeedConsumed,
       
       inventoryInitialized: true,
@@ -56,13 +76,13 @@ export async function migrateFarmInventory(db: any, dryRun: boolean = true): Pro
 
     console.log(`[MIGRATE] Farm ${farmDoc.id} (${data.name}) will be upgraded:`, upgradeData);
     
-    if (!dryRun) {
+    if (!dryRun && batch) {
       batch.set(farmDoc.ref, upgradeData, { merge: true });
     }
     migratedCount++;
   });
 
-  if (!dryRun && migratedCount > 0) {
+  if (!dryRun && migratedCount > 0 && batch) {
     await batch.commit();
     console.log(`\n=== SUCCESS: Committed migration for ${migratedCount} farms ===`);
   } else {

@@ -2,8 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getUserByUid } from '../../services/userDataService';
 import { normalizeRole } from '../../utils/normalizeRole';
-
-const f = (window as any).firebase;
+import { auth } from '../../config/firebase';
 
 export function ManagementLoginPage() {
   const [activeTab, setActiveTab] = useState<'supervisor' | 'admin'>('supervisor');
@@ -20,7 +19,7 @@ export function ManagementLoginPage() {
     setLoading(true);
 
     try {
-      const result = await f.auth().signInWithEmailAndPassword(email, password);
+      const result = await auth.signInWithEmailAndPassword(email, password);
       const uid = result.user.uid;
 
       let profile;
@@ -28,21 +27,21 @@ export function ManagementLoginPage() {
         profile = await getUserByUid(uid);
       } catch (fsErr: any) {
         console.error('[ManagementLogin] Firestore read error:', fsErr);
-        await f.auth().signOut();
+        await auth.signOut();
         setError('Could not load your profile. Please try again.');
         setLoading(false);
         return;
       }
 
       if (!profile) {
-        await f.auth().signOut();
+        await auth.signOut();
         setError('No profile found for this account. Contact the administrator.');
         setLoading(false);
         return;
       }
 
       if (!profile.active) {
-        await f.auth().signOut();
+        await auth.signOut();
         setError('This account is disabled. Contact the administrator.');
         setLoading(false);
         return;
@@ -51,7 +50,7 @@ export function ManagementLoginPage() {
       const normalizedRole = normalizeRole(profile.role);
 
       if (normalizedRole === 'farmer') {
-        await f.auth().signOut();
+        await auth.signOut();
         setError('Farmers must use the Farmer Login portal.');
         setLoading(false);
         return;
@@ -59,7 +58,7 @@ export function ManagementLoginPage() {
 
       const expectedRole = activeTab;
       if (normalizedRole !== expectedRole) {
-        await f.auth().signOut();
+        await auth.signOut();
         const friendly = expectedRole === 'supervisor' ? 'Supervisor' : 'Administrator';
         setError(`This account is not a ${friendly}.`);
         setLoading(false);
@@ -85,7 +84,7 @@ export function ManagementLoginPage() {
 
   const handleQuickLogout = async () => {
     try {
-      await f.auth().signOut();
+      await auth.signOut();
     } catch (_) {}
     window.location.reload();
   };

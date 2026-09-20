@@ -1,6 +1,5 @@
 import { normalizeReport, type NormalizedReport } from '../utils/normalizeDailyReport';
-
-const f = (window as any).firebase;
+import { db } from '../config/firebase';
 
 export type ReportDoc = NormalizedReport;
 
@@ -34,7 +33,6 @@ async function fetchNewFormatReports(
   endDate: string,
   farmIds?: string[],
 ): Promise<NormalizedReport[]> {
-  const db = f.firestore();
   try {
     const snap = await db.collectionGroup('dailyLogs').get();
     let reports: NormalizedReport[] = [];
@@ -80,7 +78,6 @@ export function subscribeToAllDailyReports(
   callback: (reports: NormalizedReport[]) => void,
   onError?: (error: Error) => void,
 ): () => void {
-  const db = f.firestore();
   const allReports = new Map<string, NormalizedReport>();
 
   const emit = () => {

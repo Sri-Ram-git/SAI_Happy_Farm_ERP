@@ -1,4 +1,4 @@
-const f = (window as any).firebase;
+import { db } from '../config/firebase';
 
 export interface FlockDoc {
   flockId: string;
@@ -19,14 +19,12 @@ export interface FlockDoc {
 }
 
 export async function getFlockById(flockId: string): Promise<FlockDoc | null> {
-  const db = f.firestore();
   const doc = await db.collection('flocks').doc(flockId).get();
   if (!doc.exists) return null;
   return { flockId: doc.id, ...doc.data() } as FlockDoc;
 }
 
 export async function getFlocksByFarmId(farmId: string): Promise<FlockDoc[]> {
-  const db = f.firestore();
   const snap = await db.collection('flocks')
     .where('farmId', '==', farmId)
     .where('status', '==', 'active')
@@ -38,7 +36,6 @@ export function subscribeToFlocksByFarm(
   farmId: string,
   callback: (flocks: FlockDoc[]) => void,
 ): () => void {
-  const db = f.firestore();
   return db.collection('flocks')
     .where('farmId', '==', farmId)
     .where('status', '==', 'active')
@@ -57,7 +54,6 @@ export function subscribeToFlocksByFarm(
 }
 
 export function subscribeToAllFlocks(callback: (flocks: FlockDoc[]) => void): () => void {
-  const db = f.firestore();
   return db.collection('flocks').onSnapshot(
     (snap: any) => {
       const flocks = snap.docs.map((doc: any) => ({
@@ -80,7 +76,6 @@ export async function createFlock(data: {
   breedType: string;
   productionCurve: 'CF_STD' | 'FR_STD';
 }): Promise<string> {
-  const db = f.firestore();
   const now = new Date().toISOString();
   const startMs = new Date(data.startDate + 'T00:00:00+05:30').getTime();
   const nowMs = Date.now();
@@ -106,7 +101,6 @@ export async function createFlock(data: {
 }
 
 export async function updateFlock(flockId: string, updates: Partial<FlockDoc>): Promise<void> {
-  const db = f.firestore();
   const now = new Date().toISOString();
   await db.collection('flocks').doc(flockId).update({
     ...updates,

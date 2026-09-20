@@ -1,4 +1,4 @@
-const f = (window as any).firebase;
+import { auth, db } from '../config/firebase';
 
 export interface UserDoc {
   uid: string;
@@ -11,7 +11,6 @@ export interface UserDoc {
 }
 
 export async function getUserByUid(uid: string): Promise<UserDoc | null> {
-  const db = f.firestore();
   const doc = await db.collection('users').doc(uid).get();
   if (!doc.exists) return null;
   const data = doc.data();
@@ -27,7 +26,6 @@ export async function getUserByUid(uid: string): Promise<UserDoc | null> {
 }
 
 export async function getAllUsers(): Promise<UserDoc[]> {
-  const db = f.firestore();
   const snap = await db.collection('users').get();
   return snap.docs.map((doc: any) => {
     const data = doc.data();
@@ -44,7 +42,6 @@ export async function getAllUsers(): Promise<UserDoc[]> {
 }
 
 export async function getUsersByRole(role: string): Promise<UserDoc[]> {
-  const db = f.firestore();
   const snap = await db.collection('users').where('role', '==', role).get();
   return snap.docs.map((doc: any) => {
     const data = doc.data();
@@ -61,7 +58,6 @@ export async function getUsersByRole(role: string): Promise<UserDoc[]> {
 }
 
 export async function getActiveFarmers(): Promise<UserDoc[]> {
-  const db = f.firestore();
   const snap = await db.collection('users').where('role', '==', 'farmer').where('active', '==', true).get();
   return snap.docs.map((doc: any) => {
     const data = doc.data();
@@ -78,11 +74,11 @@ export async function getActiveFarmers(): Promise<UserDoc[]> {
 }
 
 export async function updateUserStatus(uid: string, active: boolean): Promise<void> {
-  const user = f.auth().currentUser;
+  const user = auth.currentUser;
   if (user) {
     try {
       const idToken = await user.getIdToken();
-      const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
       const response = await fetch(`${backendUrl}/api/v1/admin/users/${uid}/status`, {
         method: 'PATCH',
         headers: {
@@ -99,12 +95,10 @@ export async function updateUserStatus(uid: string, active: boolean): Promise<vo
       console.warn('[userDataService] Backend updateUserStatus failed, falling back to direct Firestore update:', err.message || err);
     }
   }
-  const db = f.firestore();
   await db.collection('users').doc(uid).update({ active, updatedAt: new Date().toISOString() });
 }
 
 export function subscribeToAllUsers(callback: (users: UserDoc[]) => void): () => void {
-  const db = f.firestore();
   return db.collection('users').onSnapshot(
     (snap: any) => {
       const users = snap.docs.map((doc: any) => {
@@ -144,12 +138,12 @@ export interface CreateFarmerResult {
 }
 
 export async function createFarmer(payload: CreateFarmerPayload): Promise<CreateFarmerResult> {
-  const user = f.auth().currentUser;
+  const user = auth.currentUser;
   if (!user) throw new Error('Not authenticated');
 
   const idToken = await user.getIdToken();
 
-  const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
 
   const response = await fetch(`${backendUrl}/api/v1/admin/users/farmer`, {
     method: 'POST',
