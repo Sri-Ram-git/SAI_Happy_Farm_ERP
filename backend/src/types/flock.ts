@@ -12,11 +12,19 @@ export interface Flock {
   breedType: string;
   productionCurve: 'CF_STD' | 'FR_STD';
   status: 'active' | 'completed';
+  batchNumber?: number;
+  isInitialFlock?: boolean;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export type CreateFlockDTO = Pick<
-  Flock,
-  'farmId' | 'flockName' | 'initialBirds' | 'startDate' | 'breedType' | 'productionCurve'
->;
+export type CreateFlockDTO = {
+  farmId: string;
+  flockName?: string;
+  initialBirds?: number;
+  startDate: string;
+  breedType?: string;
+  productionCurve?: 'CF_STD' | 'FR_STD';
+  notes?: string;
+};

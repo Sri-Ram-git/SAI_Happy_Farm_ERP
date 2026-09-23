@@ -64,3 +64,39 @@ export async function getReportById(
     next(error);
   }
 }
+
+export async function exportProductionCurveReport(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    const startDate = (req.query['startDate'] as string) || new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().split('T')[0]!;
+    const endDate = (req.query['endDate'] as string) || new Date().toISOString().split('T')[0]!;
+    const requestId = req.requestId!;
+    const user = req.user;
+
+    const farmIdParam = req.query['farmId'] as string | undefined;
+    let targetFarmIds: string[] | undefined = undefined;
+
+    if (farmIdParam) {
+      targetFarmIds = [farmIdParam];
+    } else if (user && user.role !== UserRole.ADMIN && user.role !== UserRole.OFFICE_STAFF) {
+      targetFarmIds = user.farmIds;
+    }
+
+    const { buffer, filename } = await reportsService.generateProductionCurveExport(
+      startDate,
+      endDate,
+      requestId,
+      targetFarmIds,
+    );
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.status(200).send(buffer);
+  } catch (error) {
+    next(error);
+  }
+}
+

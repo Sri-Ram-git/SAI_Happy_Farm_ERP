@@ -15,6 +15,10 @@ import { SupervisorRankingsPage } from './pages/supervisor/SupervisorRankingsPag
 import { SupervisorSubmissionsPage } from './pages/supervisor/SupervisorSubmissionsPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
+import { AdminCreateFarmerPage } from './pages/admin/AdminCreateFarmerPage';
+import { AdminCreateSupervisorPage } from './pages/admin/AdminCreateSupervisorPage';
+import { AdminCreateAdminPage } from './pages/admin/AdminCreateAdminPage';
+import { AdminEditSupervisorPage } from './pages/admin/AdminEditSupervisorPage';
 import { AdminFarmsPage } from './pages/admin/AdminFarmsPage';
 import { AdminFarmDetailPage } from './pages/admin/AdminFarmDetailPage';
 import { AdminAnalyticsPage } from './pages/admin/AdminAnalyticsPage';
@@ -94,6 +98,47 @@ function AppRoutes() {
       <Route path="/admin/users" element={
         <ProtectedManagementRoute allowedRoles={['admin']}>
           <ErrorBoundary><AdminUsersPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/admin/users/create-farmer" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminCreateFarmerPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/users/create-farmer" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminCreateFarmerPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+
+      <Route path="/admin/users/create-supervisor" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminCreateSupervisorPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/users/create-supervisor" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminCreateSupervisorPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/admin/users/create-admin" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminCreateAdminPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/users/create-admin" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminCreateAdminPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/admin/users/edit-supervisor/:userId" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminEditSupervisorPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/users/edit-supervisor/:userId" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminEditSupervisorPage /></ErrorBoundary>
         </ProtectedManagementRoute>
       } />
       <Route path="/admin/farms" element={

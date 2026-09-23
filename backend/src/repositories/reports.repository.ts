@@ -113,4 +113,64 @@ export class ReportsRepository {
 
     return doc.data() as Farm;
   }
+
+  async getDailyReportsByDateRange(
+    startDate: string,
+    endDate: string,
+    farmIds?: string[],
+  ): Promise<any[]> {
+    try {
+      const reports: any[] = [];
+      const farmFilter = farmIds && farmIds.length > 0 ? new Set(farmIds) : null;
+
+      // 1. Fetch from collectionGroup('dailyLogs')
+      try {
+        const snap = await this.db.collectionGroup('dailyLogs').get();
+        snap.docs.forEach((doc) => {
+          const data = doc.data();
+          const dateStr = data['submissionDate'] || data['reportDate'];
+          const fId = data['farmId'];
+          if (dateStr && dateStr >= startDate && dateStr <= endDate) {
+            if (!farmFilter || (fId && farmFilter.has(fId))) {
+              reports.push(data);
+            }
+          }
+        });
+      } catch (e) {
+        logger.warn('Failed querying collectionGroup dailyLogs, falling back to dailyReports', { error: e });
+      }
+
+      // 2. Fetch from top-level dailyReports collection
+      try {
+        const snap = await this.db.collection('dailyReports').get();
+        snap.docs.forEach((doc) => {
+          const data = doc.data();
+          const dateStr = data['submissionDate'] || data['reportDate'];
+          const fId = data['farmId'];
+          if (dateStr && dateStr >= startDate && dateStr <= endDate) {
+            if (!farmFilter || (fId && farmFilter.has(fId))) {
+              reports.push(data);
+            }
+          }
+        });
+      } catch (e) {
+        logger.warn('Failed querying dailyReports collection', { error: e });
+      }
+
+      // Deduplicate by farmId + submissionDate
+      const seen = new Map<string, any>();
+      reports.forEach((r) => {
+        const key = `${r.farmId}_${r.submissionDate || r.reportDate}`;
+        if (!seen.has(key) || (r.submissionVersion || 1) > (seen.get(key).submissionVersion || 1)) {
+          seen.set(key, r);
+        }
+      });
+
+      return Array.from(seen.values());
+    } catch (error) {
+      logger.error('Failed to fetch daily reports by date range', { error });
+      throw new InternalError('Failed to fetch daily reports');
+    }
+  }
 }
+

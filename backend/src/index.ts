@@ -24,13 +24,30 @@ function createApp(): express.Express {
   const app = express();
   app.set('trust proxy', 1);
 
+  const allowedOrigins = env.ALLOWED_ORIGINS.split(',').map((o) => o.trim());
+
   app.use(helmet());
   app.use(cors({
-    origin: env.ALLOWED_ORIGINS.split(','),
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+
+      if (env.NODE_ENV === 'development') {
+        if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+          return callback(null, true);
+        }
+      }
+
+      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        return callback(null, true);
+      }
+
+      return callback(null, false);
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true,
   }));
+
 
   app.use(express.json({ limit: '100kb' }));
 

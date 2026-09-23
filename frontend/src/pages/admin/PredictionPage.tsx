@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../context/AuthContext';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { Sidebar } from '../../components/dashboard/Sidebar';
-import { LanguageSelector } from '../../components/LanguageSelector';
 import { subscribeToAllFlocks, type FlockDoc } from '../../services/flockDataService';
 import { subscribeToAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { generatePredictions, type DailyDataPoint, type PredictionResult } from '../../services/predictionService';
@@ -123,7 +122,6 @@ export function PredictionPage() {
       <DashboardLayout role="admin">
         <div className="page-header">
           <h1>{t('prediction.title')}</h1>
-          <LanguageSelector />
         </div>
 
         <div className="prediction-controls" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>

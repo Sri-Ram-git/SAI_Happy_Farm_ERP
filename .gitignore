@@ -20,6 +20,8 @@ backend/.env.*
 !backend/.env.example
 service-account.json
 backend/service-account.json
+*serviceAccount*.json
+*service-account*.json
 
 # Logs & Coverage
 *.log
@@ -29,3 +31,8 @@ coverage/
 .vscode/
 .idea/
 .DS_Store
+
+# Temporary scratch
+scratch/
+backend/scratch/
+

@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin';
 import { getFirestore, getAuth } from '../config/firebase';
 import { AuditService } from './audit.service';
-import { DuplicateError, NotFoundError } from '../utils/errors';
+import { DuplicateError, NotFoundError, ValidationError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import { CreateFarmerInput } from '../validators/farmer.validator';
 
@@ -67,61 +67,48 @@ export class FarmerService {
     let newFarmId = '';
     try {
       await this.db.runTransaction(async (t) => {
-        // Read all farms to find max suffix and detect pattern dynamically
+        // Read all farms to find max suffix and generate next sequential Farm ID
         const farmsSnapshot = await t.get(this.db.collection('farms'));
         
-        let detectedPrefix: string | null = null;
-        let detectedPadding: number | null = null;
+        let targetPrefix = 'AP';
+        let detectedPadding = 0;
         let maxNumber = 0;
-        let validFarmsCount = 0;
 
         for (const doc of farmsSnapshot.docs) {
-          if (doc.data().name?.toLowerCase() === input.farmName.toLowerCase()) {
+          const farmData = doc.data();
+          if (farmData['name'] && farmData['name'].toLowerCase() === input.farmName.toLowerCase()) {
             throw new DuplicateError('A farm with this name already exists.');
           }
           
           const id = doc.id;
-          const match = id.match(/^(.*?)(\d+)$/);
-          
-          if (!match) {
-            continue; // Skip farms that don't match the sequential pattern
-          }
-          
-          validFarmsCount++;
-          const prefix = match[1] || '';
-          const numStr = match[2] || '';
-          const num = parseInt(numStr, 10);
-          const padding = numStr.startsWith('0') ? numStr.length : 0;
-
-          if (detectedPrefix === null) {
-            detectedPrefix = prefix;
-            detectedPadding = padding;
-          } else if (detectedPrefix !== prefix) {
-            throw new Error(`Ambiguous Farm ID pattern detected. Found conflicting prefixes: '${detectedPrefix}' and '${prefix}'.`);
-          } else if (detectedPadding !== null && detectedPadding !== padding && numStr.startsWith('0')) {
-            detectedPadding = Math.max(detectedPadding, padding);
-          }
-
-          if (num > maxNumber) {
-            maxNumber = num;
+          const match = id.match(/^([A-Za-z_]+)(\d+)$/);
+          if (match) {
+            const prefix = match[1] || 'AP';
+            const numStr = match[2] || '0';
+            const num = parseInt(numStr, 10);
+            
+            if (num > maxNumber) {
+              maxNumber = num;
+              targetPrefix = prefix;
+              if (numStr.startsWith('0')) {
+                detectedPadding = Math.max(detectedPadding, numStr.length);
+              }
+            }
           }
         }
 
-        if (validFarmsCount === 0 || detectedPrefix === null) {
-          throw new Error('Cannot detect Farm ID pattern: No existing farms have a sequential numeric suffix to derive the format from.');
-        }
-
-        const nextNumber = maxNumber + 1;
+        const nextNumber = maxNumber > 0 ? maxNumber + 1 : 1;
         let nextNumberStr = nextNumber.toString();
         
-        if (detectedPadding !== null && detectedPadding > 0) {
+        if (detectedPadding > 0) {
           nextNumberStr = nextNumberStr.padStart(detectedPadding, '0');
         }
 
-        newFarmId = `${detectedPrefix}${nextNumberStr}`;
+        newFarmId = `${targetPrefix}${nextNumberStr}`;
 
         const farmRef = this.db.collection('farms').doc(newFarmId);
         const userRef = this.db.collection('users').doc(authUser.uid);
+
 
         const farmDoc = {
           farmId: newFarmId,
@@ -267,11 +254,26 @@ export class FarmerService {
     adminUid: string,
     requestId: string,
   ): Promise<{ uid: string; active: boolean }> {
+    if (!active && targetUid === adminUid) {
+      throw new ValidationError('You cannot deactivate your own authenticated administrator account.');
+    }
+
     const userRef = this.db.collection('users').doc(targetUid);
     const userDoc = await userRef.get();
 
     if (!userDoc.exists) {
       throw new NotFoundError('User');
+    }
+
+    const userData = userDoc.data() || {};
+    const role = (userData['role'] || '').toLowerCase();
+
+    if (!active && role === 'admin') {
+      const allAdminsSnap = await this.db.collection('users').where('role', '==', 'admin').get();
+      const activeAdmins = allAdminsSnap.docs.filter((d) => d.data()['active'] !== false);
+      if (activeAdmins.length <= 1) {
+        throw new ValidationError('Cannot deactivate the last remaining active administrator.');
+      }
     }
 
     const now = new Date().toISOString();
@@ -298,11 +300,13 @@ export class FarmerService {
     }
 
     await this.auditService.log({
-      eventType: 'USER_STATUS_UPDATED',
+      eventType: active ? 'USER_ACTIVATED' : 'USER_DEACTIVATED',
       uid: adminUid,
       resourceId: targetUid,
       requestId,
       metadata: {
+        targetRole: role,
+        targetEmail: userData['email'] || '',
         newStatus: active ? 'active' : 'inactive',
       },
     });
