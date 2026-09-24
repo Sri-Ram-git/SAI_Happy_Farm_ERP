@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { logoutUser } from '../../services/authService';
 import {
@@ -47,6 +47,25 @@ export function Sidebar({ role, userName }: SidebarProps) {
   const location = useLocation();
   const [loggingOut, setLoggingOut] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
+  // Lock body scrolling when mobile drawer is open to prevent background page scroll conflicts
+  useEffect(() => {
+    if (mobileDrawerOpen) {
+      const originalOverflow = document.body.style.overflow;
+      const originalTouchAction = document.body.style.touchAction;
+      document.body.style.overflow = 'hidden';
+      document.body.style.touchAction = 'none';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+        document.body.style.touchAction = originalTouchAction;
+      };
+    }
+  }, [mobileDrawerOpen]);
+
+  // Close drawer on route change
+  useEffect(() => {
+    setMobileDrawerOpen(false);
+  }, [location.pathname]);
 
   const items = role === 'admin' ? ADMIN_NAV : SUPERVISOR_NAV;
 
@@ -130,10 +149,14 @@ export function Sidebar({ role, userName }: SidebarProps) {
       {mobileDrawerOpen && (
         <div className="mobile-drawer-overlay" onClick={() => setMobileDrawerOpen(false)}>
           <div className="mobile-drawer-card" onClick={(e) => e.stopPropagation()}>
+            {/* FIXED / STATIC HEADER */}
             <div className="mobile-drawer-header">
-              <div className="mobile-drawer-user-info">
-                <span className="mobile-drawer-user-name">{userName || (role === 'admin' ? 'Admin' : 'Supervisor')}</span>
-                <span className="mobile-drawer-user-role">{role === 'admin' ? 'System Administrator' : 'Farm Supervisor'}</span>
+              <div className="mobile-drawer-brand">
+                <img src="/happy_farm_logo.jpg" alt="SAI Happy Farms" className="mobile-drawer-logo" />
+                <div className="mobile-drawer-brand-text">
+                  <span className="mobile-drawer-brand-title">SAI Happy Farms</span>
+                  <span className="mobile-drawer-brand-badge">{role === 'admin' ? 'Admin Portal' : 'Supervisor Portal'}</span>
+                </div>
               </div>
               <button
                 type="button"
@@ -145,6 +168,7 @@ export function Sidebar({ role, userName }: SidebarProps) {
               </button>
             </div>
 
+            {/* SCROLLABLE NAVIGATION LIST */}
             <nav className="mobile-drawer-nav">
               {items.map((item) => {
                 const Icon = item.icon;
@@ -162,10 +186,25 @@ export function Sidebar({ role, userName }: SidebarProps) {
               })}
             </nav>
 
+            {/* FIXED / PINNED BOTTOM ACCOUNT AREA */}
             <div className="mobile-drawer-footer">
-              <button className="mobile-drawer-logout-btn" onClick={handleLogout} disabled={loggingOut}>
-                <LogOut size={18} />
-                <span>{loggingOut ? 'Signing out...' : 'Sign Out'}</span>
+              <div className="mobile-drawer-user-card">
+                <div className="mobile-drawer-user-avatar">
+                  {(userName || (role === 'admin' ? 'Admin' : 'Supervisor')).charAt(0).toUpperCase()}
+                </div>
+                <div className="mobile-drawer-user-details">
+                  <span className="mobile-drawer-user-name">{userName || (role === 'admin' ? 'Admin' : 'Supervisor')}</span>
+                  <span className="mobile-drawer-user-role">{role === 'admin' ? 'System Administrator' : 'Farm Supervisor'}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="mobile-drawer-logout-btn"
+                onClick={handleLogout}
+                disabled={loggingOut}
+              >
+                <LogOut size={16} />
+                <span>{loggingOut ? 'Signing out...' : 'Logout'}</span>
               </button>
             </div>
           </div>
