@@ -1926,8 +1926,16 @@ textarea {
 }
 
 .user-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.user-action-btn-line1,
+.user-action-btn-line2 {
+  display: inline;
 }
 
 .date-filter {
@@ -3678,39 +3686,49 @@ textarea {
     white-space: nowrap !important;
   }
 
-  /* One horizontally scrollable action row: strictly NO 2+1 layout */
+  /* Three proportional creation buttons in ONE ROW (NO horizontal scroll, NO 2+1 layout) */
   .user-action-buttons-row {
     display: flex !important;
-    align-items: center !important;
-    gap: 8px !important;
     width: 100% !important;
-    max-width: 100% !important;
-    min-width: 0 !important;
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch !important;
+    gap: 6px !important;
+    overflow-x: visible !important;
     flex-wrap: nowrap !important;
-    padding: 2px 0 6px !important;
-    scrollbar-width: none !important;
-    -ms-overflow-style: none !important;
-  }
-
-  .user-action-buttons-row::-webkit-scrollbar {
-    display: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
   .user-action-btn {
-    flex-shrink: 0 !important;
-    white-space: nowrap !important;
-    min-height: 40px !important;
-    height: 40px !important;
-    padding: 0 14px !important;
-    font-size: 13px !important;
-    font-weight: 600 !important;
-    border-radius: 8px !important;
-    box-sizing: border-box !important;
-    display: inline-flex !important;
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    width: 0 !important; /* guarantees equal 33.3% flex share */
+    display: flex !important;
+    flex-direction: column !important;
     align-items: center !important;
     justify-content: center !important;
+    padding: 6px 2px !important;
+    min-height: 44px !important;
+    height: 44px !important;
+    border-radius: 8px !important;
+    box-sizing: border-box !important;
+    text-align: center !important;
+    line-height: 1.15 !important;
+  }
+
+  .user-action-btn-line1 {
+    display: block !important;
+    font-size: 10.5px !important;
+    font-weight: 500 !important;
+    opacity: 0.95 !important;
+    line-height: 1.15 !important;
+    white-space: nowrap !important;
+  }
+
+  .user-action-btn-line2 {
+    display: block !important;
+    font-size: 11.5px !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+    white-space: nowrap !important;
   }
 
   .export-card-header {
@@ -3961,6 +3979,40 @@ textarea {
   .kpi-card-label,
   .kpi-title {
     font-size: 10.5px !important;
+  }
+
+  .user-action-buttons-row {
+    gap: 5px !important;
+  }
+
+  .user-action-btn {
+    padding: 4px 1px !important;
+  }
+
+  .user-action-btn-line1 {
+    font-size: 10px !important;
+  }
+
+  .user-action-btn-line2 {
+    font-size: 11px !important;
+  }
+}
+
+@media (max-width: 350px) {
+  .user-action-buttons-row {
+    gap: 4px !important;
+  }
+
+  .user-action-btn {
+    padding: 3px 1px !important;
+  }
+
+  .user-action-btn-line1 {
+    font-size: 9px !important;
+  }
+
+  .user-action-btn-line2 {
+    font-size: 10px !important;
   }
 }
 

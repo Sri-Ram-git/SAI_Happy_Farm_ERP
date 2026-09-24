@@ -302,21 +302,24 @@ export function AdminUsersPage() {
                 className="btn btn--primary user-action-btn"
                 onClick={() => navigate('/admin/users/create-farmer')}
               >
-                + Create Farmer
+                <span className="user-action-btn-line1">+ Create</span>
+                <span className="user-action-btn-line2">Farmer</span>
               </button>
               <button
                 type="button"
                 className="btn btn--supervisor user-action-btn"
                 onClick={() => navigate('/admin/users/create-supervisor')}
               >
-                + Create Supervisor
+                <span className="user-action-btn-line1">+ Create</span>
+                <span className="user-action-btn-line2">Supervisor</span>
               </button>
               <button
                 type="button"
                 className="btn btn--admin user-action-btn"
                 onClick={() => navigate('/admin/users/create-admin')}
               >
-                + Create Admin
+                <span className="user-action-btn-line1">+ Create</span>
+                <span className="user-action-btn-line2">Admin</span>
               </button>
             </div>
           </div>
