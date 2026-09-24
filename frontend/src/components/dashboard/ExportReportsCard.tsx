@@ -194,25 +194,27 @@ export function ExportReportsCard() {
       {/* MODE 1: DATE RANGE */}
       {mode === 'range' && (
         <div className="export-card-body">
-          <div className="export-card-row">
-            <div className="form-group export-field">
-              <label>Start Date</label>
-              <input
-                type="date"
-                className="form-input"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-              />
-            </div>
+          <div className="export-card-row export-card-row--range">
+            <div className="export-date-range-fields">
+              <div className="form-group export-field">
+                <label>Start Date</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </div>
 
-            <div className="form-group export-field">
-              <label>End Date</label>
-              <input
-                type="date"
-                className="form-input"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-              />
+              <div className="form-group export-field">
+                <label>End Date</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </div>
             </div>
 
             <div className="export-btn-wrap">

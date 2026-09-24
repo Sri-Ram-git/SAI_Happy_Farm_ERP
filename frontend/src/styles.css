@@ -3298,6 +3298,10 @@ textarea {
   align-items: end;
 }
 
+.export-date-range-fields {
+  display: contents;
+}
+
 .export-field label {
   display: block;
   font-size: 0.8125rem;
@@ -3815,10 +3819,36 @@ textarea {
     white-space: nowrap !important;
   }
 
+  .export-reports-card {
+    padding: 12px 14px !important;
+    margin-bottom: 16px !important;
+    border-radius: 12px !important;
+  }
+
   .export-card-header {
     flex-direction: column !important;
     align-items: stretch !important;
-    gap: 12px !important;
+    gap: 10px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .export-card-info {
+    gap: 10px !important;
+  }
+
+  .export-card-icon {
+    padding: 6px !important;
+    border-radius: 6px !important;
+  }
+
+  .export-card-info h3 {
+    font-size: 15px !important;
+    letter-spacing: 0.02em !important;
+  }
+
+  .export-card-info p {
+    font-size: 11.5px !important;
+    line-height: 1.3 !important;
   }
 
   .export-card-tabs {
@@ -3826,35 +3856,90 @@ textarea {
     display: grid !important;
     grid-template-columns: repeat(3, 1fr) !important;
     gap: 4px !important;
+    margin-top: 2px !important;
+    padding: 3px !important;
   }
 
   .export-tab-btn {
     justify-content: center !important;
-    padding: 10px 4px !important;
+    padding: 0 6px !important;
     font-size: 12px !important;
-    min-height: 42px !important;
+    min-height: 38px !important;
+    height: 38px !important;
+    border-radius: 6px !important;
+  }
+
+  .export-card-body {
+    padding: 10px 12px !important;
+    border-radius: 8px !important;
   }
 
   .export-card-row {
     grid-template-columns: 1fr !important;
-    gap: 12px !important;
+    gap: 10px !important;
+  }
+
+  .export-card-row--range {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+
+  /* Two date fields on the SAME ROW sharing ~50% each with small gap */
+  .export-date-range-fields {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .export-date-range-fields .export-field {
+    min-width: 0 !important;
+    width: 100% !important;
+    margin-bottom: 0 !important;
+  }
+
+  .export-date-range-fields .export-field label {
+    display: block !important;
+    font-size: 11.5px !important;
+    font-weight: 600 !important;
+    color: #334155 !important;
+    margin-bottom: 4px !important;
+    white-space: nowrap !important;
+  }
+
+  .export-date-range-fields .export-field input[type="date"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 40px !important;
+    min-height: 40px !important;
+    padding: 0 6px !important;
+    font-size: 12px !important;
+    border-radius: 6px !important;
+    box-sizing: border-box !important;
   }
 
   .export-field input,
   .export-field select {
     width: 100% !important;
-    min-height: 46px !important;
+    min-height: 40px !important;
+    height: 40px !important;
+    font-size: 12.5px !important;
+    border-radius: 6px !important;
   }
 
   .export-btn-wrap {
     width: 100% !important;
-    margin-top: 4px !important;
+    margin-top: 2px !important;
   }
 
   .export-action-btn {
     width: 100% !important;
-    height: 48px !important;
-    font-size: 14px !important;
+    height: 44px !important;
+    min-height: 44px !important;
+    font-size: 13.5px !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
     justify-content: center !important;
   }
 
@@ -4226,6 +4311,30 @@ textarea {
 
   .flock-kpi-total-inner .kpi-value {
     font-size: 17px !important;
+  }
+
+  .export-reports-card {
+    padding: 10px !important;
+  }
+
+  .export-card-body {
+    padding: 8px !important;
+  }
+
+  .export-date-range-fields {
+    gap: 6px !important;
+  }
+
+  .export-date-range-fields .export-field input[type="date"] {
+    font-size: 11.5px !important;
+    padding: 0 4px !important;
+  }
+}
+
+@media (max-width: 340px) {
+  .export-date-range-fields {
+    grid-template-columns: 1fr !important;
+    gap: 6px !important;
   }
 }
 
