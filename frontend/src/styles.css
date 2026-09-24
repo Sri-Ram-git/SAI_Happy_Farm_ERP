@@ -1799,6 +1799,90 @@ textarea {
   font-weight: 600;
 }
 
+/* Flock Management Header, KPIs, & Filter Row (Desktop Base) */
+.flock-create-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 600;
+  padding: 10px 20px;
+}
+
+.flock-kpi-grid {
+  margin-bottom: 24px;
+}
+
+.flock-kpi-total-inner {
+  display: block;
+}
+
+.flock-filter-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  background: var(--card-bg, #ffffff);
+  padding: 12px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.flock-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.flock-filter-farm-col {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 260px;
+  min-width: 0;
+}
+
+.flock-filter-search-col {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 300px;
+  min-width: 0;
+}
+
+.flock-filter-icon,
+.flock-search-icon {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.flock-filter-select,
+.flock-filter-input {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 10px;
+  font-size: 13.5px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: var(--text-primary, #1e293b);
+  box-sizing: border-box;
+}
+
+.flock-filter-reset-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  height: 38px;
+  min-height: 38px;
+  padding: 0 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -3839,6 +3923,105 @@ textarea {
     min-height: 40px !important;
   }
 
+  /* Flock Management Mobile Refinements */
+  .flock-create-btn {
+    width: 100% !important;
+    min-height: 42px !important;
+    height: 42px !important;
+    justify-content: center !important;
+    font-size: 14px !important;
+    border-radius: 8px !important;
+    padding: 0 16px !important;
+  }
+
+  .flock-kpi-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+    margin-bottom: 12px !important;
+  }
+
+  .flock-kpi-total {
+    grid-column: 1 / -1 !important;
+    padding: 10px 14px !important;
+  }
+
+  .flock-kpi-total-inner {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    gap: 12px !important;
+  }
+
+  .flock-kpi-total-inner .kpi-title {
+    margin-bottom: 0 !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.03em !important;
+    white-space: nowrap !important;
+  }
+
+  .flock-kpi-total-inner .kpi-value {
+    margin-top: 0 !important;
+    font-size: 20px !important;
+    font-weight: 700 !important;
+    white-space: nowrap !important;
+  }
+
+  .flock-filter-card {
+    padding: 8px 10px !important;
+    margin-bottom: 14px !important;
+    border-radius: 10px !important;
+  }
+
+  .flock-filter-row {
+    display: flex !important;
+    width: 100% !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex-wrap: nowrap !important;
+  }
+
+  .flock-filter-farm-col {
+    display: flex !important;
+    align-items: center !important;
+    flex: 4 1 0 !important;
+    min-width: 0 !important;
+    gap: 4px !important;
+  }
+
+  .flock-filter-search-col {
+    display: flex !important;
+    align-items: center !important;
+    flex: 6 1 0 !important;
+    min-width: 0 !important;
+    gap: 4px !important;
+  }
+
+  .flock-filter-icon,
+  .flock-search-icon {
+    width: 14px !important;
+    height: 14px !important;
+  }
+
+  .flock-filter-select,
+  .flock-filter-input {
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 6px !important;
+    font-size: 12px !important;
+    border-radius: 6px !important;
+  }
+
+  .flock-filter-reset-btn {
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 8px !important;
+    font-size: 11px !important;
+    margin-left: 0 !important;
+    flex-shrink: 0 !important;
+  }
+
   .ent-charts-grid {
     grid-template-columns: 1fr !important;
     gap: 16px !important;
@@ -4013,6 +4196,36 @@ textarea {
 
   .user-action-btn-line2 {
     font-size: 10px !important;
+  }
+
+  .flock-filter-card {
+    padding: 6px 8px !important;
+  }
+
+  .flock-filter-row {
+    gap: 4px !important;
+  }
+
+  .flock-filter-farm-col {
+    gap: 3px !important;
+  }
+
+  .flock-filter-search-col {
+    gap: 3px !important;
+  }
+
+  .flock-filter-select,
+  .flock-filter-input {
+    font-size: 11px !important;
+    padding: 0 4px !important;
+  }
+
+  .flock-kpi-total-inner .kpi-title {
+    font-size: 10px !important;
+  }
+
+  .flock-kpi-total-inner .kpi-value {
+    font-size: 17px !important;
   }
 }
 

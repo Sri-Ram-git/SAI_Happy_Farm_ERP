@@ -330,24 +330,17 @@ export function AdminFlocksPage() {
           </div>
           <div className="header-controls">
             <button
-              className="btn btn--primary"
+              className="btn btn--primary flock-create-btn"
               onClick={() => openAddFlockModal()}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                fontWeight: 600,
-                padding: '10px 20px',
-              }}
             >
-              <Plus size={18} />
+              <Plus size={17} />
               <span>{t('admin.createFlock')}</span>
             </button>
           </div>
         </div>
 
         {/* Summary Metric Stats Bar */}
-        <div className="kpi-grid stats-grid" style={{ marginBottom: '24px' }}>
+        <div className="kpi-grid stats-grid flock-kpi-grid">
           <div className="kpi-card">
             <div className="kpi-title" style={{ marginBottom: '6px' }}>Monitored Farms</div>
             <div className="kpi-value">{summaryMetrics.farmCount}</div>
@@ -358,67 +351,60 @@ export function AdminFlocksPage() {
             <div className="kpi-value" style={{ color: '#0284c7' }}>{summaryMetrics.totalActiveFlocks}</div>
           </div>
 
-          <div className="kpi-card">
-            <div className="kpi-title" style={{ marginBottom: '6px' }}>Current Farm Birds</div>
-            <div className="kpi-value" style={{ color: '#16a34a' }}>{summaryMetrics.totalBirds.toLocaleString()}</div>
+          <div className="kpi-card flock-kpi-total">
+            <div className="flock-kpi-total-inner">
+              <div className="kpi-title">TOTAL BIRD POPULATION</div>
+              <div className="kpi-value" style={{ color: '#16a34a' }}>
+                {summaryMetrics.totalBirds.toLocaleString()}
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Filter / Search Bar */}
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            alignItems: 'center',
-            gap: '12px',
-            marginBottom: '24px',
-            background: 'var(--card-bg, #ffffff)',
-            padding: '14px 18px',
-            borderRadius: '10px',
-            border: '1px solid var(--border-color, #e2e8f0)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 240px' }}>
-            <Filter size={16} color="#64748b" />
-            <select
-              className="form-input"
-              value={selectedFarmId}
-              onChange={(e) => setSelectedFarmId(e.target.value)}
-              style={{ padding: '8px 12px', fontSize: '14px', width: '100%', maxWidth: '300px' }}
-            >
-              <option value="all">All Farms ({farms.length})</option>
-              {farms.map((farm) => (
-                <option key={farm.farmId} value={farm.farmId}>
-                  {farm.farmId} — {farm.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="flock-filter-card">
+          <div className="flock-filter-row">
+            <div className="flock-filter-farm-col">
+              <Filter size={15} className="flock-filter-icon" />
+              <select
+                className="form-input flock-filter-select"
+                value={selectedFarmId}
+                onChange={(e) => setSelectedFarmId(e.target.value)}
+              >
+                <option value="all">All Farms ({farms.length})</option>
+                {farms.map((farm) => (
+                  <option key={farm.farmId} value={farm.farmId}>
+                    {farm.farmId} — {farm.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 240px' }}>
-            <Search size={16} color="#64748b" />
-            <input
-              type="text"
-              className="form-input"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by farm name, ID, or flock..."
-              style={{ padding: '8px 12px', fontSize: '14px', width: '100%' }}
-            />
-          </div>
+            <div className="flock-filter-search-col">
+              <Search size={15} className="flock-search-icon" />
+              <input
+                type="text"
+                className="form-input flock-filter-input"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search farm, flock..."
+              />
+            </div>
 
-          {(selectedFarmId !== 'all' || searchQuery) && (
-            <button
-              className="btn btn--outline btn--sm"
-              onClick={() => {
-                setSelectedFarmId('all');
-                setSearchQuery('');
-              }}
-              style={{ marginLeft: 'auto' }}
-            >
-              Reset Filters
-            </button>
-          )}
+            {(selectedFarmId !== 'all' || searchQuery) && (
+              <button
+                type="button"
+                className="btn btn--outline btn--sm flock-filter-reset-btn"
+                onClick={() => {
+                  setSelectedFarmId('all');
+                  setSearchQuery('');
+                }}
+                title="Reset Filters"
+              >
+                Reset
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Informational Farm Cards & Scoped Flock History */}
