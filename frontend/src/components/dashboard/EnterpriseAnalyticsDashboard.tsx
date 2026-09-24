@@ -62,6 +62,38 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
   } | null>(null);
   const unsubRefs = useRef<(() => void)[]>([]);
 
+  // Mobile viewport tracker for responsive modal charts
+  const [isMobileScreen, setIsMobileScreen] = useState(() => {
+    return typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileScreen(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const getModalChartHeight = (type: ChartType): number => {
+    if (!isMobileScreen) return 400;
+    switch (type) {
+      case 'submission':
+        return 200; // simple bar chart: ~190-220px
+      case 'temperature':
+        return 210; // area/line chart: ~190-230px
+      case 'production':
+      case 'bodyWeight':
+        return 215; // line chart: ~190-230px
+      case 'mortality':
+      case 'feed':
+      case 'eggQuality':
+        return 230; // dual axes charts: ~210-240px
+      default:
+        return 215;
+    }
+  };
+
   // Assigned farms scoping for Supervisor
   const assignedFarmIds = useMemo(() => {
     if (role === 'admin') return undefined;
@@ -931,119 +963,140 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           standardCurveType={standardCurveType}
           onStandardCurveChange={setStandardCurveType}
           renderChartContent={() => {
+            const chartHeight = getModalChartHeight(expandedMetric.type);
+            const chartMargin = isMobileScreen
+              ? { top: 6, right: 6, bottom: 0, left: -14 }
+              : { top: 10, right: 16, bottom: 5, left: 0 };
+            const axisTick = { fontSize: isMobileScreen ? 10 : 12 };
+            const legendStyle = { fontSize: isMobileScreen ? 11 : 12, paddingTop: 4 };
+
             switch (expandedMetric.type) {
               case 'production':
                 return (
-                  <ResponsiveContainer width="100%" height={400}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
-                      <Tooltip formatter={(value: any) => `${value}%`} />
-                      <Legend />
-                      <Line type="monotone" dataKey="production" stroke="#10b981" strokeWidth={3} name="Actual Production %" dot={{ r: 5 }} connectNulls />
-                      <Line type="monotone" dataKey="standardProduction" stroke="#64748b" strokeWidth={2} strokeDasharray="5 5" name="Standard Target %" dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                      <LineChart data={chartData} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="date" tick={axisTick} />
+                        <YAxis domain={[0, 100]} tick={axisTick} unit="%" />
+                        <Tooltip formatter={(value: any) => `${value}%`} />
+                        <Legend wrapperStyle={legendStyle} />
+                        <Line type="monotone" dataKey="production" stroke="#10b981" strokeWidth={isMobileScreen ? 2 : 3} name="Actual Production %" dot={{ r: isMobileScreen ? 3 : 5 }} connectNulls />
+                        <Line type="monotone" dataKey="standardProduction" stroke="#64748b" strokeWidth={isMobileScreen ? 1.5 : 2} strokeDasharray="5 5" name="Standard Target %" dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 );
 
               case 'mortality':
                 return (
-                  <ResponsiveContainer width="100%" height={400}>
-                    <ComposedChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
-                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} unit="%" />
-                      <Tooltip />
-                      <Legend />
-                      <Bar yAxisId="left" dataKey="mortalityCount" fill="#ef4444" name="Mortality Count" radius={[4, 4, 0, 0]} />
-                      <Bar yAxisId="left" dataKey="cullingCount" fill="#f59e0b" name="Culling Count" radius={[4, 4, 0, 0]} />
-                      <Line yAxisId="right" type="monotone" dataKey="mortality" stroke="#b91c1c" strokeWidth={2.5} name="Mortality Rate %" dot={{ r: 4 }} connectNulls />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+                  <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                      <ComposedChart data={chartData} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="date" tick={axisTick} />
+                        <YAxis yAxisId="left" tick={axisTick} />
+                        <YAxis yAxisId="right" orientation="right" tick={axisTick} unit="%" />
+                        <Tooltip />
+                        <Legend wrapperStyle={legendStyle} />
+                        <Bar yAxisId="left" dataKey="mortalityCount" fill="#ef4444" name="Mortality Count" radius={[4, 4, 0, 0]} />
+                        <Bar yAxisId="left" dataKey="cullingCount" fill="#f59e0b" name="Culling Count" radius={[4, 4, 0, 0]} />
+                        <Line yAxisId="right" type="monotone" dataKey="mortality" stroke="#b91c1c" strokeWidth={2} name="Mortality Rate %" dot={{ r: isMobileScreen ? 3 : 4 }} connectNulls />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
                 );
 
               case 'feed':
                 return (
-                  <ResponsiveContainer width="100%" height={400}>
-                    <ComposedChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis yAxisId="left" tick={{ fontSize: 12 }} unit=" Kg" />
-                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} unit=" g" />
-                      <Tooltip />
-                      <Legend />
-                      <Area yAxisId="left" type="monotone" dataKey="feedKg" stroke="#d97706" fill="#fef3c7" name="Total Feed (Kg)" />
-                      <Line yAxisId="right" type="monotone" dataKey="feedPerBirdG" stroke="#059669" strokeWidth={2.5} name="Feed / Bird (g)" dot={{ r: 4 }} connectNulls />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+                  <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                      <ComposedChart data={chartData} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="date" tick={axisTick} />
+                        <YAxis yAxisId="left" tick={axisTick} unit=" Kg" />
+                        <YAxis yAxisId="right" orientation="right" tick={axisTick} unit=" g" />
+                        <Tooltip />
+                        <Legend wrapperStyle={legendStyle} />
+                        <Area yAxisId="left" type="monotone" dataKey="feedKg" stroke="#d97706" fill="#fef3c7" name="Total Feed (Kg)" />
+                        <Line yAxisId="right" type="monotone" dataKey="feedPerBirdG" stroke="#059669" strokeWidth={2} name="Feed / Bird (g)" dot={{ r: isMobileScreen ? 3 : 4 }} connectNulls />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
                 );
 
               case 'eggQuality':
                 return (
-                  <ResponsiveContainer width="100%" height={400}>
-                    <ComposedChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis yAxisId="left" domain={[40, 80]} tick={{ fontSize: 12 }} unit=" g" />
-                      <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
-                      <Tooltip />
-                      <Legend />
-                      <Line yAxisId="left" type="monotone" dataKey="eggWtAvg" stroke="#0284c7" strokeWidth={2.5} name="Avg Egg Wt (g)" dot={{ r: 4 }} connectNulls />
-                      <Line yAxisId="left" type="monotone" dataKey="eggWtMin" stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" name="Min Egg Wt" connectNulls />
-                      <Line yAxisId="left" type="monotone" dataKey="eggWtMax" stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" name="Max Egg Wt" connectNulls />
-                      <Line yAxisId="right" type="monotone" dataKey="selectionPct" stroke="#16a34a" strokeWidth={2.5} name="Selection %" dot={{ r: 4 }} connectNulls />
-                    </ComposedChart>
-                  </ResponsiveContainer>
+                  <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                      <ComposedChart data={chartData} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="date" tick={axisTick} />
+                        <YAxis yAxisId="left" domain={[40, 80]} tick={axisTick} unit=" g" />
+                        <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={axisTick} unit="%" />
+                        <Tooltip />
+                        <Legend wrapperStyle={legendStyle} />
+                        <Line yAxisId="left" type="monotone" dataKey="eggWtAvg" stroke="#0284c7" strokeWidth={2} name="Avg Egg Wt (g)" dot={{ r: isMobileScreen ? 3 : 4 }} connectNulls />
+                        <Line yAxisId="left" type="monotone" dataKey="eggWtMin" stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" name="Min Egg Wt" connectNulls />
+                        <Line yAxisId="left" type="monotone" dataKey="eggWtMax" stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" name="Max Egg Wt" connectNulls />
+                        <Line yAxisId="right" type="monotone" dataKey="selectionPct" stroke="#16a34a" strokeWidth={2} name="Selection %" dot={{ r: isMobileScreen ? 3 : 4 }} connectNulls />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
                 );
 
               case 'bodyWeight':
                 return (
-                  <ResponsiveContainer width="100%" height={400}>
-                    <LineChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} unit=" g" />
-                      <Tooltip />
-                      <Legend />
-                      <Line type="monotone" dataKey="bodyWtAvg" stroke="#8b5cf6" strokeWidth={3} name="Avg Body Wt (g)" dot={{ r: 5 }} connectNulls />
-                      <Line type="monotone" dataKey="bodyWtMin" stroke="#cbd5e1" strokeWidth={1.5} strokeDasharray="3 3" name="Min Body Wt" connectNulls />
-                      <Line type="monotone" dataKey="bodyWtMax" stroke="#cbd5e1" strokeWidth={1.5} strokeDasharray="3 3" name="Max Body Wt" connectNulls />
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                      <LineChart data={chartData} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="date" tick={axisTick} />
+                        <YAxis tick={axisTick} unit=" g" />
+                        <Tooltip />
+                        <Legend wrapperStyle={legendStyle} />
+                        <Line type="monotone" dataKey="bodyWtAvg" stroke="#8b5cf6" strokeWidth={isMobileScreen ? 2 : 3} name="Avg Body Wt (g)" dot={{ r: isMobileScreen ? 3 : 5 }} connectNulls />
+                        <Line type="monotone" dataKey="bodyWtMin" stroke="#cbd5e1" strokeWidth={1.5} strokeDasharray="3 3" name="Min Body Wt" connectNulls />
+                        <Line type="monotone" dataKey="bodyWtMax" stroke="#cbd5e1" strokeWidth={1.5} strokeDasharray="3 3" name="Max Body Wt" connectNulls />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 );
 
               case 'temperature':
                 return (
-                  <ResponsiveContainer width="100%" height={400}>
-                    <AreaChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis domain={[10, 45]} tick={{ fontSize: 12 }} unit="°C" />
-                      <Tooltip />
-                      <Legend />
-                      <ReferenceLine y={30} stroke="#dc2626" strokeDasharray="3 3" label={{ value: 'Max Comfort (30°C)', fill: '#dc2626', fontSize: 12 }} />
-                      <ReferenceLine y={18} stroke="#0284c7" strokeDasharray="3 3" label={{ value: 'Min Comfort (18°C)', fill: '#0284c7', fontSize: 12 }} />
-                      <Area type="monotone" dataKey="tempMax" stroke="#f59e0b" fill="#fef3c7" name="Max Temp (°C)" />
-                      <Line type="monotone" dataKey="tempAvg" stroke="#ea580c" strokeWidth={2.5} name="Avg Temp (°C)" dot={{ r: 4 }} connectNulls />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                  <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                      <AreaChart data={chartData} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="date" tick={axisTick} />
+                        <YAxis domain={[10, 45]} tick={axisTick} unit="°C" />
+                        <Tooltip />
+                        <Legend wrapperStyle={legendStyle} />
+                        <ReferenceLine y={30} stroke="#dc2626" strokeDasharray="3 3" label={{ value: 'Max (30°C)', fill: '#dc2626', fontSize: isMobileScreen ? 10 : 12 }} />
+                        <ReferenceLine y={18} stroke="#0284c7" strokeDasharray="3 3" label={{ value: 'Min (18°C)', fill: '#0284c7', fontSize: isMobileScreen ? 10 : 12 }} />
+                        <Area type="monotone" dataKey="tempMax" stroke="#f59e0b" fill="#fef3c7" name="Max Temp (°C)" />
+                        <Line type="monotone" dataKey="tempAvg" stroke="#ea580c" strokeWidth={2} name="Avg Temp (°C)" dot={{ r: isMobileScreen ? 3 : 4 }} connectNulls />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
                 );
 
               case 'submission':
                 return (
-                  <ResponsiveContainer width="100%" height={400}>
-                    <BarChart data={chartData}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                      <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                      <YAxis tick={{ fontSize: 12 }} />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="submitted" fill="#10b981" name="Submitted Reports" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="missing" fill="#fca5a5" name="Missing Reports" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
+                    <ResponsiveContainer width="100%" height={chartHeight}>
+                      <BarChart data={chartData} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                        <XAxis dataKey="date" tick={axisTick} />
+                        <YAxis tick={axisTick} />
+                        <Tooltip />
+                        <Legend wrapperStyle={legendStyle} />
+                        <Bar dataKey="submitted" fill="#10b981" name="Submitted Reports" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="missing" fill="#fca5a5" name="Missing Reports" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 );
 
               default:

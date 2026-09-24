@@ -1,7 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { ChartDataTable, type ChartType } from './ChartDataTable';
 import { CalculationDetails } from './CalculationDetails';
-import { X, BarChart3, Table, Calculator, Filter, Calendar } from 'lucide-react';
+import { X, BarChart3, Table, Calculator, Filter, Calendar, SlidersHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ExpandedChartModalProps {
   isOpen: boolean;
@@ -35,9 +35,13 @@ export function ExpandedChartModal({
   renderChartContent,
 }: ExpandedChartModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>('chart');
+  const [showMobileOptions, setShowMobileOptions] = useState(false);
 
   // Handle ESC key press
   useEffect(() => {
+    if (isOpen) {
+      setShowMobileOptions(false);
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen) {
         onClose();
@@ -67,8 +71,28 @@ export function ExpandedChartModal({
           </button>
         </div>
 
+        {/* COMPACT MOBILE VIEW OPTIONS TOGGLE */}
+        <div className="chart-modal-options-toggle-wrap">
+          <button
+            type="button"
+            className={`chart-modal-options-btn ${showMobileOptions ? 'chart-modal-options-btn--active' : ''}`}
+            onClick={() => setShowMobileOptions((prev) => !prev)}
+            aria-expanded={showMobileOptions}
+          >
+            <SlidersHorizontal size={13} />
+            <span>{showMobileOptions ? 'Hide Options' : 'View Options'}</span>
+            {showMobileOptions ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          
+          {!showMobileOptions && (
+            <span className="chart-modal-options-summary">
+              {rangeLabel} · {farmFilter ? `Farm ${farmFilter}` : 'All Farms'}
+            </span>
+          )}
+        </div>
+
         {/* ACTIVE FILTERS & CONTROLS TOOLBAR */}
-        <div className="chart-modal-toolbar">
+        <div className={`chart-modal-toolbar ${showMobileOptions ? 'chart-modal-toolbar--open' : 'chart-modal-toolbar--closed'}`}>
           <div className="chart-modal-filters">
             <span className="chart-modal-filter-chip">
               <Calendar size={13} />

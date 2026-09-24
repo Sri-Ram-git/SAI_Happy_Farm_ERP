@@ -1,7 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { ChartDataTable, type ChartType } from './ChartDataTable';
 import { CalculationDetails } from './CalculationDetails';
-import { X, BarChart3, Table, Calculator, Filter, Calendar, Users, AlertTriangle } from 'lucide-react';
+import { X, BarChart3, Table, Calculator, Filter, Calendar, Users, AlertTriangle, SlidersHorizontal, ChevronDown, ChevronUp } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/dateUtils';
 import type { FarmDoc } from '../../services/farmDataService';
 import type { UserDoc } from '../../services/userDataService';
@@ -58,9 +58,12 @@ export function DashboardMetricDetailModal({
 }: DashboardMetricDetailModalProps) {
   // Default to summary for submission, table for birds, chart for others
   const [activeTab, setActiveTab] = useState<TabType>('chart');
+  // Mobile expandable options panel (collapsed by default)
+  const [showMobileOptions, setShowMobileOptions] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
+      setShowMobileOptions(false);
       if (metricType === 'submission') setActiveTab('submission_summary');
       else if (metricType === 'birds') setActiveTab('birds_list');
       else setActiveTab('chart');
@@ -95,8 +98,28 @@ export function DashboardMetricDetailModal({
           </button>
         </div>
 
+        {/* COMPACT MOBILE VIEW OPTIONS TOGGLE */}
+        <div className="chart-modal-options-toggle-wrap">
+          <button
+            type="button"
+            className={`chart-modal-options-btn ${showMobileOptions ? 'chart-modal-options-btn--active' : ''}`}
+            onClick={() => setShowMobileOptions((prev) => !prev)}
+            aria-expanded={showMobileOptions}
+          >
+            <SlidersHorizontal size={13} />
+            <span>{showMobileOptions ? 'Hide Options' : 'View Options'}</span>
+            {showMobileOptions ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          
+          {!showMobileOptions && (
+            <span className="chart-modal-options-summary">
+              {rangeLabel} · {farmFilter ? `Farm ${farmFilter}` : 'All Farms'}
+            </span>
+          )}
+        </div>
+
         {/* ACTIVE FILTERS & CONTROLS TOOLBAR */}
-        <div className="chart-modal-toolbar">
+        <div className={`chart-modal-toolbar ${showMobileOptions ? 'chart-modal-toolbar--open' : 'chart-modal-toolbar--closed'}`}>
           <div className="chart-modal-filters">
             <span className="chart-modal-filter-chip">
               <Calendar size={13} />
@@ -153,7 +176,7 @@ export function DashboardMetricDetailModal({
         </div>
 
         {/* MODAL BODY */}
-        <div className="chart-modal-body" style={{ minHeight: '400px', maxHeight: '65vh', overflowY: 'auto' }}>
+        <div className="chart-modal-body">
           
           {(activeTab === 'chart' || activeTab === 'submission_summary') && (
             <div className="chart-expanded-wrapper">
@@ -171,18 +194,18 @@ export function DashboardMetricDetailModal({
                 </div>
               )}
               {metricType === 'submission' && submissionMatrix && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-                  <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                    <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Expected Reports</div>
-                    <div style={{ fontSize: '32px', color: '#0f172a', fontWeight: 700 }}>{submissionMatrix.expected.length}</div>
+                <div className="chart-modal-submission-stats">
+                  <div className="chart-modal-submission-stat chart-modal-submission-stat--expected">
+                    <div className="chart-modal-submission-stat-label">Expected Reports</div>
+                    <div className="chart-modal-submission-stat-val">{submissionMatrix.expected.length}</div>
                   </div>
-                  <div style={{ background: '#f0fdf4', padding: '16px', borderRadius: '8px', border: '1px solid #bbf7d0', textAlign: 'center' }}>
-                    <div style={{ fontSize: '13px', color: '#166534', fontWeight: 600, textTransform: 'uppercase' }}>Submitted Reports</div>
-                    <div style={{ fontSize: '32px', color: '#15803d', fontWeight: 700 }}>{submissionMatrix.submitted.length}</div>
+                  <div className="chart-modal-submission-stat chart-modal-submission-stat--submitted">
+                    <div className="chart-modal-submission-stat-label">Submitted Reports</div>
+                    <div className="chart-modal-submission-stat-val">{submissionMatrix.submitted.length}</div>
                   </div>
-                  <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '8px', border: '1px solid #fecaca', textAlign: 'center' }}>
-                    <div style={{ fontSize: '13px', color: '#991b1b', fontWeight: 600, textTransform: 'uppercase' }}>Missing Reports</div>
-                    <div style={{ fontSize: '32px', color: '#dc2626', fontWeight: 700 }}>{submissionMatrix.missing.length}</div>
+                  <div className="chart-modal-submission-stat chart-modal-submission-stat--missing">
+                    <div className="chart-modal-submission-stat-label">Missing Reports</div>
+                    <div className="chart-modal-submission-stat-val">{submissionMatrix.missing.length}</div>
                   </div>
                 </div>
               )}
