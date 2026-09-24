@@ -535,7 +535,7 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
       {/* LEVEL 1: EXECUTIVE KPI SUMMARY GRID */}
       {(variant === 'overview' || variant === 'full') && (
         <>
-          <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: 20 }}>
+          <div className="kpi-grid" style={{ marginBottom: 20 }}>
             <KpiCard
               title="Total Bird Population"
               value={totalBirdsLive.toLocaleString()}

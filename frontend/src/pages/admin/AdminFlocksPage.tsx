@@ -347,63 +347,20 @@ export function AdminFlocksPage() {
         </div>
 
         {/* Summary Metric Stats Bar */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: '16px',
-            marginBottom: '24px',
-          }}
-        >
-          <div
-            style={{
-              background: 'var(--card-bg, #ffffff)',
-              border: '1px solid var(--border-color, #e2e8f0)',
-              borderRadius: '12px',
-              padding: '16px 20px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            }}
-          >
-            <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 500, marginBottom: '6px' }}>
-              Monitored Farms
-            </div>
-            <div style={{ fontSize: '24px', fontWeight: 700, color: 'var(--text-primary, #1e293b)' }}>
-              {summaryMetrics.farmCount}
-            </div>
+        <div className="kpi-grid stats-grid" style={{ marginBottom: '24px' }}>
+          <div className="kpi-card">
+            <div className="kpi-title" style={{ marginBottom: '6px' }}>Monitored Farms</div>
+            <div className="kpi-value">{summaryMetrics.farmCount}</div>
           </div>
 
-          <div
-            style={{
-              background: 'var(--card-bg, #ffffff)',
-              border: '1px solid var(--border-color, #e2e8f0)',
-              borderRadius: '12px',
-              padding: '16px 20px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            }}
-          >
-            <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 500, marginBottom: '6px' }}>
-              Active Flocks / Batches
-            </div>
-            <div style={{ fontSize: '24px', fontWeight: 700, color: '#0284c7' }}>
-              {summaryMetrics.totalActiveFlocks}
-            </div>
+          <div className="kpi-card">
+            <div className="kpi-title" style={{ marginBottom: '6px' }}>Active Flocks / Batches</div>
+            <div className="kpi-value" style={{ color: '#0284c7' }}>{summaryMetrics.totalActiveFlocks}</div>
           </div>
 
-          <div
-            style={{
-              background: 'var(--card-bg, #ffffff)',
-              border: '1px solid var(--border-color, #e2e8f0)',
-              borderRadius: '12px',
-              padding: '16px 20px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            }}
-          >
-            <div style={{ fontSize: '13px', color: '#64748b', fontWeight: 500, marginBottom: '6px' }}>
-              Current Farm Birds
-            </div>
-            <div style={{ fontSize: '24px', fontWeight: 700, color: '#16a34a' }}>
-              {summaryMetrics.totalBirds.toLocaleString()}
-            </div>
+          <div className="kpi-card">
+            <div className="kpi-title" style={{ marginBottom: '6px' }}>Current Farm Birds</div>
+            <div className="kpi-value" style={{ color: '#16a34a' }}>{summaryMetrics.totalBirds.toLocaleString()}</div>
           </div>
         </div>
 
@@ -527,39 +484,33 @@ export function AdminFlocksPage() {
                     </div>
 
                     {/* Stats & View History Toggle */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '12px', color: '#64748b' }}>Current Farm Birds</div>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#16a34a' }}>
-                          {currentBirds.toLocaleString()}
+                    <div className="farm-header-stats-wrap">
+                      <div className="farm-stats-microstrip">
+                        <div className="farm-microstat">
+                          <div className="farm-microstat-label">Current Birds</div>
+                          <div className="farm-microstat-val" style={{ color: '#16a34a' }}>
+                            {currentBirds.toLocaleString()}
+                          </div>
                         </div>
-                      </div>
 
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '12px', color: '#64748b' }}>Active Flocks</div>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#0284c7' }}>
-                          {activeCount}
+                        <div className="farm-microstat">
+                          <div className="farm-microstat-label">Active Flocks</div>
+                          <div className="farm-microstat-val" style={{ color: '#0284c7' }}>
+                            {activeCount}
+                          </div>
                         </div>
-                      </div>
 
-                      <div style={{ textAlign: 'right' }}>
-                        <div style={{ fontSize: '12px', color: '#64748b' }}>Flock History</div>
-                        <div style={{ fontSize: '16px', fontWeight: 700, color: '#475569' }}>
-                          {farmFlocks.length}
+                        <div className="farm-microstat">
+                          <div className="farm-microstat-label">Flock History</div>
+                          <div className="farm-microstat-val" style={{ color: '#475569' }}>
+                            {farmFlocks.length}
+                          </div>
                         </div>
                       </div>
 
                       <button
-                        className="btn btn--outline btn--sm"
+                        className="btn btn--outline btn--sm farm-history-toggle-btn"
                         onClick={() => toggleFarmExpansion(farm.farmId)}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          padding: '6px 12px',
-                          fontSize: '13px',
-                          fontWeight: 600,
-                        }}
                       >
                         <span>{isExpanded ? 'Hide History' : 'View History'}</span>
                         {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}

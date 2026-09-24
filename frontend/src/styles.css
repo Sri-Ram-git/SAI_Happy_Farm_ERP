@@ -1750,12 +1750,53 @@ textarea {
   color: var(--gray-600);
 }
 
-.table-container {
+.table-container,
+.table-responsive {
+  width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   background: var(--white);
   border: 1px solid var(--gray-200);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+}
+
+/* Farm Header Stats Strip (Admin Flocks & Overview) */
+.farm-header-stats-wrap {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.farm-stats-microstrip {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.farm-microstat {
+  text-align: right;
+}
+
+.farm-microstat-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 2px;
+}
+
+.farm-microstat-val {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.farm-history-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .data-table {
@@ -2344,11 +2385,13 @@ textarea {
   }
 
   .locked-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
   }
 
   .kpi-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 6px !important;
   }
 }
 
@@ -3527,16 +3570,59 @@ textarea {
     border-radius: 12px !important;
   }
 
-  .kpi-card-label {
+  .kpi-card-label,
+  .kpi-title {
     font-size: 11px !important;
     line-height: 1.25 !important;
     word-break: break-word !important;
   }
 
-  .kpi-card-value {
+  .kpi-card-value,
+  .kpi-value {
     font-size: 18px !important;
     font-weight: 700 !important;
     margin-top: 4px !important;
+  }
+
+  .farm-header-stats-wrap {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
+    margin-top: 6px !important;
+  }
+
+  .farm-stats-microstrip {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 6px !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    padding: 8px !important;
+    border-radius: 8px !important;
+    border: 1px solid #e2e8f0 !important;
+  }
+
+  .farm-microstat {
+    text-align: center !important;
+  }
+
+  .farm-microstat-label {
+    font-size: 10px !important;
+    color: #64748b !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+  }
+
+  .farm-microstat-val {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+  }
+
+  .farm-history-toggle-btn {
+    width: 100% !important;
+    justify-content: center !important;
+    min-height: 40px !important;
   }
 
   .ent-charts-grid {
@@ -3671,8 +3757,14 @@ textarea {
     gap: 8px !important;
   }
 
-  .kpi-card-value {
+  .kpi-card-value,
+  .kpi-value {
     font-size: 16px !important;
+  }
+
+  .kpi-card-label,
+  .kpi-title {
+    font-size: 10.5px !important;
   }
 }
 

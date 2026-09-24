@@ -197,7 +197,7 @@ export function PredictionPage() {
             )}
 
             {/* KPI Summary Cards */}
-            <div className="kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div className="kpi-grid" style={{ marginBottom: '1.5rem' }}>
               <div className="kpi-card">
                 <div className="kpi-card-label">{t('prediction.currentProduction')}</div>
                 <div className="kpi-card-value">{result.lastActualPct}%</div>
