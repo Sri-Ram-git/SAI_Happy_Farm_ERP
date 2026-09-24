@@ -283,11 +283,12 @@ export function AdminUsersPage() {
       <div className="mgmt-page">
         <div className="mgmt-page-header">
           <h2>User Management</h2>
-          <div className="header-controls" style={{ flexWrap: 'wrap', gap: 8 }}>
+          <div className="header-controls user-mgmt-header-controls">
             <div className="filter-group">
               {['all', 'farmer', 'supervisor', 'admin'].map((r) => (
                 <button
                   key={r}
+                  type="button"
                   className={`filter-btn ${filter === r ? 'filter-btn--active' : ''}`}
                   onClick={() => setFilter(r)}
                 >
@@ -295,21 +296,24 @@ export function AdminUsersPage() {
                 </button>
               ))}
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div className="user-action-buttons-row">
               <button
-                className="btn btn--primary"
+                type="button"
+                className="btn btn--primary user-action-btn"
                 onClick={() => navigate('/admin/users/create-farmer')}
               >
                 + Create Farmer
               </button>
               <button
-                className="btn btn--supervisor"
+                type="button"
+                className="btn btn--supervisor user-action-btn"
                 onClick={() => navigate('/admin/users/create-supervisor')}
               >
                 + Create Supervisor
               </button>
               <button
-                className="btn btn--admin"
+                type="button"
+                className="btn btn--admin user-action-btn"
                 onClick={() => navigate('/admin/users/create-admin')}
               >
                 + Create Admin

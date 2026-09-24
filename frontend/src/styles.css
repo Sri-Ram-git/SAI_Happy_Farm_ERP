@@ -1918,6 +1918,18 @@ textarea {
   box-shadow: var(--shadow-sm);
 }
 
+/* User Management Action Buttons Row */
+.user-action-buttons-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-action-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .date-filter {
   display: flex;
   gap: 4px;
@@ -3632,6 +3644,71 @@ textarea {
     padding: 6px 2px !important;
     font-size: 12px !important;
     display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* User Management Mobile Header Controls & Button Row */
+  .user-mgmt-header-controls {
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+
+  .user-mgmt-header-controls .filter-group {
+    display: grid !important;
+    grid-template-columns: repeat(4, 1fr) !important;
+    width: 100% !important;
+    background: var(--gray-100) !important;
+    border-radius: 8px !important;
+    padding: 3px !important;
+    gap: 3px !important;
+  }
+
+  .user-mgmt-header-controls .filter-btn {
+    text-align: center !important;
+    padding: 8px 4px !important;
+    font-size: 12px !important;
+    min-height: 38px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    white-space: nowrap !important;
+  }
+
+  /* One horizontally scrollable action row: strictly NO 2+1 layout */
+  .user-action-buttons-row {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    flex-wrap: nowrap !important;
+    padding: 2px 0 6px !important;
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+
+  .user-action-buttons-row::-webkit-scrollbar {
+    display: none !important;
+  }
+
+  .user-action-btn {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    min-height: 40px !important;
+    height: 40px !important;
+    padding: 0 14px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    box-sizing: border-box !important;
+    display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
   }
