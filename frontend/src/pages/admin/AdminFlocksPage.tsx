@@ -430,7 +430,7 @@ export function AdminFlocksPage() {
               const farmFlocks = flocksByFarm.get(farm.farmId) || [];
               const activeCount = farmFlocks.filter((f) => f.status === 'active').length;
               const currentBirds = Number(farm.currentBirdCount ?? 0);
-              const isExpanded = expandedFarms[farm.farmId] !== false; // expanded by default
+              const isExpanded = Boolean(expandedFarms[farm.farmId]); // collapsed by default
 
               return (
                 <div
