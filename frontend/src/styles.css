@@ -1609,11 +1609,30 @@ textarea {
   gap: 12px;
 }
 
+.mgmt-header-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.mgmt-filter-select {
+  width: 150px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 13.5px;
+  border-radius: 6px;
+  border: 1px solid var(--gray-300);
+  background: var(--white);
+  color: var(--gray-800);
+}
+
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
 }
 
 .kpi-card {
@@ -1750,8 +1769,7 @@ textarea {
   color: var(--gray-600);
 }
 
-.table-container,
-.table-responsive {
+.table-container {
   width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -1759,6 +1777,12 @@ textarea {
   border: 1px solid var(--gray-200);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Farm Header Stats Strip (Admin Flocks & Overview) */
@@ -1810,6 +1834,9 @@ textarea {
 }
 
 .flock-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
   margin-bottom: 24px;
 }
 
@@ -2799,16 +2826,17 @@ textarea {
 .enterprise-dashboard {
   display: flex;
   flex-direction: column;
-  gap: 1.75rem;
+  gap: 1.5rem;
   width: 100%;
-  padding: 28px 36px 32px;
-  max-width: 1440px;
+  max-width: 1280px;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
 @media (max-width: 768px) {
   .enterprise-dashboard {
-    padding: 16px 16px 32px;
+    padding: 0;
+    gap: 12px;
   }
 }
 
@@ -3637,8 +3665,42 @@ textarea {
 }
 
 @media (min-width: 769px) {
+  .sidebar {
+    display: flex !important;
+    width: 240px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .mobile-app-header,
+  .mobile-nav,
   .mobile-drawer-overlay {
     display: none !important;
+  }
+
+  .mgmt-content {
+    margin-left: 240px !important;
+  }
+
+  .mgmt-page-header {
+    flex-direction: row !important;
+    align-items: flex-start !important;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)) !important;
+    gap: 16px !important;
+    margin-bottom: 20px !important;
+  }
+
+  .flock-kpi-grid {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 16px !important;
+  }
+
+  .enterprise-dashboard {
+    max-width: 1280px !important;
+    margin: 0 auto !important;
+    width: 100% !important;
   }
 }
 
