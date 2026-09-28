@@ -16,6 +16,7 @@ interface ExpandedChartModalProps {
   standardCurveType?: 'CF_STD' | 'FR_STD';
   onStandardCurveChange?: (type: 'CF_STD' | 'FR_STD') => void;
   renderChartContent: () => ReactNode;
+  role?: 'supervisor' | 'admin';
 }
 
 type TabType = 'chart' | 'table' | 'formula';
@@ -33,6 +34,7 @@ export function ExpandedChartModal({
   standardCurveType,
   onStandardCurveChange,
   renderChartContent,
+  role,
 }: ExpandedChartModalProps) {
   const [activeTab, setActiveTab] = useState<TabType>('chart');
   const [showMobileOptions, setShowMobileOptions] = useState(false);
@@ -164,13 +166,14 @@ export function ExpandedChartModal({
                 chartData={chartData}
                 farmFilter={farmFilter}
                 flockFilter={flockFilter}
+                role={role}
               />
             </div>
           )}
 
           {activeTab === 'formula' && (
             <div className="chart-formula-wrapper">
-              <CalculationDetails chartType={chartType} standardCurveType={standardCurveType} />
+              <CalculationDetails chartType={chartType} standardCurveType={standardCurveType} role={role} />
             </div>
           )}
         </div>

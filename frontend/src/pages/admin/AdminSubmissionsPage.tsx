@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
@@ -8,6 +9,7 @@ import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { getAllUsers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils';
 import { useDailyReportsByDate } from '../../hooks/useDailyReports';
+import { UploadCloud } from 'lucide-react';
 
 import { ExportReportsCard } from '../../components/dashboard/ExportReportsCard';
 
@@ -55,6 +57,16 @@ export function AdminSubmissionsPage() {
       <div className="mgmt-page">
         {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <ExportReportsCard />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+          <Link
+            to="/admin/import"
+            className="btn btn--primary"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'none', padding: '8px 16px', fontWeight: 600 }}
+          >
+            <UploadCloud size={16} />
+            <span>Import Historical Data (CSV / XML)</span>
+          </Link>
+        </div>
         <div className="mgmt-page-header">
           <h2>Submissions - {formatDisplayDate(date)}</h2>
           <div className="header-controls">

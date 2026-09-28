@@ -23,6 +23,7 @@ import { AdminFarmsPage } from './pages/admin/AdminFarmsPage';
 import { AdminFarmDetailPage } from './pages/admin/AdminFarmDetailPage';
 import { AdminAnalyticsPage } from './pages/admin/AdminAnalyticsPage';
 import { AdminSubmissionsPage } from './pages/admin/AdminSubmissionsPage';
+import { AdminImportPage } from './pages/admin/AdminImportPage';
 import { FeedLoadPage } from './pages/admin/FeedLoadPage';
 import { AdminFlocksPage } from './pages/admin/AdminFlocksPage';
 import { PredictionPage } from './pages/admin/PredictionPage';
@@ -63,6 +64,11 @@ function AppRoutes() {
           <ErrorBoundary><SupervisorDashboard /></ErrorBoundary>
         </ProtectedManagementRoute>
       } />
+      <Route path="/supervisor/overview" element={
+        <ProtectedManagementRoute allowedRoles={['supervisor']}>
+          <ErrorBoundary><SupervisorDashboard /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
       <Route path="/supervisor/farms" element={
         <ProtectedManagementRoute allowedRoles={['supervisor']}>
           <ErrorBoundary><SupervisorFarmsPage /></ErrorBoundary>
@@ -91,6 +97,11 @@ function AppRoutes() {
 
       {/* Admin routes */}
       <Route path="/admin" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminDashboard /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/admin/overview" element={
         <ProtectedManagementRoute allowedRoles={['admin']}>
           <ErrorBoundary><AdminDashboard /></ErrorBoundary>
         </ProtectedManagementRoute>
@@ -169,6 +180,11 @@ function AppRoutes() {
       <Route path="/admin/submissions" element={
         <ProtectedManagementRoute allowedRoles={['admin']}>
           <ErrorBoundary><AdminSubmissionsPage /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/admin/import" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><AdminImportPage /></ErrorBoundary>
         </ProtectedManagementRoute>
       } />
       <Route path="/admin/feed-load" element={

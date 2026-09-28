@@ -7,6 +7,8 @@ export interface FarmFormData {
   culling: string;
   eggsProduced: string;
   selectionEggs: string;
+  damagedEggs: string;
+  floorEggs: string;
   temperature: string;
   tempMin: string;
   tempMax: string;
@@ -18,6 +20,7 @@ export interface FarmFormData {
   bodyWeightAvg: string;
   remarks: string;
   ammoniaPpm: string;
+  feedGramsPerBird?: string;
 }
 
 export const INITIAL_FARM_FORM_DATA: FarmFormData = {
@@ -29,6 +32,8 @@ export const INITIAL_FARM_FORM_DATA: FarmFormData = {
   culling: '',
   eggsProduced: '',
   selectionEggs: '',
+  damagedEggs: '',
+  floorEggs: '',
   temperature: '',
   tempMin: '',
   tempMax: '',
@@ -40,6 +45,7 @@ export const INITIAL_FARM_FORM_DATA: FarmFormData = {
   bodyWeightAvg: '',
   remarks: '',
   ammoniaPpm: '',
+  feedGramsPerBird: '',
 };
 
 export const STEP_NAMES = [
@@ -52,59 +58,100 @@ export interface FarmFormErrors {
   [key: string]: string;
 }
 
-export function validateStep(step: number, data: FarmFormData, birdCount: number): FarmFormErrors {
+export function calculateFeedGramsPerBird(feedKg: number | string, birdCount: number): number {
+  const kg = Number(feedKg);
+  if (!Number.isFinite(kg) || kg <= 0 || !Number.isFinite(birdCount) || birdCount <= 0) {
+    return 0;
+  }
+  return Number(((kg * 1000) / birdCount).toFixed(1));
+}
+
+export function isHighAmmonia(ammoniaPpm: number | string): boolean {
+  const val = Number(ammoniaPpm);
+  return Number.isFinite(val) && val > 10 && val <= 50;
+}
+
+export function validateStep(
+  step: number,
+  data: FarmFormData,
+  birdCount: number,
+  t?: (key: string, opts?: any) => string
+): FarmFormErrors {
   const errors: FarmFormErrors = {};
+  const tr = (key: string, fallback: string, opts?: any) => (t ? t(key, opts) : key);
 
   switch (step) {
     case 0: {
       const fq = Number(data.feedQuantity);
-      if (data.feedQuantity === '') errors.feedQuantity = 'Required';
-      else if (fq < 0 || isNaN(fq)) errors.feedQuantity = 'Enter a valid non-negative number';
+      if (data.feedQuantity === '') errors.feedQuantity = tr('validation.required', 'Required');
+      else if (fq < 0 || isNaN(fq)) errors.feedQuantity = tr('validation.invalidNumber', 'Enter a valid non-negative number');
 
       const moVal = data.mortality === '' ? 0 : Number(data.mortality);
-      if (isNaN(moVal) || moVal < 0) errors.mortality = 'Enter a valid non-negative whole number';
-      else if (birdCount > 0 && moVal > birdCount) errors.mortality = 'Cannot exceed bird count';
+      if (isNaN(moVal) || moVal < 0) errors.mortality = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+      else if (birdCount > 0 && moVal > birdCount) errors.mortality = tr('validation.exceedsBirdCount', 'Cannot exceed bird count');
 
       const cuVal = data.culling === '' ? 0 : Number(data.culling);
-      if (isNaN(cuVal) || cuVal < 0) errors.culling = 'Enter a valid non-negative whole number';
-      else if (birdCount > 0 && cuVal > birdCount) errors.culling = 'Cannot exceed bird count';
-      else if (birdCount > 0 && moVal + cuVal > birdCount) errors.culling = 'Mortality + Culling exceeds bird count';
+      if (isNaN(cuVal) || cuVal < 0) errors.culling = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+      else if (birdCount > 0 && cuVal > birdCount) errors.culling = tr('validation.exceedsBirdCount', 'Cannot exceed bird count');
+      else if (birdCount > 0 && moVal + cuVal > birdCount) errors.culling = tr('validation.mortalityCullingExceeds', 'Mortality + Culling exceeds bird count');
       break;
     }
     case 1: {
       const ep = Number(data.eggsProduced);
-      if (data.eggsProduced === '') errors.eggsProduced = 'Required';
-      else if (!Number.isInteger(ep) || ep < 0) errors.eggsProduced = 'Enter a valid non-negative whole number';
-      else if (birdCount > 0 && ep > birdCount) errors.eggsProduced = 'Cannot exceed bird count';
+      const maxAllowedEggs = Math.floor(birdCount * 0.95);
+      if (data.eggsProduced === '') errors.eggsProduced = tr('validation.required', 'Required');
+      else if (!Number.isInteger(ep) || ep < 0) errors.eggsProduced = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+      else if (birdCount > 0 && ep > maxAllowedEggs) {
+        errors.eggsProduced = tr(
+          'validation.exceedsProductionRate',
+          `Egg production cannot exceed 95% of bird count (max ${maxAllowedEggs})`,
+          { max: maxAllowedEggs }
+        );
+      }
 
       const se = Number(data.selectionEggs);
-      if (data.selectionEggs === '') errors.selectionEggs = 'Required';
-      else if (!Number.isInteger(se) || se < 0) errors.selectionEggs = 'Enter a valid non-negative whole number';
-      else if (ep > 0 && se > ep) errors.selectionEggs = 'Cannot exceed eggs produced';
+      if (data.selectionEggs === '') errors.selectionEggs = tr('validation.required', 'Required');
+      else if (!Number.isInteger(se) || se < 0) errors.selectionEggs = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+      else if (ep > 0 && se > ep) errors.selectionEggs = tr('validation.exceedsEggsProduced', 'Cannot exceed eggs produced');
+
+      if (data.damagedEggs !== '') {
+        const de = Number(data.damagedEggs);
+        if (isNaN(de) || !Number.isInteger(de) || de < 0) {
+          errors.damagedEggs = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+        }
+      }
+
+      if (data.floorEggs !== '') {
+        const fe = Number(data.floorEggs);
+        if (isNaN(fe) || !Number.isInteger(fe) || fe < 0) {
+          errors.floorEggs = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+        }
+      }
 
       const tMin = Number(data.tempMin);
-      if (data.tempMin === '') errors.tempMin = 'Required';
-      else if (isNaN(tMin) || tMin < -10 || tMin > 60) errors.tempMin = 'Must be between -10 and 60';
+      if (data.tempMin === '') errors.tempMin = tr('validation.required', 'Required');
+      else if (isNaN(tMin) || tMin < 10 || tMin > 50) errors.tempMin = tr('validation.tempRange', 'Must be between 10 and 50');
 
       const tMax = Number(data.tempMax);
-      if (data.tempMax === '') errors.tempMax = 'Required';
-      else if (isNaN(tMax) || tMax < -10 || tMax > 60) errors.tempMax = 'Must be between -10 and 60';
+      if (data.tempMax === '') errors.tempMax = tr('validation.required', 'Required');
+      else if (isNaN(tMax) || tMax < 10 || tMax > 50) errors.tempMax = tr('validation.tempRange', 'Must be between 10 and 50');
 
       if (!errors.tempMin && !errors.tempMax && !isNaN(tMin) && !isNaN(tMax) && tMin > tMax) {
-        errors.tempMin = 'Min temp cannot exceed max temp';
+        errors.tempMin = tr('validation.minExceedsMax', 'Min temp cannot exceed max temp');
       }
       break;
     }
     case 2: {
-      validateWeight(errors, data, 'eggWeight');
-      validateWeight(errors, data, 'bodyWeight');
+      validateEggWeight(errors, data, tr);
+      validateBodyWeight(errors, data, tr);
 
-      const a = Number(data.ammoniaPpm);
-      if (data.ammoniaPpm === '') errors.ammoniaPpm = 'Required';
-      else if (isNaN(a) || a < 0) errors.ammoniaPpm = 'Enter a valid non-negative number';
-      else if (a > 100) errors.ammoniaPpm = 'Cannot exceed 100 PPM';
+      if (data.ammoniaPpm !== '') {
+        const a = Number(data.ammoniaPpm);
+        if (isNaN(a) || a < 0) errors.ammoniaPpm = tr('validation.invalidNumber', 'Enter a valid non-negative number');
+        else if (a > 50) errors.ammoniaPpm = tr('validation.maxPpm50', 'Cannot exceed 50 PPM');
+      }
 
-      if (data.remarks.length > 1000) errors.remarks = 'Max 1000 characters';
+      if (data.remarks.length > 1000) errors.remarks = tr('validation.maxChars', 'Max 1000 characters', { max: 1000 });
       break;
     }
   }
@@ -112,22 +159,60 @@ export function validateStep(step: number, data: FarmFormData, birdCount: number
   return errors;
 }
 
-function validateWeight(errors: FarmFormErrors, data: FarmFormData, prefix: 'eggWeight' | 'bodyWeight') {
-  const minKey = `${prefix}Min`;
-  const maxKey = `${prefix}Max`;
-  const avgKey = `${prefix}Avg`;
-  const min = Number(data[minKey as keyof FarmFormData]);
-  const max = Number(data[maxKey as keyof FarmFormData]);
+function validateEggWeight(
+  errors: FarmFormErrors,
+  data: FarmFormData,
+  tr: (key: string, fallback: string, opts?: any) => string
+) {
+  const min = Number(data.eggWeightMin);
+  const max = Number(data.eggWeightMax);
 
-  if (data[minKey as keyof FarmFormData] === '' || isNaN(min)) errors[minKey] = 'Required';
-  else if (min < 0) errors[minKey] = 'Cannot be negative';
+  if (data.eggWeightMin === '' || isNaN(min)) {
+    errors.eggWeightMin = tr('validation.required', 'Required');
+  } else if (min < 30 || min > 80) {
+    errors.eggWeightMin = tr('validation.eggWeightRange', 'Must be between 30g and 80g');
+  }
 
-  if (data[maxKey as keyof FarmFormData] === '' || isNaN(max)) errors[maxKey] = 'Required';
-  else if (max < 0) errors[maxKey] = 'Cannot be negative';
+  if (data.eggWeightMax === '' || isNaN(max)) {
+    errors.eggWeightMax = tr('validation.required', 'Required');
+  } else if (max < 30 || max > 80) {
+    errors.eggWeightMax = tr('validation.eggWeightRange', 'Must be between 30g and 80g');
+  }
 
-  if (!errors[minKey] && !errors[maxKey] && !isNaN(min) && !isNaN(max)) {
-    if (min > max) {
-      errors[minKey] = 'Min cannot exceed max';
-    }
+  if (!errors.eggWeightMin && !errors.eggWeightMax && min > max) {
+    errors.eggWeightMin = tr('validation.minExceedsMax', 'Min cannot exceed max');
+  }
+}
+
+function validateBodyWeight(
+  errors: FarmFormErrors,
+  data: FarmFormData,
+  tr: (key: string, fallback: string, opts?: any) => string
+) {
+  // Body weight is collected weekly and is optional on daily submissions
+  const hasMin = data.bodyWeightMin !== '';
+  const hasMax = data.bodyWeightMax !== '';
+
+  if (!hasMin && !hasMax) {
+    return;
+  }
+
+  const min = Number(data.bodyWeightMin);
+  const max = Number(data.bodyWeightMax);
+
+  if (!hasMin || isNaN(min)) {
+    errors.bodyWeightMin = tr('validation.required', 'Required');
+  } else if (min < 500 || min > 3000) {
+    errors.bodyWeightMin = tr('validation.bodyWeightRange', 'Must be between 500g and 3000g');
+  }
+
+  if (!hasMax || isNaN(max)) {
+    errors.bodyWeightMax = tr('validation.required', 'Required');
+  } else if (max < 500 || max > 3000) {
+    errors.bodyWeightMax = tr('validation.bodyWeightRange', 'Must be between 500g and 3000g');
+  }
+
+  if (!errors.bodyWeightMin && !errors.bodyWeightMax && min > max) {
+    errors.bodyWeightMin = tr('validation.minExceedsMax', 'Min cannot exceed max');
   }
 }

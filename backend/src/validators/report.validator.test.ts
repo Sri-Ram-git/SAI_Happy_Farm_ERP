@@ -12,7 +12,7 @@ describe('DailyReportInputSchema', () => {
     selectionEggs: 100,
     temperature: 25.5,
     eggWeight: { min: 58, max: 62, avg: 60 },
-    bodyWeight: { min: 1.7, max: 1.9, avg: 1.8 },
+    bodyWeight: { min: 1700, max: 1900, avg: 1800 },
     remarks: '',
     ammoniaPpm: 10,
   };
@@ -20,6 +20,68 @@ describe('DailyReportInputSchema', () => {
   it('should accept valid input', () => {
     const result = DailyReportInputSchema.safeParse(validInput);
     expect(result.success).toBe(true);
+  });
+
+  it('should accept input without bodyWeight and ammoniaPpm (weekly/optional)', () => {
+    const { bodyWeight: _, ammoniaPpm: __, ...input } = validInput;
+    const result = DailyReportInputSchema.safeParse(input);
+    expect(result.success).toBe(true);
+  });
+
+  it('should reject bodyWeight min < 500', () => {
+    const result = DailyReportInputSchema.safeParse({
+      ...validInput,
+      bodyWeight: { min: 400, max: 1500, avg: 1000 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject bodyWeight max > 3000', () => {
+    const result = DailyReportInputSchema.safeParse({
+      ...validInput,
+      bodyWeight: { min: 1500, max: 3500, avg: 2000 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject eggWeight min < 30', () => {
+    const result = DailyReportInputSchema.safeParse({
+      ...validInput,
+      eggWeight: { min: 25, max: 60, avg: 45 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject eggWeight max > 80', () => {
+    const result = DailyReportInputSchema.safeParse({
+      ...validInput,
+      eggWeight: { min: 60, max: 85, avg: 70 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject ammoniaPpm > 50', () => {
+    const result = DailyReportInputSchema.safeParse({
+      ...validInput,
+      ammoniaPpm: 55,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject temperature < 10', () => {
+    const result = DailyReportInputSchema.safeParse({
+      ...validInput,
+      temperature: 9,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject temperature > 50', () => {
+    const result = DailyReportInputSchema.safeParse({
+      ...validInput,
+      temperature: 51,
+    });
+    expect(result.success).toBe(false);
   });
 
   it('should reject missing farmId', () => {
@@ -110,5 +172,54 @@ describe('DailyReportInputSchema', () => {
   it('should accept empty farmId', () => {
     const result = DailyReportInputSchema.safeParse({ ...validInput, farmId: '' });
     expect(result.success).toBe(false);
+  });
+
+  it('should accept valid non-negative integer damagedEggs and floorEggs', () => {
+    const result = DailyReportInputSchema.safeParse({
+      ...validInput,
+      damagedEggs: 15,
+      floorEggs: 8,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('should accept damagedEggs and floorEggs as 0 or omitted', () => {
+    const resultZero = DailyReportInputSchema.safeParse({
+      ...validInput,
+      damagedEggs: 0,
+      floorEggs: 0,
+    });
+    expect(resultZero.success).toBe(true);
+
+    const resultOmitted = DailyReportInputSchema.safeParse(validInput);
+    expect(resultOmitted.success).toBe(true);
+  });
+
+  it('should reject negative damagedEggs or floorEggs', () => {
+    const resultDamaged = DailyReportInputSchema.safeParse({
+      ...validInput,
+      damagedEggs: -1,
+    });
+    expect(resultDamaged.success).toBe(false);
+
+    const resultFloor = DailyReportInputSchema.safeParse({
+      ...validInput,
+      floorEggs: -5,
+    });
+    expect(resultFloor.success).toBe(false);
+  });
+
+  it('should reject non-integer decimal damagedEggs or floorEggs', () => {
+    const resultDamaged = DailyReportInputSchema.safeParse({
+      ...validInput,
+      damagedEggs: 4.5,
+    });
+    expect(resultDamaged.success).toBe(false);
+
+    const resultFloor = DailyReportInputSchema.safeParse({
+      ...validInput,
+      floorEggs: 2.3,
+    });
+    expect(resultFloor.success).toBe(false);
   });
 });

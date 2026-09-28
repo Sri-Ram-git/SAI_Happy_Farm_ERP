@@ -7,9 +7,10 @@ interface ChartDataTableProps {
   chartData: any[];
   farmFilter?: string;
   flockFilter?: string;
+  role?: 'supervisor' | 'admin';
 }
 
-export function ChartDataTable({ chartType, chartData, farmFilter, flockFilter }: ChartDataTableProps) {
+export function ChartDataTable({ chartType, chartData, farmFilter, flockFilter, role }: ChartDataTableProps) {
   if (!chartData || chartData.length === 0) {
     return <div className="text-muted" style={{ padding: 20, textAlign: 'center' }}>No data available for the selected period.</div>;
   }
@@ -71,7 +72,7 @@ export function ChartDataTable({ chartType, chartData, farmFilter, flockFilter }
                 <th>Farm Scope</th>
                 <th>Flock Scope</th>
                 <th>Mortality Count</th>
-                <th>Culling Count</th>
+                {role !== 'supervisor' && <th>Culling Count</th>}
                 <th>Mortality Rate %</th>
               </tr>
             </thead>
@@ -82,7 +83,7 @@ export function ChartDataTable({ chartType, chartData, farmFilter, flockFilter }
                   <td>{farmLabel}</td>
                   <td>{flockLabel}</td>
                   <td style={{ color: '#dc2626', fontWeight: 600 }}>{d.mortalityCount?.toLocaleString() ?? 0}</td>
-                  <td style={{ color: '#d97706' }}>{d.cullingCount?.toLocaleString() ?? 0}</td>
+                  {role !== 'supervisor' && <td style={{ color: '#d97706' }}>{d.cullingCount?.toLocaleString() ?? 0}</td>}
                   <td style={{ fontWeight: 600, color: d.mortality !== null && d.mortality > 2.0 ? '#dc2626' : '#15803d' }}>
                     {d.mortality !== null ? `${d.mortality}%` : 'No Data'}
                   </td>
@@ -122,6 +123,39 @@ export function ChartDataTable({ chartType, chartData, farmFilter, flockFilter }
       );
 
     case 'eggQuality':
+      if (role === 'supervisor') {
+        return (
+          <div className="table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Farm Scope</th>
+                  <th>Flock Scope</th>
+                  <th>Selection Quantity (Eggs)</th>
+                  <th>Selection Quality %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chartData.map((d) => (
+                  <tr key={d.fullDate}>
+                    <td className="td-bold">{formatDisplayDate(d.fullDate)}</td>
+                    <td>{farmLabel}</td>
+                    <td>{flockLabel}</td>
+                    <td style={{ fontWeight: 600, color: '#16a34a' }}>
+                      {d.selectionCount !== null && d.selectionCount !== undefined ? d.selectionCount.toLocaleString() : '--'}
+                    </td>
+                    <td style={{ fontWeight: 600, color: d.selectionPct !== null && d.selectionPct >= 80 ? '#15803d' : '#d97706' }}>
+                      {d.selectionPct !== null ? `${d.selectionPct}%` : '--'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+
       return (
         <div className="table-responsive">
           <table className="data-table">

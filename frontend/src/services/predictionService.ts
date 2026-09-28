@@ -39,8 +39,8 @@ export interface PredictionResult {
 export function generatePredictions(params: {
   historicalData: DailyDataPoint[];
   currentBirds: number;
-  flockStartDate: string;
-  curveType: 'CF_STD' | 'FR_STD';
+  flockStartDate?: string;
+  curveType?: 'CF_STD' | 'FR_STD';
   forecastDays: number;
   dailyMortalityRate?: number;
 }): PredictionResult {
@@ -50,7 +50,7 @@ export function generatePredictions(params: {
     flockStartDate,
     curveType,
     forecastDays,
-    dailyMortalityRate = 0.001,
+    dailyMortalityRate = 0,
   } = params;
 
   // Sort by date ascending
@@ -109,10 +109,16 @@ export function generatePredictions(params: {
   }
   const standardError = recentN > 2 ? Math.sqrt(residualSum / (recentN - 2)) : 5;
 
-  // Calculate flock age in weeks from start date
-  const startMs = new Date(flockStartDate + 'T00:00:00+05:30').getTime();
+  // Calculate flock age in weeks if start date provided
+  const hasFlockCurve = Boolean(flockStartDate && curveType);
+  let currentAgeWeeks = 0;
+  if (flockStartDate) {
+    const startMs = new Date(flockStartDate + 'T00:00:00+05:30').getTime();
+    const lastDateMs = new Date(lastActualDate + 'T00:00:00+05:30').getTime();
+    currentAgeWeeks = (lastDateMs - startMs) / (7 * 24 * 3600 * 1000);
+  }
+
   const lastDateMs = new Date(lastActualDate + 'T00:00:00+05:30').getTime();
-  const currentAgeWeeks = (lastDateMs - startMs) / (7 * 24 * 3600 * 1000);
 
   // Generate predictions
   const predictions: PredictionPoint[] = [];
@@ -121,17 +127,25 @@ export function generatePredictions(params: {
   for (let day = 1; day <= forecastDays; day++) {
     const forecastDate = new Date(lastDateMs + day * 24 * 3600 * 1000);
     const dateStr = forecastDate.toISOString().slice(0, 10);
-    const ageWeeks = currentAgeWeeks + day / 7;
+    const ageWeeks = currentAgeWeeks > 0 ? currentAgeWeeks + day / 7 : 0;
 
-    // Standard production at this age
-    const standardPct = getStandardProductionAtAge(curveType, ageWeeks);
+    let predictedPct: number;
+    let standardPct = 0;
 
-    // Trend projection
-    const trendPct = wma + slope * day;
+    if (hasFlockCurve && curveType) {
+      // Standard production at this age
+      const trendPct = wma + slope * day;
+      standardPct = getStandardProductionAtAge(curveType, ageWeeks);
+      const blendWeight = dataQuality === 'reliable' ? 0.7 : dataQuality === 'preliminary' ? 0.5 : 0.3;
+      predictedPct = blendWeight * trendPct + (1 - blendWeight) * standardPct;
+    } else {
+      // Pure historical farm-level forecast:
+      // Baseline expected production % is weighted historical farm production % (wma)
+      // If sufficient observations exist (>= 7), apply gently damped trend
+      const dampedTrendEffect = recentN >= 7 ? slope * Math.min(day, 7) * Math.pow(0.85, Math.max(0, day - 7)) : 0;
+      predictedPct = wma + dampedTrendEffect;
+    }
 
-    // Blend: 60% trend, 40% standard curve (adjustable)
-    const blendWeight = dataQuality === 'reliable' ? 0.7 : dataQuality === 'preliminary' ? 0.5 : 0.3;
-    let predictedPct = blendWeight * trendPct + (1 - blendWeight) * standardPct;
     predictedPct = Math.max(0, Math.min(100, predictedPct));
 
     // Prediction intervals widen with forecast horizon
@@ -139,8 +153,12 @@ export function generatePredictions(params: {
     const upperPct = Math.min(100, predictedPct + intervalWidth);
     const lowerPct = Math.max(0, predictedPct - intervalWidth);
 
-    // Estimate bird count (slight daily mortality)
-    runningBirds = Math.max(0, Math.round(runningBirds * (1 - dailyMortalityRate)));
+    // Estimate bird count
+    if (dailyMortalityRate > 0) {
+      runningBirds = Math.max(0, Math.round(runningBirds * (1 - dailyMortalityRate)));
+    } else {
+      runningBirds = currentBirds;
+    }
     const predictedEggs = Math.round((predictedPct / 100) * runningBirds);
 
     predictions.push({

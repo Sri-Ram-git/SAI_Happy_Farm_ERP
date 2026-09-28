@@ -15,6 +15,7 @@ import {
   Menu,
   X,
   MoreHorizontal,
+  History,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -38,6 +39,7 @@ const ADMIN_NAV = [
   { path: '/admin/flocks', label: 'Flocks', icon: Layers },
   { path: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
   { path: '/admin/submissions', label: 'Submissions', icon: ClipboardList },
+  { path: '/admin/import', label: 'Import History', icon: History },
   { path: '/admin/feed-load', label: 'Feed Load', icon: Package },
   { path: '/admin/prediction', label: 'Prediction', icon: Sparkles },
 ];
@@ -68,6 +70,13 @@ export function Sidebar({ role, userName }: SidebarProps) {
   }, [location.pathname]);
 
   const items = role === 'admin' ? ADMIN_NAV : SUPERVISOR_NAV;
+
+  const isItemActive = (itemPath: string) => {
+    if (location.pathname === itemPath) return true;
+    if (itemPath === '/admin' && location.pathname === '/admin/overview') return true;
+    if (itemPath === '/supervisor' && location.pathname === '/supervisor/overview') return true;
+    return false;
+  };
 
   // Primary 4 tabs for bottom navigation bar
   const primaryBottomTabs = items.slice(0, 4);
@@ -103,7 +112,7 @@ export function Sidebar({ role, userName }: SidebarProps) {
         <nav className="sidebar-nav">
           {items.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+            const isActive = isItemActive(item.path);
             return (
               <button
                 key={item.path}
@@ -172,7 +181,7 @@ export function Sidebar({ role, userName }: SidebarProps) {
             <nav className="mobile-drawer-nav">
               {items.map((item) => {
                 const Icon = item.icon;
-                const isActive = location.pathname === item.path;
+                const isActive = isItemActive(item.path);
                 return (
                   <button
                     key={item.path}
@@ -215,7 +224,7 @@ export function Sidebar({ role, userName }: SidebarProps) {
       <nav className="mobile-nav">
         {primaryBottomTabs.map((item) => {
           const Icon = item.icon;
-          const isActive = location.pathname === item.path;
+          const isActive = isItemActive(item.path);
           return (
             <button
               key={item.path}

@@ -4,9 +4,10 @@ import { HelpCircle, Calculator, Database, Filter, Layers } from 'lucide-react';
 interface CalculationDetailsProps {
   chartType: ChartType;
   standardCurveType?: 'CF_STD' | 'FR_STD';
+  role?: 'supervisor' | 'admin';
 }
 
-export function CalculationDetails({ chartType, standardCurveType = 'CF_STD' }: CalculationDetailsProps) {
+export function CalculationDetails({ chartType, standardCurveType = 'CF_STD', role }: CalculationDetailsProps) {
   const getFormulaInfo = () => {
     switch (chartType) {
       case 'production':
@@ -21,9 +22,9 @@ export function CalculationDetails({ chartType, standardCurveType = 'CF_STD' }: 
 
       case 'mortality':
         return {
-          title: 'Daily Mortality & Culling Tracking',
+          title: role === 'supervisor' ? 'Daily Mortality Tracking' : 'Daily Mortality & Culling Tracking',
           formula: 'Mortality Rate % = (Daily Mortality Count ÷ Opening Bird Count) × 100',
-          dataSource: 'Daily farmer report (mortality, culling, openingBirdCount)',
+          dataSource: role === 'supervisor' ? 'Daily farmer report (mortality, openingBirdCount)' : 'Daily farmer report (mortality, culling, openingBirdCount)',
           standardInfo: 'Recommended operational target is ≤ 0.1% daily mortality (or ≤ 2.0% cumulative period mortality).',
           units: 'Bird Count & Percentage (%)',
           aggregation: 'Total daily count sum & average mortality percentage.',
@@ -41,12 +42,14 @@ export function CalculationDetails({ chartType, standardCurveType = 'CF_STD' }: 
 
       case 'eggQuality':
         return {
-          title: 'Egg Weight & Selection Quality',
+          title: role === 'supervisor' ? 'Egg Selection Analytics' : 'Egg Weight & Selection Quality',
           formula: 'Selection Egg % = (Selection Eggs ÷ Total Eggs Produced) × 100',
-          dataSource: 'Daily farmer report egg weight sampling (eggWeight.min, max, avg) & selection eggs (selectionEggs)',
+          dataSource: role === 'supervisor'
+            ? 'Daily farmer report selection eggs (selectionEggs) & eggs produced'
+            : 'Daily farmer report egg weight sampling (eggWeight.min, max, avg) & selection eggs (selectionEggs)',
           standardInfo: 'Selection eggs represent grade-A hatchable/marketable eggs. Target: ≥ 85%.',
-          units: 'Grams (g) & Percentage (%)',
-          aggregation: 'Average weight sampling & selection percentage rate.',
+          units: role === 'supervisor' ? 'Selected Eggs Count & Percentage (%)' : 'Grams (g) & Percentage (%)',
+          aggregation: role === 'supervisor' ? 'Total selected eggs count & selection percentage rate.' : 'Average weight sampling & selection percentage rate.',
         };
 
       case 'bodyWeight':

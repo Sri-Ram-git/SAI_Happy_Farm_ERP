@@ -1,28 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../context/AuthContext';
 import { logoutUser } from '../services/authService';
-import { submitReport, syncPendingSubmissions, subscribeToTodayReport, getIstDate, formatDisplayDate, calculateWeekNumber } from '../services/reportService';
+import {
+  submitReport,
+  syncPendingSubmissions,
+  subscribeToTodayReport,
+  getIstDate,
+  formatDisplayDate,
+  calculateWeekNumber,
+  calculateReportingWeek,
+  subscribeToWeeklyMetrics,
+  getAllowedReportDates,
+  type WeeklyMetricsDoc,
+  type AllowedReportDateOption,
+} from '../services/reportService';
 import { saveFarmerDraft, getFarmerDraft, clearFarmerDraft } from '../services/offlineDraftService';
 import { subscribeToFlocksByFarm, type FlockDoc } from '../services/flockDataService';
 import { subscribeToFarm, type FarmDoc } from '../services/farmDataService';
 import { LanguageSelector } from '../components/LanguageSelector';
 import { ReportStatusModal } from '../components/ReportStatusModal';
-import { Check, Home, Lock, LogOut } from 'lucide-react';
+import { OverwriteConfirmationModal } from '../components/OverwriteConfirmationModal';
+import { Calendar, Check, Home, Lock, LogOut } from 'lucide-react';
 import {
   FarmFormData,
   INITIAL_FARM_FORM_DATA,
   FarmFormErrors,
   STEP_NAMES,
   validateStep,
+  calculateFeedGramsPerBird,
+  isHighAmmonia,
 } from '../utils/formValidation';
 
 function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
+  const { t } = useTranslation();
   return (
     <div className="field">
       <label>{label}</label>
       {children}
-      {error && <span className="field-error">{error}</span>}
+      {error && <span className="field-error">{error.startsWith('validation.') ? t(error) : error}</span>}
     </div>
   );
 }
@@ -52,19 +69,39 @@ interface VerifyProps {
   data: FarmFormData;
   farmId: string;
   reportDate: string;
-  weekNumber: number;
+  weekNumber: number | null;
+  weekLabel: string;
   birdCount: number;
   mortalityPct: string;
   cullingPct: string;
   eggProdPct: string;
   selectionPct: string;
   feedKgDisplay: number;
+  feedPerBirdDisplay: number;
+  weeklyMetrics: WeeklyMetricsDoc | null;
   onEdit: (step: number) => void;
   t: any;
   flockName: string;
 }
 
-function VerifyScreen({ data, farmId, reportDate, weekNumber, birdCount, mortalityPct, cullingPct, eggProdPct, selectionPct, feedKgDisplay, onEdit, t, flockName }: VerifyProps) {
+function VerifyScreen({
+  data,
+  farmId,
+  reportDate,
+  weekNumber,
+  weekLabel,
+  birdCount,
+  mortalityPct,
+  cullingPct,
+  eggProdPct,
+  selectionPct,
+  feedKgDisplay,
+  feedPerBirdDisplay,
+  weeklyMetrics,
+  onEdit,
+  t,
+  flockName,
+}: VerifyProps) {
   return (
     <>
       <h3 className="form-section-title">{t('farmer.verifyReport')}</h3>
@@ -72,7 +109,7 @@ function VerifyScreen({ data, farmId, reportDate, weekNumber, birdCount, mortali
       <VerifyCard title={t('common.info')} onEdit={() => onEdit(0)} t={t}>
         <VerifyRow label={t('common.date')} value={formatDisplayDate(reportDate)} />
         <VerifyRow label={t('flock.farm')} value={farmId} />
-        <VerifyRow label="Week" value={`Week ${weekNumber}`} />
+        <VerifyRow label={t('farmer.week')} value={weekLabel ? `${t('farmer.week')} ${weekLabel}` : '--'} />
         {flockName && <VerifyRow label={t('flock.flockName')} value={flockName} />}
       </VerifyCard>
 
@@ -82,8 +119,9 @@ function VerifyScreen({ data, farmId, reportDate, weekNumber, birdCount, mortali
       </VerifyCard>
 
       <VerifyCard title={t('farmer.feed')} onEdit={() => onEdit(0)} t={t}>
-        <VerifyRow label={`${t('farmer.quantity')} (Kg)`} value={`${feedKgDisplay.toFixed(2)} Kg`} />
-        <VerifyRow label="Equivalent Weight" value={`${(feedKgDisplay * 1000).toLocaleString()} G`} />
+        <VerifyRow label={`${t('farmer.feedUsed', 'Feed Used')} (kg)`} value={`${feedKgDisplay.toFixed(2)} kg`} />
+        <VerifyRow label={`${t('farmer.feedPerBird', 'Feed per Bird')} (g/bird)`} value={birdCount > 0 && feedKgDisplay > 0 ? `${feedPerBirdDisplay} g/bird` : '--'} />
+        <VerifyRow label={t('farmer.equivalentWeight')} value={`${(feedKgDisplay * 1000).toLocaleString()} g`} />
       </VerifyCard>
 
       <VerifyCard title={t('farmer.mortality')} onEdit={() => onEdit(0)} t={t}>
@@ -104,35 +142,189 @@ function VerifyScreen({ data, farmId, reportDate, weekNumber, birdCount, mortali
         <VerifyRow label={t('farmer.count')} value={`${data.selectionEggs} (${selectionPct}%)`} />
       </VerifyCard>
 
+      <VerifyCard title={t('farmer.damagedEggs')} onEdit={() => onEdit(1)} t={t}>
+        <VerifyRow label={t('farmer.count')} value={data.damagedEggs || '0'} />
+      </VerifyCard>
+
+      <VerifyCard title={t('farmer.floorEggs')} onEdit={() => onEdit(1)} t={t}>
+        <VerifyRow label={t('farmer.count')} value={data.floorEggs || '0'} />
+      </VerifyCard>
+
       <VerifyCard title={t('farmer.temperature')} onEdit={() => onEdit(1)} t={t}>
-        <VerifyRow label="Min Temp" value={`${data.tempMin} °C`} />
-        <VerifyRow label="Max Temp" value={`${data.tempMax} °C`} />
-        <VerifyRow label="Avg Temp" value={`${((Number(data.tempMin) + Number(data.tempMax)) / 2).toFixed(1)} °C`} />
+        <VerifyRow label={t('farmer.minTemp')} value={`${data.tempMin} °C`} />
+        <VerifyRow label={t('farmer.maxTemp')} value={`${data.tempMax} °C`} />
+        <VerifyRow label={t('farmer.avgTemp')} value={`${((Number(data.tempMin) + Number(data.tempMax)) / 2).toFixed(1)} °C`} />
       </VerifyCard>
 
       <VerifyCard title={t('farmer.eggWeight')} onEdit={() => onEdit(2)} t={t}>
-        <VerifyRow label="Min" value={`${data.eggWeightMin} g`} />
-        <VerifyRow label="Max" value={`${data.eggWeightMax} g`} />
-        <VerifyRow label="Avg" value={`${data.eggWeightAvg} g`} />
+        <VerifyRow label={t('farmer.min')} value={`${data.eggWeightMin} g`} />
+        <VerifyRow label={t('farmer.max')} value={`${data.eggWeightMax} g`} />
+        <VerifyRow label={t('farmer.avg')} value={`${data.eggWeightAvg} g`} />
       </VerifyCard>
 
       <VerifyCard title={t('farmer.bodyWeight')} onEdit={() => onEdit(2)} t={t}>
-        <VerifyRow label="Min" value={`${data.bodyWeightMin} g`} />
-        <VerifyRow label="Max" value={`${data.bodyWeightMax} g`} />
-        <VerifyRow label="Avg" value={`${data.bodyWeightAvg} g`} />
+        {data.bodyWeightMin ? (
+          <>
+            <VerifyRow label={t('farmer.min')} value={`${data.bodyWeightMin} g`} />
+            <VerifyRow label={t('farmer.max')} value={`${data.bodyWeightMax} g`} />
+            <VerifyRow label={t('farmer.avg')} value={`${data.bodyWeightAvg} g`} />
+          </>
+        ) : weeklyMetrics ? (
+          <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', fontSize: '13px', color: '#475569' }}>
+            {t('farmer.weeklyAlreadyRecorded', { week: weekNumber, date: formatDisplayDate(weeklyMetrics.reportDate) })}: <strong>{weeklyMetrics.bodyWeight.avg} g</strong> ({weeklyMetrics.bodyWeight.min} – {weeklyMetrics.bodyWeight.max} g)
+          </div>
+        ) : (
+          <div style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '6px', fontSize: '13px', color: '#64748b' }}>
+            {t('farmer.optionalWeekly')}
+          </div>
+        )}
       </VerifyCard>
 
       <VerifyCard title={t('common.other')} onEdit={() => onEdit(2)} t={t}>
-        <VerifyRow label={t('farmer.ammonium')} value={`${data.ammoniaPpm} PPM`} />
+        {data.ammoniaPpm !== '' ? (
+          <>
+            <VerifyRow label={t('farmer.ammonium')} value={`${data.ammoniaPpm} PPM`} />
+            {isHighAmmonia(data.ammoniaPpm) && (
+              <div style={{ marginTop: '8px', padding: '10px 14px', background: '#fffbeb', borderLeft: '4px solid #f59e0b', borderRadius: '6px' }}>
+                <strong style={{ color: '#92400e', display: 'block', marginBottom: '2px', fontSize: '12px' }}>
+                  ⚠️ {t('farmer.ammoniaAlertTitle')}
+                </strong>
+                <p style={{ margin: 0, fontSize: '12px', color: '#78350f' }}>
+                  {t('farmer.ammoniaAlertMessage')}
+                </p>
+              </div>
+            )}
+          </>
+        ) : (
+          <VerifyRow label={t('farmer.ammonium')} value={`-- ${t('farmer.optionalDailyWeekly')}`} />
+        )}
         {data.remarks && <VerifyRow label={t('farmer.remarks')} value={data.remarks} />}
       </VerifyCard>
     </>
   );
 }
 
+function DateSelectionOverlay({
+  allowedOptions,
+  selectedDate,
+  onSelectDate,
+  onClose,
+  t,
+}: {
+  allowedOptions: AllowedReportDateOption[];
+  selectedDate: string;
+  onSelectDate: (isoDate: string) => void;
+  onClose: () => void;
+  t: any;
+}) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (overlayRef.current && !overlayRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={overlayRef}
+      className="date-selection-popover"
+      onClick={(e) => e.stopPropagation()}
+      role="dialog"
+      aria-label={t('farmer.selectReportDate', 'Select report date')}
+    >
+      <div className="date-popover-header">
+        <span className="date-popover-title">{t('farmer.selectReportDate', 'Select report date')}</span>
+        <button
+          type="button"
+          className="date-popover-close"
+          onClick={onClose}
+          aria-label={t('common.close', 'Close')}
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="date-popover-options">
+        {allowedOptions.map((option) => {
+          const isSelected = option.isoDate === selectedDate;
+          const labelText = t(option.labelKey, option.key === 'yesterday' ? 'Yesterday' : option.key === 'today' ? 'Today' : 'Tomorrow');
+
+          return (
+            <button
+              key={option.isoDate}
+              type="button"
+              className={`date-option-card ${isSelected ? 'selected' : ''}`}
+              onClick={() => onSelectDate(option.isoDate)}
+            >
+              <div className="date-option-left">
+                <span className="date-option-label">{labelText}</span>
+                <span className="date-option-sub">
+                  {option.dayOfWeekName}, {option.displayFormatted}
+                </span>
+              </div>
+              {isSelected && <Check size={16} className="date-option-check" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function FarmerFormPage() {
   const { t } = useTranslation();
-  const { userProfile, firebaseUser } = useAuth();
+  const { userProfile, firebaseUser, loading: authLoading } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const allowedOptions = getAllowedReportDates();
+  const allowedIsoDates = allowedOptions.map((o) => o.isoDate);
+  const todayIso = allowedOptions.find((o) => o.key === 'today')?.isoDate || getIstDate();
+
+  const [reportDate, setReportDate] = useState<string>(() => {
+    const qDate = searchParams.get('date');
+    if (qDate && allowedIsoDates.includes(qDate)) {
+      return qDate;
+    }
+    return todayIso;
+  });
+
+  const [isDateOverlayOpen, setIsDateOverlayOpen] = useState(false);
+  const [showOverwriteModal, setShowOverwriteModal] = useState(false);
+
+  useEffect(() => {
+    const qDate = searchParams.get('date');
+    if (qDate && qDate !== reportDate) {
+      if (allowedIsoDates.includes(qDate)) {
+        setReportDate(qDate);
+      } else {
+        setReportDate(todayIso);
+        setSearchParams({ date: todayIso }, { replace: true });
+      }
+    }
+  }, [searchParams]);
+
+  const handleDateChange = (newDate: string) => {
+    if (!newDate || !allowedIsoDates.includes(newDate)) return;
+    setReportDate(newDate);
+    setSearchParams({ date: newDate }, { replace: true });
+    setIsDateOverlayOpen(false);
+  };
+
   const [step, setStep] = useState(0);
   const [data, setData] = useState<FarmFormData>(INITIAL_FARM_FORM_DATA);
   const [errors, setErrors] = useState<FarmFormErrors>({});
@@ -149,6 +341,8 @@ export function FarmerFormPage() {
   const [todayReport, setTodayReport] = useState<any | null>(null);
   const [showStatusModal, setShowStatusModal] = useState<boolean>(false);
   const [hasDismissedModal, setHasDismissedModal] = useState<boolean>(false);
+  const [weeklyMetrics, setWeeklyMetrics] = useState<WeeklyMetricsDoc | null>(null);
+  const [isEditingWeekly, setIsEditingWeekly] = useState<boolean>(false);
 
   useEffect(() => {
     if (todayReport && (todayReport.submissionVersion != null || todayReport.status) && !hasDismissedModal) {
@@ -158,12 +352,38 @@ export function FarmerFormPage() {
 
   const farmId = userProfile?.farmIds?.[0] ?? '';
   const userName = userProfile?.name || firebaseUser?.displayName || 'Farmer';
-  const reportDate = getIstDate();
   const birdCount = Number(data.birdCount) || 0;
 
-  // Calculate Week Number from authoritative creation / start date
-  const creationDateSource = flocks[0]?.startDate || flocks[0]?.createdAt || (userProfile as any)?.createdAt || (userProfile as any)?.created_at || farmDoc?.inventoryInitializedAt || (farmDoc as any)?.createdAt;
-  const weekNumber = calculateWeekNumber(creationDateSource, reportDate);
+  // Authoritative Report-Week Calculation from authenticated farmer's users document createdat
+  const isLoadingUser = authLoading || !userProfile;
+  const userCreatedAt = userProfile?.createdat ?? userProfile?.createdAt ?? (userProfile as any)?.created_at ?? null;
+  const reportingWeek = userCreatedAt
+    ? calculateReportingWeek(userCreatedAt, reportDate, 3)
+    : { weekNumber: null, dayInWeek: null, daysElapsed: null, label: '', isValid: false, error: 'Missing creation date' };
+  const weekNumber = reportingWeek.weekNumber;
+  const weekLabel = reportingWeek.label;
+
+  // Subscribe to weekly metrics lock for this farm & week
+  useEffect(() => {
+    if (!farmId || !weekNumber) return;
+    const unsub = subscribeToWeeklyMetrics(farmId, weekNumber, (metrics) => {
+      setWeeklyMetrics(metrics);
+      if (metrics && metrics.bodyWeight) {
+        setData((prev) => {
+          if (!prev.bodyWeightMin && !prev.bodyWeightMax) {
+            return {
+              ...prev,
+              bodyWeightMin: String(metrics.bodyWeight.min ?? ''),
+              bodyWeightMax: String(metrics.bodyWeight.max ?? ''),
+              bodyWeightAvg: String(metrics.bodyWeight.avg ?? ''),
+            };
+          }
+          return prev;
+        });
+      }
+    });
+    return () => unsub();
+  }, [farmId, weekNumber]);
 
   // Subscribe to today's canonical report for current farm & date
   useEffect(() => {
@@ -181,17 +401,19 @@ export function FarmerFormPage() {
           culling: String(rep.culling ?? prev.culling),
           eggsProduced: String(rep.eggsProduced ?? prev.eggsProduced),
           selectionEggs: String(rep.selectionEggs ?? prev.selectionEggs),
+          damagedEggs: rep.damagedEggs != null ? String(rep.damagedEggs) : prev.damagedEggs,
+          floorEggs: rep.floorEggs != null ? String(rep.floorEggs) : prev.floorEggs,
           temperature: String(rep.temperature ?? prev.temperature),
           tempMin: String(rep.tempMin ?? prev.tempMin ?? ''),
           tempMax: String(rep.tempMax ?? prev.tempMax ?? ''),
           eggWeightMin: String(rep.eggWeight?.min ?? prev.eggWeightMin),
           eggWeightMax: String(rep.eggWeight?.max ?? prev.eggWeightMax),
           eggWeightAvg: String(rep.eggWeight?.avg ?? prev.eggWeightAvg),
-          bodyWeightMin: String(rep.bodyWeight?.min ?? prev.bodyWeightMin),
-          bodyWeightMax: String(rep.bodyWeight?.max ?? prev.bodyWeightMax),
-          bodyWeightAvg: String(rep.bodyWeight?.avg ?? prev.bodyWeightAvg),
+          bodyWeightMin: rep.bodyWeight?.min != null ? String(rep.bodyWeight.min) : prev.bodyWeightMin,
+          bodyWeightMax: rep.bodyWeight?.max != null ? String(rep.bodyWeight.max) : prev.bodyWeightMax,
+          bodyWeightAvg: rep.bodyWeight?.avg != null ? String(rep.bodyWeight.avg) : prev.bodyWeightAvg,
           remarks: rep.remarks ?? prev.remarks,
-          ammoniaPpm: String(rep.ammoniaPpm ?? prev.ammoniaPpm),
+          ammoniaPpm: rep.ammoniaPpm != null ? String(rep.ammoniaPpm) : prev.ammoniaPpm,
         }));
       }
     });
@@ -390,7 +612,7 @@ export function FarmerFormPage() {
       temperature: String(avgTemp || data.temperature || ''),
     };
 
-    const stepErrors = validateStep(step, effectiveData, effectiveBirdCount);
+    const stepErrors = validateStep(step, effectiveData, effectiveBirdCount, t);
     if (Object.keys(stepErrors).length > 0) {
       console.warn('[FarmerForm] Cannot advance, stepErrors:', stepErrors);
       setErrors(stepErrors);
@@ -418,9 +640,32 @@ export function FarmerFormPage() {
 
   const handleSubmit = async () => {
     if (submitting || submitted) return;
+
+    const hasExistingReport =
+      todayReport &&
+      (todayReport.submissionVersion >= 1 ||
+        todayReport.status === 'submitted' ||
+        todayReport.status === 'corrected');
+
+    if (hasExistingReport) {
+      setShowOverwriteModal(true);
+      return;
+    }
+
+    await executeSubmission();
+  };
+
+  const executeSubmission = async () => {
+    setShowOverwriteModal(false);
     setSubmitting(true);
     setSubmitError('');
     try {
+      if (!reportingWeek.isValid || reportingWeek.weekNumber == null) {
+        setSubmitError(t('farmer.reportingPeriodUnavailable', 'Reporting period is unavailable or invalid. Farmer account creation date is missing.'));
+        setSubmitting(false);
+        return;
+      }
+
       let feedKg = Number(data.feedQuantity) || 0;
       if (data.feedUnit === 'g') {
         feedKg = feedKg / 1000;
@@ -429,6 +674,26 @@ export function FarmerFormPage() {
       const effectiveFlockId = data.flockId || flocks[0]?.flockId || `${farmId}_FL01`;
       const avgTemp = (Number(data.tempMin) + Number(data.tempMax)) / 2;
 
+      const hasBw = data.bodyWeightMin !== '' && data.bodyWeightMax !== '';
+      const bodyWeightPayload = hasBw
+        ? {
+            min: Number(data.bodyWeightMin),
+            max: Number(data.bodyWeightMax),
+            avg:
+              Number(data.bodyWeightAvg) ||
+              Number(
+                (
+                  (Number(data.bodyWeightMin) + Number(data.bodyWeightMax)) /
+                  2
+                ).toFixed(1)
+              ),
+          }
+        : weeklyMetrics && !isEditingWeekly
+        ? weeklyMetrics.bodyWeight
+        : null;
+
+      const feedGramsPerBirdVal = calculateFeedGramsPerBird(feedKg, birdCount);
+
       const payload = {
         farmId,
         flockId: effectiveFlockId,
@@ -436,10 +701,13 @@ export function FarmerFormPage() {
         feedKg,
         feedGrams: feedKg * 1000,
         feedG: feedKg * 1000,
+        feedGramsPerBird: feedGramsPerBirdVal,
         mortality: Number(data.mortality) || 0,
         culling: Number(data.culling) || 0,
         eggsProduced: Number(data.eggsProduced) || 0,
         selectionEggs: Number(data.selectionEggs) || 0,
+        damagedEggs: Number(data.damagedEggs) || 0,
+        floorEggs: Number(data.floorEggs) || 0,
         temperature: avgTemp || 0,
         tempMin: Number(data.tempMin) || 0,
         tempMax: Number(data.tempMax) || 0,
@@ -448,15 +716,12 @@ export function FarmerFormPage() {
           max: Number(data.eggWeightMax) || 0,
           avg: Number(data.eggWeightAvg) || 0,
         },
-        bodyWeight: {
-          min: Number(data.bodyWeightMin) || 0,
-          max: Number(data.bodyWeightMax) || 0,
-          avg: Number(data.bodyWeightAvg) || 0,
-        },
+        bodyWeight: bodyWeightPayload,
         remarks: data.remarks || '',
-        ammoniaPpm: Number(data.ammoniaPpm) || 0,
+        ammoniaPpm: data.ammoniaPpm !== '' ? Number(data.ammoniaPpm) : null,
         submittedBy: userProfile!.uid,
         weekNumber,
+        weekLabel,
         submissionDate: reportDate,
         reportDate: reportDate,
         submissionKey: `sub_${userProfile!.uid}_${farmId}_${reportDate}`,
@@ -467,8 +732,11 @@ export function FarmerFormPage() {
           throw new Error(`Invalid numeric value for field: ${key}`);
         }
       }
-      if (!Number.isFinite(payload.eggWeight.min) || !Number.isFinite(payload.bodyWeight.min)) {
-          throw new Error(`Invalid numeric value in weight fields`);
+      if (!Number.isFinite(payload.eggWeight.min) || !Number.isFinite(payload.eggWeight.max)) {
+        throw new Error(`Invalid numeric value in weight fields`);
+      }
+      if (payload.bodyWeight && (!Number.isFinite(payload.bodyWeight.min) || !Number.isFinite(payload.bodyWeight.max))) {
+        throw new Error(`Invalid numeric value in body weight fields`);
       }
 
       const res = await submitReport(payload);
@@ -516,6 +784,8 @@ export function FarmerFormPage() {
   const eggProdPct = birdCount > 0 ? ((Number(data.eggsProduced) / birdCount) * 100).toFixed(1) : '0.0';
   const selectionPct = Number(data.eggsProduced) > 0 ? ((Number(data.selectionEggs) / Number(data.eggsProduced)) * 100).toFixed(1) : '0.0';
   const feedKgDisplay = data.feedQuantity ? Number(data.feedQuantity) : 0;
+  const feedPerBirdDisplay = calculateFeedGramsPerBird(feedKgDisplay, birdCount);
+  const maxEggsAllowed = birdCount > 0 ? Math.floor(birdCount * 0.95) : 0;
 
   if (submittedOffline) {
     return (
@@ -533,7 +803,7 @@ export function FarmerFormPage() {
             <div className="farmer-context-info">
               <Home size={13} className="farmer-context-icon" />
               <span>{t('flock.farm')}: <strong>{farmId}</strong></span>
-              <span className="offline-status-badge offline">🟠 Offline (Saved)</span>
+              <span className="offline-status-badge offline">🟠 {t('farmer.offlineSaved')}</span>
             </div>
             <div className="farmer-controls-right">
               <LanguageSelector />
@@ -549,12 +819,12 @@ export function FarmerFormPage() {
             <div className="success-icon" style={{ background: '#fef3c7', color: '#d97706' }}>
               <Check size={36} />
             </div>
-            <h2>Report saved on this device</h2>
+            <h2>{t('farmer.reportSavedLocally')}</h2>
             <p style={{ marginTop: '10px', fontSize: '14px', color: '#475569' }}>
-              It will be submitted automatically when internet connection returns.
+              {t('farmer.offlineSyncNotice')}
             </p>
             <p className="text-muted" style={{ marginTop: '14px' }}>
-              {t('common.date')}: {formatDisplayDate(reportDate)} | Week {weekNumber} | {t('flock.farm')}: {farmId}
+              {t('common.date')}: {formatDisplayDate(reportDate)} | {t('farmer.week')} {weekLabel} | {t('flock.farm')}: {farmId}
             </p>
             <button className="btn btn--primary btn--full" style={{ marginTop: 20 }} onClick={handleReset}>
               {t('common.save')}
@@ -582,7 +852,7 @@ export function FarmerFormPage() {
               <Home size={13} className="farmer-context-icon" />
               <span>{t('flock.farm')}: <strong>{farmId}</strong></span>
               <span className={`offline-status-badge ${!isOnline ? 'offline' : isSyncing ? 'syncing' : 'online'}`}>
-                {!isOnline ? '🟠 Offline (Saved)' : isSyncing ? '🔵 Syncing...' : '🟢 Online'}
+                {!isOnline ? `🟠 ${t('farmer.offlineSaved')}` : isSyncing ? `🔵 ${t('farmer.syncing')}` : `🟢 ${t('farmer.online')}`}
               </span>
             </div>
             <div className="farmer-controls-right">
@@ -599,7 +869,7 @@ export function FarmerFormPage() {
             <div className="success-icon"><Check size={36} /></div>
             <h2>{t('common.success')}</h2>
             <p>{t('farmer.successMessage')}</p>
-            <p className="text-muted">{t('common.date')}: {formatDisplayDate(reportDate)} | Week {weekNumber} | {t('flock.farm')}: {farmId}</p>
+            <p className="text-muted">{t('common.date')}: {formatDisplayDate(reportDate)} | {t('farmer.week')} {weekLabel} | {t('flock.farm')}: {farmId}</p>
             <button className="btn btn--primary btn--full" style={{ marginTop: 20 }} onClick={handleReset}>
               {t('common.save')}
             </button>
@@ -628,7 +898,7 @@ export function FarmerFormPage() {
             <Home size={13} className="farmer-context-icon" />
             <span>{t('flock.farm')}: <strong>{farmId}</strong></span>
             <span className={`offline-status-badge ${!isOnline ? 'offline' : isSyncing ? 'syncing' : 'online'}`}>
-              {!isOnline ? '🟠 Offline (Saved)' : isSyncing ? '🔵 Syncing...' : '🟢 Online'}
+              {!isOnline ? `🟠 ${t('farmer.offlineSaved')}` : isSyncing ? `🔵 ${t('farmer.syncing')}` : `🟢 ${t('farmer.online')}`}
             </span>
           </div>
           <div className="farmer-controls-right">
@@ -644,20 +914,45 @@ export function FarmerFormPage() {
 
         {farmDoc && farmDoc.inventoryInitialized !== true && (
           <div className="alert alert--critical" style={{ marginBottom: '14px', fontWeight: 600 }}>
-            ⚠️ Your farm inventory has not been initialized. You cannot submit daily reports until an Admin sets up the initial bird and feed inventory.
+            ⚠️ {t('farmer.inventoryNotInitialized')}
+          </div>
+        )}
+
+        {!isLoadingUser && !reportingWeek.isValid && (
+          <div className="alert alert--critical" style={{ marginBottom: '14px', fontWeight: 600 }}>
+            ⚠️ {t('farmer.reportingPeriodUnavailable', 'Reporting period is unavailable. Farmer account creation date is missing or invalid.')}
           </div>
         )}
 
         {(!farmDoc || farmDoc.inventoryInitialized === true) && (
           <>
             <div className="locked-card">
-              <div className="locked-card-title">REPORT INFORMATION</div>
+              <div className="locked-card-title">{t('farmer.reportInformation').toUpperCase()}</div>
               <div className="locked-grid">
-                <div className="locked-item">
+                <div className="locked-item" style={{ position: 'relative' }}>
                   <span className="locked-label">{t('common.date').toUpperCase()}</span>
-                  <span className="locked-value">
-                    {formatDisplayDate(reportDate)} <Lock size={12} className="lock-icon" />
-                  </span>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span className="locked-value">{formatDisplayDate(reportDate)}</span>
+                    <button
+                      type="button"
+                      className="btn-edit-date-compact"
+                      onClick={() => setIsDateOverlayOpen((prev) => !prev)}
+                      aria-expanded={isDateOverlayOpen}
+                      aria-label={t('farmer.changeDate', 'Change date')}
+                    >
+                      <Calendar size={13} />
+                      <span>{t('farmer.changeDate', 'Change date')}</span>
+                    </button>
+                  </div>
+                  {isDateOverlayOpen && (
+                    <DateSelectionOverlay
+                      allowedOptions={allowedOptions}
+                      selectedDate={reportDate}
+                      onSelectDate={handleDateChange}
+                      onClose={() => setIsDateOverlayOpen(false)}
+                      t={t}
+                    />
+                  )}
                 </div>
                 <div className="locked-item">
                   <span className="locked-label">{t('farmer.openingBirds').toUpperCase()}</span>
@@ -666,9 +961,9 @@ export function FarmerFormPage() {
                   </span>
                 </div>
                 <div className="locked-item">
-                  <span className="locked-label">WEEK</span>
+                  <span className="locked-label">{t('farmer.week').toUpperCase()}</span>
                   <span className="locked-value week-val">
-                    Week {weekNumber}
+                    {isLoadingUser ? '--' : reportingWeek.isValid ? `${t('farmer.week')} ${weekLabel}` : '--'}
                   </span>
                 </div>
                 <div className="locked-item">
@@ -682,7 +977,7 @@ export function FarmerFormPage() {
 
             <div className="form-progress">
               <div className="form-progress-text">
-                {step < 3 ? `Step ${step + 1} of 3 — ${t(`farmer.step${step + 1}`)}` : t('farmer.verifyReport')}
+                {step < 3 ? `${t('farmer.step', { current: step + 1, total: 3 })} — ${t(`farmer.step${step + 1}`)}` : t('farmer.verifyReport')}
               </div>
               <div className="form-progress-track">
                 <div className="form-progress-fill" style={{ width: `${Math.min(((step + 1) / 4) * 100, 100)}%` }} />
@@ -696,21 +991,41 @@ export function FarmerFormPage() {
                   
                   {step === 0 && (
                     <>
-                      <Field label={`${t('farmer.feed')} (KG)`} error={errors.feedQuantity}>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          min="0"
-                          value={data.feedQuantity}
-                          onChange={(e) => handleChange('feedQuantity', e.target.value)}
-                          onWheel={(e) => e.currentTarget.blur()}
-                          placeholder="e.g. 250"
-                        />
-                      </Field>
-                      <div className="calc-inline">
-                        <span className="calc-inline-label">Equivalent Weight:</span>
-                        <span className="calc-inline-value">{data.feedQuantity ? `${(Number(data.feedQuantity) * 1000).toLocaleString()} G` : '0 G'}</span>
-                        <span className="calc-inline-sub">Calculated automatically</span>
+                      <div className="field-row">
+                        <Field label={`${t('farmer.feedUsed', 'Feed Used')} (kg)`} error={errors.feedQuantity}>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            value={data.feedQuantity}
+                            onChange={(e) => handleChange('feedQuantity', e.target.value)}
+                            onWheel={(e) => e.currentTarget.blur()}
+                            placeholder="e.g. 250"
+                          />
+                        </Field>
+                        <Field label={`${t('farmer.feedPerBird', 'Feed per Bird')} (g/bird)`}>
+                          <input
+                            type="text"
+                            readOnly
+                            tabIndex={-1}
+                            value={
+                              data.feedQuantity === ''
+                                ? '--'
+                                : birdCount <= 0 || !Number.isFinite(birdCount)
+                                ? '--'
+                                : Number(data.feedQuantity) < 0 || isNaN(Number(data.feedQuantity))
+                                ? '--'
+                                : `${calculateFeedGramsPerBird(data.feedQuantity, birdCount)} g/bird`
+                            }
+                            style={{
+                              background: '#f1f5f9',
+                              color: '#334155',
+                              fontWeight: 600,
+                              cursor: 'not-allowed',
+                              borderColor: '#cbd5e1',
+                            }}
+                          />
+                        </Field>
                       </div>
 
                       <Field label={t('farmer.mortality')} error={errors.mortality}>
@@ -729,7 +1044,7 @@ export function FarmerFormPage() {
                         <div className="calc-inline">
                           <span className="calc-inline-label">{t('farmer.rate')}:</span>
                           <span className="calc-inline-value">{mortalityPct}%</span>
-                          <span className="calc-inline-sub">Calculated automatically</span>
+                          <span className="calc-inline-sub">{t('farmer.calculated')}</span>
                         </div>
                       )}
 
@@ -749,7 +1064,7 @@ export function FarmerFormPage() {
                         <div className="calc-inline">
                           <span className="calc-inline-label">{t('farmer.rate')}:</span>
                           <span className="calc-inline-value">{cullingPct}%</span>
-                          <span className="calc-inline-sub">Calculated automatically</span>
+                          <span className="calc-inline-sub">{t('farmer.calculated')}</span>
                         </div>
                       )}
                     </>
@@ -762,7 +1077,7 @@ export function FarmerFormPage() {
                           type="number"
                           inputMode="numeric"
                           min="0"
-                          max={birdCount || undefined}
+                          max={maxEggsAllowed || undefined}
                           value={data.eggsProduced}
                           onChange={(e) => handleChange('eggsProduced', e.target.value)}
                           onWheel={(e) => e.currentTarget.blur()}
@@ -773,7 +1088,7 @@ export function FarmerFormPage() {
                         <div className="calc-inline">
                           <span className="calc-inline-label">{t('farmer.rate')}:</span>
                           <span className="calc-inline-value">{eggProdPct}%</span>
-                          <span className="calc-inline-sub">Calculated automatically</span>
+                          <span className="calc-inline-sub">{`Max 95%: ${maxEggsAllowed.toLocaleString()}`}</span>
                         </div>
                       )}
 
@@ -793,18 +1108,42 @@ export function FarmerFormPage() {
                         <div className="calc-inline">
                           <span className="calc-inline-label">{t('farmer.rate')}:</span>
                           <span className="calc-inline-value">{selectionPct}%</span>
-                          <span className="calc-inline-sub">Calculated automatically</span>
+                          <span className="calc-inline-sub">{t('farmer.calculated')}</span>
                         </div>
                       )}
 
-                      <h4 className="form-sub-title" style={{ marginTop: '16px' }}>{t('farmer.temperature')}</h4>
+                      <Field label={t('farmer.damagedEggs')} error={errors.damagedEggs}>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min="0"
+                          value={data.damagedEggs}
+                          onChange={(e) => handleChange('damagedEggs', e.target.value)}
+                          onWheel={(e) => e.currentTarget.blur()}
+                          placeholder="e.g. 15"
+                        />
+                      </Field>
+
+                      <Field label={t('farmer.floorEggs')} error={errors.floorEggs}>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min="0"
+                          value={data.floorEggs}
+                          onChange={(e) => handleChange('floorEggs', e.target.value)}
+                          onWheel={(e) => e.currentTarget.blur()}
+                          placeholder="e.g. 8"
+                        />
+                      </Field>
+
+                      <h4 className="form-sub-title" style={{ marginTop: '16px' }}>{t('farmer.temperature')} (10°C – 50°C)</h4>
                       <div className="field-row">
                         <Field label={t('farmer.tempMin')} error={errors.tempMin}>
                           <input
                             type="number"
                             inputMode="decimal"
-                            min="-10"
-                            max="60"
+                            min="10"
+                            max="50"
                             step="0.1"
                             value={data.tempMin}
                             onChange={(e) => handleChange('tempMin', e.target.value)}
@@ -816,8 +1155,8 @@ export function FarmerFormPage() {
                           <input
                             type="number"
                             inputMode="decimal"
-                            min="-10"
-                            max="60"
+                            min="10"
+                            max="50"
                             step="0.1"
                             value={data.tempMax}
                             onChange={(e) => handleChange('tempMax', e.target.value)}
@@ -828,11 +1167,11 @@ export function FarmerFormPage() {
                       </div>
                       {(data.tempMin !== '' || data.tempMax !== '') && (
                         <div className="calc-inline">
-                          <span className="calc-inline-label">Avg Temp:</span>
+                          <span className="calc-inline-label">{t('farmer.avgTemp')}:</span>
                           <span className="calc-inline-value">
                             {((Number(data.tempMin || 0) + Number(data.tempMax || 0)) / (data.tempMin && data.tempMax ? 2 : 1)).toFixed(1)} °C
                           </span>
-                          <span className="calc-inline-sub">Calculated automatically</span>
+                          <span className="calc-inline-sub">{t('farmer.calculated')}</span>
                         </div>
                       )}
                     </>
@@ -840,94 +1179,158 @@ export function FarmerFormPage() {
 
                   {step === 2 && (
                     <>
-                      <h4 className="form-sub-title">{t('farmer.eggWeight')}</h4>
+                      <h4 className="form-sub-title">{t('farmer.eggWeight')} (30g – 80g)</h4>
                       <div className="field-row">
-                        <Field label="Min (g)" error={errors.eggWeightMin}>
+                        <Field label={t('farmer.minG')} error={errors.eggWeightMin}>
                           <input
                             type="number"
                             inputMode="decimal"
-                            min="0"
+                            min="30"
+                            max="80"
                             step="0.1"
                             value={data.eggWeightMin}
                             onChange={(e) => handleChange('eggWeightMin', e.target.value)}
                             onWheel={(e) => e.currentTarget.blur()}
-                            placeholder="e.g. 45"
+                            placeholder="e.g. 50"
                           />
                         </Field>
-                        <Field label="Max (g)" error={errors.eggWeightMax}>
+                        <Field label={t('farmer.maxG')} error={errors.eggWeightMax}>
                           <input
                             type="number"
                             inputMode="decimal"
-                            min="0"
+                            min="30"
+                            max="80"
                             step="0.1"
                             value={data.eggWeightMax}
                             onChange={(e) => handleChange('eggWeightMax', e.target.value)}
                             onWheel={(e) => e.currentTarget.blur()}
-                            placeholder="e.g. 55"
+                            placeholder="e.g. 65"
                           />
                         </Field>
                       </div>
                       {data.eggWeightAvg && (
                         <div className="calc-inline">
-                          <span className="calc-inline-label">Avg Egg Weight:</span>
+                          <span className="calc-inline-label">{t('farmer.avgEggWeight')}:</span>
                           <span className="calc-inline-value">{data.eggWeightAvg} g</span>
-                          <span className="calc-inline-sub">Calculated automatically</span>
+                          <span className="calc-inline-sub">{t('farmer.calculated')}</span>
                         </div>
                       )}
 
-                      <h4 className="form-sub-title" style={{ marginTop: '16px' }}>{t('farmer.bodyWeight')}</h4>
-                      <div className="field-row">
-                        <Field label="Min (g)" error={errors.bodyWeightMin}>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            min="0"
-                            step="0.1"
-                            value={data.bodyWeightMin}
-                            onChange={(e) => handleChange('bodyWeightMin', e.target.value)}
-                            onWheel={(e) => e.currentTarget.blur()}
-                            placeholder="e.g. 1200"
-                          />
-                        </Field>
-                        <Field label="Max (g)" error={errors.bodyWeightMax}>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            min="0"
-                            step="0.1"
-                            value={data.bodyWeightMax}
-                            onChange={(e) => handleChange('bodyWeightMax', e.target.value)}
-                            onWheel={(e) => e.currentTarget.blur()}
-                            placeholder="e.g. 1800"
-                          />
-                        </Field>
+                      <div style={{ marginTop: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div>
+                            <h4 className="form-sub-title" style={{ margin: 0 }}>
+                              {t('farmer.weeklyBodyWeight')} (500g – 3,000g)
+                            </h4>
+                            <p style={{ fontSize: '12px', color: '#64748b', margin: '2px 0 0 0' }}>
+                              {t('farmer.weeklyMetricsDesc')}
+                            </p>
+                          </div>
+                          {weeklyMetrics && (
+                            <button
+                              type="button"
+                              className="btn btn--outline btn--sm"
+                              style={{ fontSize: '12px', padding: '4px 10px' }}
+                              onClick={() => setIsEditingWeekly(!isEditingWeekly)}
+                            >
+                              {isEditingWeekly
+                                ? t('farmer.cancelEditWeekly', { week: weekNumber })
+                                : t('farmer.editWeeklyMetrics', { week: weekNumber })}
+                            </button>
+                          )}
+                        </div>
+
+                        {weeklyMetrics && !isEditingWeekly ? (
+                          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '12px 16px', marginBottom: '12px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#166534', fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>
+                              <span>✓</span>
+                              <span>{t('farmer.weeklyAlreadyRecorded', { week: weekNumber, date: formatDisplayDate(weeklyMetrics.reportDate) })}</span>
+                            </div>
+                            <div style={{ fontSize: '13px', color: '#15803d' }}>
+                              {t('farmer.min')}: <strong>{weeklyMetrics.bodyWeight.min} g</strong> | {t('farmer.max')}: <strong>{weeklyMetrics.bodyWeight.max} g</strong> | {t('farmer.avg')}: <strong>{weeklyMetrics.bodyWeight.avg} g</strong>
+                              {weeklyMetrics.ammoniaPpm != null && (
+                                <span style={{ marginLeft: '12px' }}>| {t('farmer.ammonium')}: <strong>{weeklyMetrics.ammoniaPpm} PPM</strong></span>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="field-row">
+                              <Field label={t('farmer.minG')} error={errors.bodyWeightMin}>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  min="500"
+                                  max="3000"
+                                  step="1"
+                                  value={data.bodyWeightMin}
+                                  onChange={(e) => handleChange('bodyWeightMin', e.target.value)}
+                                  onWheel={(e) => e.currentTarget.blur()}
+                                  placeholder="e.g. 1500"
+                                />
+                              </Field>
+                              <Field label={t('farmer.maxG')} error={errors.bodyWeightMax}>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  min="500"
+                                  max="3000"
+                                  step="1"
+                                  value={data.bodyWeightMax}
+                                  onChange={(e) => handleChange('bodyWeightMax', e.target.value)}
+                                  onWheel={(e) => e.currentTarget.blur()}
+                                  placeholder="e.g. 1850"
+                                />
+                              </Field>
+                            </div>
+                            {data.bodyWeightAvg && (
+                              <div className="calc-inline">
+                                <span className="calc-inline-label">{t('farmer.avgBodyWeight')}:</span>
+                                <span className="calc-inline-value">{data.bodyWeightAvg} g</span>
+                                <span className="calc-inline-sub">{t('farmer.calculated')}</span>
+                              </div>
+                            )}
+                          </>
+                        )}
                       </div>
-                      {data.bodyWeightAvg && (
-                        <div className="calc-inline">
-                          <span className="calc-inline-label">Avg Body Weight:</span>
-                          <span className="calc-inline-value">{data.bodyWeightAvg} g</span>
-                          <span className="calc-inline-sub">Calculated automatically</span>
-                        </div>
-                      )}
 
-                      <Field label={t('farmer.ammonium')} error={errors.ammoniaPpm}>
-                        <input
-                          type="number"
-                          inputMode="numeric"
-                          min="0"
-                          max="100"
-                          value={data.ammoniaPpm}
-                          onChange={(e) => handleChange('ammoniaPpm', e.target.value)}
-                          onWheel={(e) => e.currentTarget.blur()}
-                          placeholder="e.g. 10"
-                        />
-                      </Field>
+                      <div style={{ marginTop: '16px' }}>
+                        <Field label={`${t('farmer.ammonium')} (0–50 PPM) ${t('farmer.optionalDailyWeekly')}`} error={errors.ammoniaPpm}>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            max="50"
+                            value={data.ammoniaPpm}
+                            onChange={(e) => handleChange('ammoniaPpm', e.target.value)}
+                            onWheel={(e) => e.currentTarget.blur()}
+                            placeholder="e.g. 8"
+                          />
+                        </Field>
+                        {isHighAmmonia(data.ammoniaPpm) && (
+                          <div style={{
+                            marginTop: '8px',
+                            padding: '10px 14px',
+                            background: '#fffbeb',
+                            borderLeft: '4px solid #f59e0b',
+                            borderRadius: '6px'
+                          }}>
+                            <div style={{ fontWeight: 600, color: '#92400e', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>⚠️</span>
+                              <span>{t('farmer.ammoniaAlertTitle')}</span>
+                            </div>
+                            <p style={{ margin: '4px 0 0 0', fontSize: '12px', color: '#78350f', lineHeight: 1.4 }}>
+                              {t('farmer.ammoniaAlertMessage')}
+                            </p>
+                          </div>
+                        )}
+                      </div>
 
                       <Field label={t('farmer.remarks')} error={errors.remarks}>
                         <textarea
                           value={data.remarks}
                           onChange={(e) => handleChange('remarks', e.target.value)}
-                          placeholder="Any observations or notes..."
+                          placeholder={t('farmer.remarksPlaceholder')}
                           rows={3}
                           maxLength={1000}
                         />
@@ -942,12 +1345,15 @@ export function FarmerFormPage() {
                   farmId={farmId}
                   reportDate={reportDate}
                   weekNumber={weekNumber}
+                  weekLabel={weekLabel}
                   birdCount={birdCount}
                   mortalityPct={mortalityPct}
                   cullingPct={cullingPct}
                   eggProdPct={eggProdPct}
                   selectionPct={selectionPct}
                   feedKgDisplay={feedKgDisplay}
+                  feedPerBirdDisplay={feedPerBirdDisplay}
+                  weeklyMetrics={weeklyMetrics}
                   onEdit={handleEditStep}
                   t={t}
                   flockName={flocks.find(f => f.flockId === data.flockId)?.flockName || data.flockId}
@@ -957,7 +1363,7 @@ export function FarmerFormPage() {
 
             {Object.keys(errors).length > 0 && (
               <div className="alert alert--error" style={{ marginBottom: '12px' }}>
-                Please fill in all required fields on this step to proceed.
+                {t('farmer.fillRequiredFields')}
               </div>
             )}
             {submitError && <div className="alert alert--error" style={{ marginBottom: '12px' }}>{submitError}</div>}
@@ -977,10 +1383,15 @@ export function FarmerFormPage() {
                   type="button"
                   className="btn btn--primary btn--nav-next"
                   onClick={handleSubmit}
-                  disabled={submitting || (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))}
+                  disabled={
+                    submitting ||
+                    isLoadingUser ||
+                    !reportingWeek.isValid ||
+                    (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))
+                  }
                   style={{
-                    opacity: (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized')) ? 0.6 : 1,
-                    cursor: (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized')) ? 'not-allowed' : 'pointer',
+                    opacity: (isLoadingUser || !reportingWeek.isValid || (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))) ? 0.6 : 1,
+                    cursor: (isLoadingUser || !reportingWeek.isValid || (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))) ? 'not-allowed' : 'pointer',
                   }}
                 >
                   {submitting ? (
@@ -1005,6 +1416,14 @@ export function FarmerFormPage() {
           setHasDismissedModal(true);
         }}
         submissionVersion={todayReport?.submissionVersion || 1}
+      />
+      <OverwriteConfirmationModal
+        isOpen={showOverwriteModal}
+        onClose={() => setShowOverwriteModal(false)}
+        onConfirm={executeSubmission}
+        reportDate={reportDate}
+        farmId={farmId}
+        submitting={submitting}
       />
     </div>
   );

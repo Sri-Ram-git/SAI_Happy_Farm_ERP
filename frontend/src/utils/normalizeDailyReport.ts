@@ -16,6 +16,8 @@ export interface NormalizedReport {
   culling: number;
   eggsProduced: number;
   selectionEggs: number;
+  damagedEggs?: number;
+  floorEggs?: number;
   temperature: number | null;
   tempMin: number | null;
   tempMax: number | null;
@@ -64,10 +66,10 @@ export function normalizeReport(
     id: docId,
     reportId: String(data.reportId ?? docId),
     userId: String(overrideUserId ?? data.userId ?? data.submittedBy ?? ''),
-    farmId: String(data.farmId ?? ''),
+    farmId: String(data.farmId ?? '').trim(),
     flockId: String(data.flockId ?? ''),
     submissionVersion: toNum(data.submissionVersion || 1),
-    status: String(data.status ?? 'submitted'),
+    status: String(data.status ?? (data.isDraft ? 'draft' : 'submitted')),
     birdCount,
     openingBirdCount,
     closingBirdCount,
@@ -78,6 +80,8 @@ export function normalizeReport(
     culling: toNum(data.culling),
     eggsProduced: toNum(data.eggsProduced),
     selectionEggs: toNum(data.selectionEggs),
+    damagedEggs: toNum(data.damagedEggs),
+    floorEggs: toNum(data.floorEggs),
     temperature: toNumOrNull(data.temperature),
     tempMin: toNumOrNull(data.tempMin),
     tempMax: toNumOrNull(data.tempMax),
@@ -87,10 +91,27 @@ export function normalizeReport(
     ammoniaPpm: toNumOrNull(data.ammoniaPpm),
     submittedBy: String(data.submittedBy ?? ''),
     submissionDate: (() => {
-      const field = String(data.submissionDate ?? '');
-      if (field) return field;
+      const raw = data.submissionDate ?? data.reportDate ?? data.date ?? data.logDate;
+      if (raw) {
+        if (typeof raw === 'string') {
+          const trimmed = raw.trim();
+          if (trimmed.includes('T')) return trimmed.split('T')[0];
+          if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+          return trimmed;
+        }
+        if (typeof (raw as any)?.toDate === 'function') {
+          const d = (raw as any).toDate();
+          return d.toISOString().split('T')[0];
+        }
+      }
       const match = docId.match(/^(\d{4}-\d{2}-\d{2})/);
-      return match ? match[1] : '';
+      if (match) return match[1];
+
+      const fallbackRaw = data.createdAt ?? data.submittedAt;
+      if (fallbackRaw && typeof fallbackRaw === 'string' && fallbackRaw.includes('T')) {
+        return fallbackRaw.split('T')[0];
+      }
+      return '';
     })(),
     submissionMethod: String(data.submissionMethod ?? ''),
     createdAt: String(data.createdAt ?? data.submittedAt ?? ''),

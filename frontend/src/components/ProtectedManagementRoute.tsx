@@ -13,6 +13,8 @@ export function ProtectedManagementRoute({ allowedRoles, children }: Props) {
   const navigate = useNavigate();
   const [checked, setChecked] = useState(false);
 
+  const rolesKey = allowedRoles.slice().sort().join(',');
+
   useEffect(() => {
     if (loading) return;
     if (!isAuthenticated || !role) {
@@ -24,7 +26,7 @@ export function ProtectedManagementRoute({ allowedRoles, children }: Props) {
       return;
     }
     setChecked(true);
-  }, [loading, isAuthenticated, role, navigate, allowedRoles]);
+  }, [loading, isAuthenticated, role, navigate, rolesKey]);
 
   if (loading) return <LoadingScreen />;
   if (!checked) return null;

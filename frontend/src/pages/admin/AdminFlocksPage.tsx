@@ -687,6 +687,9 @@ export function AdminFlocksPage() {
                 borderRadius: '12px',
                 width: '100%',
                 maxWidth: '520px',
+                maxHeight: 'calc(100dvh - 24px)',
+                display: 'flex',
+                flexDirection: 'column',
                 boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
                 overflow: 'hidden',
               }}
@@ -700,6 +703,7 @@ export function AdminFlocksPage() {
                   padding: '16px 20px',
                   borderBottom: '1px solid #e2e8f0',
                   background: '#f8fafc',
+                  flexShrink: 0,
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -724,7 +728,7 @@ export function AdminFlocksPage() {
               </div>
 
               {/* Modal Body */}
-              <form onSubmit={handleSaveFlock} style={{ padding: '20px' }}>
+              <form onSubmit={handleSaveFlock} style={{ padding: '20px', flex: '1 1 auto', overflowY: 'auto', minHeight: 0 }}>
                 {formError && (
                   <div
                     style={{
@@ -751,11 +755,10 @@ export function AdminFlocksPage() {
                     Farm *
                   </label>
                   <select
-                    className="form-input"
+                    className="form-select"
                     value={formFarmId}
                     onChange={(e) => handleSelectFarmInModal(e.target.value)}
                     required
-                    style={{ width: '100%', padding: '9px 12px', fontSize: '14px' }}
                   >
                     <option value="">Select a farm...</option>
                     {farms.map((farm) => {
@@ -971,10 +974,9 @@ export function AdminFlocksPage() {
                       Production Curve Standard
                     </label>
                     <select
-                      className="form-input"
+                      className="form-select"
                       value={formProductionCurve}
                       onChange={(e) => setFormProductionCurve(e.target.value as 'CF_STD' | 'FR_STD')}
-                      style={{ width: '100%', padding: '9px 12px', fontSize: '14px' }}
                     >
                       <option value="CF_STD">Cobb Female (CF STD)</option>
                       <option value="FR_STD">Ross Female (FR STD)</option>

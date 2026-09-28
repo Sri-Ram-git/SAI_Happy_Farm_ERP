@@ -7,6 +7,8 @@ export interface UserProfile {
   role: string;
   farmIds: string[];
   name?: string;
+  createdat?: any;
+  createdAt?: any;
 }
 
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
@@ -27,6 +29,8 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
         ? raw.farmID
         : [];
 
+    const createdat = raw.createdat ?? raw.createdAt ?? raw.created_at ?? null;
+
     const normalized: UserProfile = {
       uid,
       active: isActive,
@@ -34,6 +38,8 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
       role: role,
       farmIds: farmIds,
       name: raw.name ?? raw.email ?? '',
+      createdat,
+      createdAt: createdat,
     };
 
     console.log('[UserProfile] NORMALIZED:', JSON.stringify(normalized));

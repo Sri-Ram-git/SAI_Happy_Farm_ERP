@@ -14,36 +14,126 @@ export function getIstDate(): string {
   return `${y}-${m}-${d}`;
 }
 
-function normalizeDateToString(val: any): string | null {
+export interface AllowedReportDateOption {
+  key: 'yesterday' | 'today' | 'tomorrow';
+  labelKey: string;
+  isoDate: string;
+  displayFormatted: string;
+  dayOfWeekName: string;
+}
+
+export function getAllowedReportDates(baseDateIso?: string): AllowedReportDateOption[] {
+  const todayIso = baseDateIso || getIstDate();
+  const parts = todayIso.split('-').map(Number);
+  if (parts.length < 3 || isNaN(parts[0])) {
+    return [];
+  }
+  const [y, m, d] = parts;
+
+  const todayUtc = new Date(Date.UTC(y, m - 1, d));
+  const yesterdayUtc = new Date(todayUtc.getTime() - 24 * 3600 * 1000);
+  const tomorrowUtc = new Date(todayUtc.getTime() + 24 * 3600 * 1000);
+
+  const formatIso = (dateObj: Date): string => {
+    const yr = dateObj.getUTCFullYear();
+    const mo = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+    const dy = String(dateObj.getUTCDate()).padStart(2, '0');
+    return `${yr}-${mo}-${dy}`;
+  };
+
+  const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  const createOption = (key: 'yesterday' | 'today' | 'tomorrow', dateObj: Date): AllowedReportDateOption => {
+    const isoDate = formatIso(dateObj);
+    const dayOfWeekName = daysOfWeek[dateObj.getUTCDay()];
+    const displayFormatted = formatDisplayDate(isoDate);
+    return {
+      key,
+      labelKey: key === 'yesterday' ? 'farmer.yesterday' : key === 'today' ? 'farmer.today' : 'farmer.tomorrow',
+      isoDate,
+      displayFormatted,
+      dayOfWeekName,
+    };
+  };
+
+  return [
+    createOption('yesterday', yesterdayUtc),
+    createOption('today', todayUtc),
+    createOption('tomorrow', tomorrowUtc),
+  ];
+}
+
+export function normalizeDateToIstString(val: any): string | null {
   if (!val) return null;
 
   if (typeof val === 'string') {
-    return val;
-  }
-
-  if (typeof val === 'object') {
-    if (typeof val.toDate === 'function') {
+    const trimmed = val.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const parsed = new Date(trimmed);
+    if (!isNaN(parsed.getTime())) {
       try {
-        return val.toDate().toISOString();
+        const parts = new Intl.DateTimeFormat('en-GB', {
+          timeZone: 'Asia/Kolkata',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).formatToParts(parsed);
+        const y = parts.find((p) => p.type === 'year')?.value;
+        const m = parts.find((p) => p.type === 'month')?.value;
+        const d = parts.find((p) => p.type === 'day')?.value;
+        if (y && m && d) return `${y}-${m}-${d}`;
       } catch {
         // fallback
       }
+      return trimmed.split('T')[0];
     }
-    if (typeof val.seconds === 'number') {
-      return new Date(val.seconds * 1000).toISOString();
-    }
-    if (val instanceof Date) {
-      return val.toISOString();
-    }
+    return trimmed.split('T')[0];
   }
 
-  if (typeof val === 'number') {
+  let dateObj: Date | null = null;
+  if (typeof val === 'object') {
+    if (typeof val.toDate === 'function') {
+      try {
+        dateObj = val.toDate();
+      } catch {
+        // fallback
+      }
+    } else if (typeof val.seconds === 'number') {
+      dateObj = new Date(val.seconds * 1000);
+    } else if (val instanceof Date) {
+      dateObj = val;
+    }
+  } else if (typeof val === 'number') {
     const ms = val < 10000000000 ? val * 1000 : val;
-    return new Date(ms).toISOString();
+    dateObj = new Date(ms);
+  }
+
+  if (dateObj && !isNaN(dateObj.getTime())) {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(dateObj);
+      const y = parts.find((p) => p.type === 'year')?.value;
+      const m = parts.find((p) => p.type === 'month')?.value;
+      const d = parts.find((p) => p.type === 'day')?.value;
+      if (y && m && d) return `${y}-${m}-${d}`;
+    } catch {
+      // fallback
+    }
+    return dateObj.toISOString().split('T')[0];
   }
 
   try {
-    return String(val);
+    const str = String(val);
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+      return str.substring(0, 10);
+    }
+    return str;
   } catch {
     return null;
   }
@@ -51,7 +141,7 @@ function normalizeDateToString(val: any): string | null {
 
 export function formatDisplayDate(isoDate: any): string {
   if (!isoDate) return '';
-  const dateStr = normalizeDateToString(isoDate);
+  const dateStr = normalizeDateToIstString(isoDate);
   if (!dateStr || typeof dateStr !== 'string') return '';
   try {
     const cleanIso = dateStr.split('T')[0];
@@ -67,14 +157,39 @@ export function formatDisplayDate(isoDate: any): string {
   }
 }
 
-export function calculateWeekNumber(startDateInput: any, reportDateInput: any): number {
-  if (!startDateInput || !reportDateInput) return 1;
+export interface ReportingWeekInfo {
+  weekNumber: number | null;
+  dayInWeek: number | null;
+  daysElapsed: number | null;
+  label: string;
+  isValid: boolean;
+  error?: string;
+}
 
-  const startDateStr = normalizeDateToString(startDateInput);
-  const reportDateStr = normalizeDateToString(reportDateInput);
+export function calculateReportingWeek(startDateInput: any, reportDateInput: any, baseWeek = 3): ReportingWeekInfo {
+  if (!startDateInput || !reportDateInput) {
+    return {
+      weekNumber: null,
+      dayInWeek: null,
+      daysElapsed: null,
+      label: '',
+      isValid: false,
+      error: !startDateInput ? 'Reporting anchor (user createdat) is missing' : 'Report date is missing',
+    };
+  }
+
+  const startDateStr = normalizeDateToIstString(startDateInput);
+  const reportDateStr = normalizeDateToIstString(reportDateInput);
 
   if (!startDateStr || typeof startDateStr !== 'string' || !reportDateStr || typeof reportDateStr !== 'string') {
-    return 1;
+    return {
+      weekNumber: null,
+      dayInWeek: null,
+      daysElapsed: null,
+      label: '',
+      isValid: false,
+      error: 'Invalid date format',
+    };
   }
 
   try {
@@ -84,21 +199,90 @@ export function calculateWeekNumber(startDateInput: any, reportDateInput: any): 
     const startParts = startIso.split('-').map(Number);
     const reportParts = reportIso.split('-').map(Number);
 
-    if (startParts.length < 3 || reportParts.length < 3) return 1;
-    if (isNaN(startParts[0]) || isNaN(reportParts[0])) return 1;
+    if (startParts.length < 3 || reportParts.length < 3 || isNaN(startParts[0]) || isNaN(reportParts[0])) {
+      return {
+        weekNumber: null,
+        dayInWeek: null,
+        daysElapsed: null,
+        label: '',
+        isValid: false,
+        error: 'Malformed date',
+      };
+    }
 
     const startDate = new Date(Date.UTC(startParts[0], startParts[1] - 1, startParts[2]));
     const reportDate = new Date(Date.UTC(reportParts[0], reportParts[1] - 1, reportParts[2]));
 
     const diffMs = reportDate.getTime() - startDate.getTime();
-    if (isNaN(diffMs)) return 1;
+    if (isNaN(diffMs)) {
+      return {
+        weekNumber: null,
+        dayInWeek: null,
+        daysElapsed: null,
+        label: '',
+        isValid: false,
+        error: 'Invalid timestamp difference',
+      };
+    }
 
     const daysElapsed = Math.max(0, Math.floor(diffMs / (24 * 3600 * 1000)));
-    return Math.floor(daysElapsed / 7) + 1;
-  } catch (err) {
-    console.warn('[calculateWeekNumber] Failed to parse dates:', err);
-    return 1;
+
+    // Calendar week alignment based on Happy Hens poultry reporting convention:
+    // - Sunday (day 0) is the whole number main week (e.g. 3, 4, ..., 7)
+    // - Monday through Saturday are subperiods .1 through .6
+    // - All 7 days within a Sunday-to-Saturday cycle share the exact same main weekNumber
+    const repDayOfWeek = reportDate.getUTCDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+    const startDayOfWeek = startDate.getUTCDay();
+
+    // Sunday on or before reportDate
+    const repSundayMs = reportDate.getTime() - repDayOfWeek * 24 * 3600 * 1000;
+    // Sunday on or before startDate (anchor Sunday of the initial week)
+    const startSundayMs = startDate.getTime() - startDayOfWeek * 24 * 3600 * 1000;
+
+    if (repSundayMs < startSundayMs) {
+      return {
+        weekNumber: null,
+        dayInWeek: null,
+        daysElapsed: null,
+        label: '',
+        isValid: false,
+        error: 'Report date is before start anchor date',
+      };
+    }
+
+    const elapsedCalendarWeeks = Math.round((repSundayMs - startSundayMs) / (7 * 24 * 3600 * 1000));
+    const weekNumber = baseWeek + elapsedCalendarWeeks;
+    const dayInWeek = repDayOfWeek;
+    const label = dayInWeek === 0 ? String(weekNumber) : `${weekNumber}.${dayInWeek}`;
+
+    return {
+      weekNumber,
+      dayInWeek,
+      daysElapsed,
+      label,
+      isValid: true,
+    };
+  } catch (err: any) {
+    console.warn('[calculateReportingWeek] Failed to parse dates:', err);
+    return {
+      weekNumber: null,
+      dayInWeek: null,
+      daysElapsed: null,
+      label: '',
+      isValid: false,
+      error: err?.message || 'Error parsing dates',
+    };
   }
+}
+
+export function formatReportingWeekLabel(startDateInput: any, reportDateInput: any, baseWeek = 3): string {
+  const res = calculateReportingWeek(startDateInput, reportDateInput, baseWeek);
+  return res.isValid ? res.label : '';
+}
+
+export function calculateWeekNumber(startDateInput: any, reportDateInput: any, baseWeek = 3): number | null {
+  const res = calculateReportingWeek(startDateInput, reportDateInput, baseWeek);
+  return res.isValid ? res.weekNumber : null;
 }
 
 export interface SubmitReportInput {
@@ -108,22 +292,84 @@ export interface SubmitReportInput {
   feedKg: number;
   feedGrams?: number;
   feedG?: number;
+  feedGramsPerBird?: number;
   mortality: number;
   culling: number;
   eggsProduced: number;
   selectionEggs: number;
+  damagedEggs?: number;
+  floorEggs?: number;
   temperature: number;
   tempMin?: number;
   tempMax?: number;
   eggWeight: { min: number; max: number; avg: number };
-  bodyWeight: { min: number; max: number; avg: number };
+  bodyWeight?: { min: number; max: number; avg: number } | null;
   remarks: string;
-  ammoniaPpm: number;
+  ammoniaPpm?: number | null;
   submittedBy: string;
-  weekNumber?: number;
+  weekNumber?: number | null;
+  weekLabel?: string;
   submissionDate?: string;
   reportDate?: string;
   submissionKey?: string;
+}
+
+export interface WeeklyMetricsDoc {
+  farmId: string;
+  weekNumber: number;
+  reportDate: string;
+  bodyWeight: { min: number; max: number; avg: number };
+  ammoniaPpm?: number | null;
+  submittedBy: string;
+  submittedAt: string;
+  updatedAt: string;
+}
+
+export function getWeeklyLockId(farmId: string, weekNumber: number): string {
+  return `weekly_${farmId}_W${weekNumber}`;
+}
+
+export function subscribeToWeeklyMetrics(
+  farmId: string,
+  weekNumber: number,
+  callback: (metrics: WeeklyMetricsDoc | null) => void,
+): () => void {
+  const docRef = db.collection('dailyReportLocks').doc(getWeeklyLockId(farmId, weekNumber));
+  return docRef.onSnapshot(
+    (doc: any) => {
+      if (doc && doc.exists) {
+        callback(doc.data() as WeeklyMetricsDoc);
+      } else {
+        callback(null);
+      }
+    },
+    (err: any) => {
+      console.warn('[reportService] subscribeToWeeklyMetrics error:', err);
+      callback(null);
+    },
+  );
+}
+
+export async function saveWeeklyMetrics(
+  farmId: string,
+  weekNumber: number,
+  userId: string,
+  reportDate: string,
+  bodyWeight: { min: number; max: number; avg: number },
+  ammoniaPpm?: number | null,
+): Promise<void> {
+  const docRef = db.collection('dailyReportLocks').doc(getWeeklyLockId(farmId, weekNumber));
+  const now = new Date().toISOString();
+  await docRef.set({
+    farmId,
+    weekNumber,
+    reportDate,
+    bodyWeight,
+    ammoniaPpm: ammoniaPpm ?? null,
+    submittedBy: userId,
+    submittedAt: now,
+    updatedAt: now,
+  }, { merge: true });
 }
 
 function hasDataChanged(input: SubmitReportInput, existing: any): boolean {
@@ -132,15 +378,27 @@ function hasDataChanged(input: SubmitReportInput, existing: any): boolean {
   if (Number(input.culling) !== Number(existing.culling ?? 0)) return true;
   if (Number(input.eggsProduced) !== Number(existing.eggsProduced ?? 0)) return true;
   if (Number(input.selectionEggs) !== Number(existing.selectionEggs ?? 0)) return true;
+  if (Number(input.damagedEggs ?? 0) !== Number(existing.damagedEggs ?? 0)) return true;
+  if (Number(input.floorEggs ?? 0) !== Number(existing.floorEggs ?? 0)) return true;
   if (Number(input.tempMin ?? input.temperature) !== Number(existing.tempMin ?? existing.temperature ?? 0)) return true;
   if (Number(input.tempMax ?? input.temperature) !== Number(existing.tempMax ?? existing.temperature ?? 0)) return true;
   if (Number(input.eggWeight?.min) !== Number(existing.eggWeight?.min ?? 0)) return true;
   if (Number(input.eggWeight?.max) !== Number(existing.eggWeight?.max ?? 0)) return true;
   if (Number(input.eggWeight?.avg) !== Number(existing.eggWeight?.avg ?? 0)) return true;
-  if (Number(input.bodyWeight?.min) !== Number(existing.bodyWeight?.min ?? 0)) return true;
-  if (Number(input.bodyWeight?.max) !== Number(existing.bodyWeight?.max ?? 0)) return true;
-  if (Number(input.bodyWeight?.avg) !== Number(existing.bodyWeight?.avg ?? 0)) return true;
-  if (Number(input.ammoniaPpm) !== Number(existing.ammoniaPpm ?? 0)) return true;
+  
+  const hasInputBw = Boolean(input.bodyWeight && (input.bodyWeight.min || input.bodyWeight.max));
+  const hasExistingBw = Boolean(existing.bodyWeight && (existing.bodyWeight.min || existing.bodyWeight.max));
+  if (hasInputBw !== hasExistingBw) return true;
+  if (hasInputBw && hasExistingBw) {
+    if (Number(input.bodyWeight!.min) !== Number(existing.bodyWeight.min ?? 0)) return true;
+    if (Number(input.bodyWeight!.max) !== Number(existing.bodyWeight.max ?? 0)) return true;
+    if (Number(input.bodyWeight!.avg) !== Number(existing.bodyWeight.avg ?? 0)) return true;
+  }
+
+  const inputAmmonia = input.ammoniaPpm != null && !isNaN(Number(input.ammoniaPpm)) ? Number(input.ammoniaPpm) : null;
+  const existingAmmonia = existing.ammoniaPpm != null && !isNaN(Number(existing.ammoniaPpm)) ? Number(existing.ammoniaPpm) : null;
+  if (inputAmmonia !== existingAmmonia) return true;
+
   if ((input.remarks || '').trim() !== (existing.remarks || '').trim()) return true;
   return false;
 }
@@ -198,6 +456,13 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
 
   try {
     await db.runTransaction(async (transaction: any) => {
+      // 0. Validate Report Date Window (Must be Yesterday, Today, or Tomorrow in IST)
+      const allowedOptions = getAllowedReportDates();
+      const allowedIsoDates = allowedOptions.map((o) => o.isoDate);
+      if (!allowedIsoDates.includes(submissionDate)) {
+        throw new Error('INVALID_REPORT_DATE_WINDOW');
+      }
+
       // 1. Verify User Authorization
       const userDoc = await transaction.get(userRef);
       if (!userDoc.exists) {
@@ -210,6 +475,18 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
       if (!userData.farmIds || !userData.farmIds.includes(input.farmId)) {
         throw new Error('FARM_NOT_ASSIGNED');
       }
+
+      // Authoritative Report-Week Calculation from farmer's users document createdat
+      const userCreatedAt = userData.createdat ?? userData.createdAt ?? userData.created_at ?? null;
+      if (!userCreatedAt) {
+        throw new Error('USER_CREATEDAT_MISSING');
+      }
+      const authReportingInfo = calculateReportingWeek(userCreatedAt, submissionDate, 3);
+      if (!authReportingInfo.isValid || authReportingInfo.weekNumber == null) {
+        throw new Error('INVALID_REPORTING_PERIOD');
+      }
+      const authoritativeWeekNumber = authReportingInfo.weekNumber;
+      const authoritativeWeekLabel = authReportingInfo.label;
 
       const existingLog = await transaction.get(dailyLogRef);
       const flockDoc = await transaction.get(flockRef);
@@ -284,19 +561,41 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
           closingFeedKg: currentFeedStock - input.feedKg,
           feedGrams: input.feedGrams ?? input.feedKg * 1000,
           feedG: input.feedG ?? input.feedKg * 1000,
+          feedGramsPerBird:
+            input.feedGramsPerBird ??
+            (openingBirdCount > 0 && input.feedKg > 0
+              ? Number(((input.feedKg * 1000) / openingBirdCount).toFixed(1))
+              : null),
           mortality: input.mortality,
           culling: input.culling,
           eggsProduced: input.eggsProduced,
           selectionEggs: input.selectionEggs,
+          damagedEggs: input.damagedEggs ?? 0,
+          floorEggs: input.floorEggs ?? 0,
           temperature: input.temperature,
           tempMin: input.tempMin ?? input.temperature,
           tempMax: input.tempMax ?? input.temperature,
           eggWeight: input.eggWeight,
-          bodyWeight: input.bodyWeight,
+          bodyWeight: input.bodyWeight ?? null,
           remarks: input.remarks,
-          ammoniaPpm: input.ammoniaPpm,
-          ...(input.weekNumber != null ? { weekNumber: input.weekNumber } : {}),
+          ammoniaPpm: input.ammoniaPpm ?? null,
+          weekNumber: authoritativeWeekNumber,
+          weekLabel: authoritativeWeekLabel,
         }, { merge: true });
+
+        if (input.bodyWeight) {
+          const weeklyLockRef = db.collection('dailyReportLocks').doc(getWeeklyLockId(input.farmId, authoritativeWeekNumber));
+          transaction.set(weeklyLockRef, {
+            farmId: input.farmId,
+            weekNumber: authoritativeWeekNumber,
+            reportDate: submissionDate,
+            bodyWeight: input.bodyWeight,
+            ammoniaPpm: input.ammoniaPpm ?? null,
+            submittedBy: userId,
+            submittedAt: now,
+            updatedAt: now,
+          }, { merge: true });
+        }
 
         if (input.mortality > 0) {
           const birdTxRef = db.collection('farms').doc(input.farmId).collection('birdTransactions').doc();
@@ -435,25 +734,50 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
           closingFeedKg: (existingData.openingFeedKg ?? currentFeedStock) - input.feedKg,
           feedGrams: input.feedGrams ?? input.feedKg * 1000,
           feedG: input.feedG ?? input.feedKg * 1000,
+          feedGramsPerBird:
+            input.feedGramsPerBird ??
+            (openingBirdCount > 0 && input.feedKg > 0
+              ? Number(((input.feedKg * 1000) / openingBirdCount).toFixed(1))
+              : null),
           mortality: input.mortality,
           culling: input.culling,
           eggsProduced: input.eggsProduced,
           selectionEggs: input.selectionEggs,
+          damagedEggs: input.damagedEggs ?? 0,
+          floorEggs: input.floorEggs ?? 0,
           temperature: input.temperature,
           tempMin: input.tempMin ?? input.temperature,
           tempMax: input.tempMax ?? input.temperature,
           eggWeight: input.eggWeight,
-          bodyWeight: input.bodyWeight,
+          bodyWeight: input.bodyWeight ?? null,
           remarks: input.remarks,
-          ammoniaPpm: input.ammoniaPpm,
+          ammoniaPpm: input.ammoniaPpm ?? null,
+          weekNumber: authoritativeWeekNumber,
+          weekLabel: authoritativeWeekLabel,
           previousVersionData: {
             feedKg: existingData.feedKg,
             mortality: existingData.mortality,
             culling: existingData.culling,
             eggsProduced: existingData.eggsProduced,
+            selectionEggs: existingData.selectionEggs,
+            damagedEggs: existingData.damagedEggs,
+            floorEggs: existingData.floorEggs,
             submittedAt: existingData.submittedAt || existingData.createdAt,
           },
         }, { merge: true });
+
+        if (input.bodyWeight) {
+          const weeklyLockRef = db.collection('dailyReportLocks').doc(getWeeklyLockId(input.farmId, authoritativeWeekNumber));
+          transaction.set(weeklyLockRef, {
+            farmId: input.farmId,
+            weekNumber: authoritativeWeekNumber,
+            reportDate: submissionDate,
+            bodyWeight: input.bodyWeight,
+            ammoniaPpm: input.ammoniaPpm ?? null,
+            submittedBy: userId,
+            updatedAt: now,
+          }, { merge: true });
+        }
       }
     });
 
@@ -534,6 +858,9 @@ export async function syncPendingSubmissions(userId: string): Promise<number> {
           'FARM_NOT_ASSIGNED',
           'INVENTORY_NOT_INITIALIZED',
           'FARM_NOT_FOUND',
+          'USER_CREATEDAT_MISSING',
+          'INVALID_REPORTING_PERIOD',
+          'INVALID_REPORT_DATE_WINDOW',
         ];
         if (nonRetryableErrors.includes(err.message)) {
           await removePendingSubmission(targetKey);

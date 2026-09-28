@@ -28,23 +28,32 @@ export class ReportsService {
       farmId: input.farmId,
       birdCount: input.birdCount,
       feedKg: input.feedKg,
+      feedGramsPerBird:
+        input.feedGramsPerBird ??
+        (input.birdCount > 0 && input.feedKg > 0
+          ? Number(((input.feedKg * 1000) / input.birdCount).toFixed(1))
+          : null),
       mortality: input.mortality,
       culling: input.culling,
       eggsProduced: input.eggsProduced,
       selectionEggs: input.selectionEggs,
+      damagedEggs: input.damagedEggs ?? 0,
+      floorEggs: input.floorEggs ?? 0,
       temperature: input.temperature,
       eggWeight: {
         min: input.eggWeight.min,
         max: input.eggWeight.max,
         avg: input.eggWeight.avg,
       },
-      bodyWeight: {
-        min: input.bodyWeight.min,
-        max: input.bodyWeight.max,
-        avg: input.bodyWeight.avg,
-      },
+      bodyWeight: input.bodyWeight
+        ? {
+            min: input.bodyWeight.min,
+            max: input.bodyWeight.max,
+            avg: input.bodyWeight.avg,
+          }
+        : null,
       remarks: input.remarks ?? '',
-      ammoniaPpm: input.ammoniaPpm,
+      ammoniaPpm: input.ammoniaPpm ?? null,
       submittedBy: user.uid,
       submissionDate: today,
       submissionMethod: 'DIGITAL_FORM',

@@ -122,5 +122,10 @@ service cloud.firestore {
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isAdmin();
     }
+
+    // Import Batches (Admin only)
+    match /importBatches/{batchId} {
+      allow read, write: if isAdmin();
+    }
   }
 }

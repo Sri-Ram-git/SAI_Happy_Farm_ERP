@@ -25,7 +25,7 @@ describe('Validation Middleware', () => {
       selectionEggs: 100,
       temperature: 25.5,
       eggWeight: { min: 58, max: 62, avg: 60 },
-      bodyWeight: { min: 1.7, max: 1.9, avg: 1.8 },
+      bodyWeight: { min: 1700, max: 1900, avg: 1800 },
       remarks: '',
       ammoniaPpm: 10,
     };
@@ -59,7 +59,7 @@ describe('Validation Middleware', () => {
       selectionEggs: 100,
       temperature: 25.5,
       eggWeight: { min: 58, max: 62, avg: 60 },
-      bodyWeight: { min: 1.7, max: 1.9, avg: 1.8 },
+      bodyWeight: { min: 1700, max: 1900, avg: 1800 },
       ammoniaPpm: 10,
       role: 'admin',
       submittedBy: 'user123',

@@ -34,6 +34,7 @@ interface DashboardMetricDetailModalProps {
   standardCurveType?: 'CF_STD' | 'FR_STD';
   onStandardCurveChange?: (type: 'CF_STD' | 'FR_STD') => void;
   renderChartContent: () => ReactNode;
+  role?: 'supervisor' | 'admin';
 }
 
 type TabType = 'chart' | 'table' | 'formula' | 'submission_summary' | 'submitted_reports' | 'missing_reports' | 'birds_list';
@@ -55,6 +56,7 @@ export function DashboardMetricDetailModal({
   standardCurveType,
   onStandardCurveChange,
   renderChartContent,
+  role,
 }: DashboardMetricDetailModalProps) {
   // Default to summary for submission, table for birds, chart for others
   const [activeTab, setActiveTab] = useState<TabType>('chart');
@@ -215,7 +217,7 @@ export function DashboardMetricDetailModal({
 
           {activeTab === 'table' && metricType !== 'birds' && metricType !== 'submission' && (
             <div className="chart-table-wrapper">
-              <ChartDataTable chartType={metricType} chartData={chartData} farmFilter={farmFilter} flockFilter={flockFilter} />
+              <ChartDataTable chartType={metricType} chartData={chartData} farmFilter={farmFilter} flockFilter={flockFilter} role={role} />
             </div>
           )}
 
@@ -315,7 +317,7 @@ export function DashboardMetricDetailModal({
 
           {activeTab === 'formula' && (
             <div className="chart-formula-wrapper">
-              <CalculationDetails chartType={metricType} standardCurveType={standardCurveType} />
+              <CalculationDetails chartType={metricType} standardCurveType={standardCurveType} role={role} />
             </div>
           )}
         </div>

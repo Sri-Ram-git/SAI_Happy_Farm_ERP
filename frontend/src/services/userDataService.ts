@@ -7,13 +7,15 @@ export interface UserDoc {
   farmIds: string[];
   active: boolean;
   name: string;
-  createdAt?: string;
+  createdat?: any;
+  createdAt?: any;
 }
 
 export async function getUserByUid(uid: string): Promise<UserDoc | null> {
   const doc = await db.collection('users').doc(uid).get();
   if (!doc.exists) return null;
   const data = doc.data();
+  const createdat = data.createdat ?? data.createdAt ?? data.created_at ?? null;
   return {
     uid,
     email: data.email ?? '',
@@ -21,7 +23,8 @@ export async function getUserByUid(uid: string): Promise<UserDoc | null> {
     farmIds: Array.isArray(data.farmIds) ? data.farmIds : Array.isArray(data.farmID) ? data.farmID : [],
     active: data.active === true,
     name: data.name ?? data.email ?? '',
-    createdAt: data.createdAt,
+    createdat,
+    createdAt: createdat,
   };
 }
 
@@ -29,6 +32,7 @@ export async function getAllUsers(): Promise<UserDoc[]> {
   const snap = await db.collection('users').get();
   return snap.docs.map((doc: any) => {
     const data = doc.data();
+    const createdat = data.createdat ?? data.createdAt ?? data.created_at ?? null;
     return {
       uid: doc.id,
       email: data.email ?? '',
@@ -36,7 +40,8 @@ export async function getAllUsers(): Promise<UserDoc[]> {
       farmIds: Array.isArray(data.farmIds) ? data.farmIds : Array.isArray(data.farmID) ? data.farmID : [],
       active: data.active === true,
       name: data.name ?? data.email ?? '',
-      createdAt: data.createdAt,
+      createdat,
+      createdAt: createdat,
     };
   });
 }
@@ -45,6 +50,7 @@ export async function getUsersByRole(role: string): Promise<UserDoc[]> {
   const snap = await db.collection('users').where('role', '==', role).get();
   return snap.docs.map((doc: any) => {
     const data = doc.data();
+    const createdat = data.createdat ?? data.createdAt ?? data.created_at ?? null;
     return {
       uid: doc.id,
       email: data.email ?? '',
@@ -52,7 +58,8 @@ export async function getUsersByRole(role: string): Promise<UserDoc[]> {
       farmIds: Array.isArray(data.farmIds) ? data.farmIds : Array.isArray(data.farmID) ? data.farmID : [],
       active: data.active === true,
       name: data.name ?? data.email ?? '',
-      createdAt: data.createdAt,
+      createdat,
+      createdAt: createdat,
     };
   });
 }
@@ -61,6 +68,7 @@ export async function getActiveFarmers(): Promise<UserDoc[]> {
   const snap = await db.collection('users').where('role', '==', 'farmer').where('active', '==', true).get();
   return snap.docs.map((doc: any) => {
     const data = doc.data();
+    const createdat = data.createdat ?? data.createdAt ?? data.created_at ?? null;
     return {
       uid: doc.id,
       email: data.email ?? '',
@@ -68,7 +76,8 @@ export async function getActiveFarmers(): Promise<UserDoc[]> {
       farmIds: Array.isArray(data.farmIds) ? data.farmIds : Array.isArray(data.farmID) ? data.farmID : [],
       active: true,
       name: data.name ?? data.email ?? '',
-      createdAt: data.createdAt,
+      createdat,
+      createdAt: createdat,
     };
   });
 }

@@ -17,6 +17,14 @@ export function validateDailyReportBusinessRules(input: DailyReportInput): void 
       'Combined mortality and culling cannot exceed bird count';
   }
 
+  if (input.eggWeight.min < 30 || input.eggWeight.min > 80) {
+    fields['eggWeightMin'] = 'Egg weight min must be between 30g and 80g';
+  }
+
+  if (input.eggWeight.max < 30 || input.eggWeight.max > 80) {
+    fields['eggWeightMax'] = 'Egg weight max must be between 30g and 80g';
+  }
+
   if (input.eggWeight.min > input.eggWeight.max) {
     fields['eggWeights'] = 'Egg weight min cannot exceed max';
   }
@@ -25,32 +33,57 @@ export function validateDailyReportBusinessRules(input: DailyReportInput): void 
     fields['eggWeightAvg'] = 'Egg weight avg must be between min and max';
   }
 
-  if (input.bodyWeight.min > input.bodyWeight.max) {
-    fields['bodyWeights'] = 'Body weight min cannot exceed max';
+  if (input.bodyWeight) {
+    if (input.bodyWeight.min < 500 || input.bodyWeight.min > 3000) {
+      fields['bodyWeightMin'] = 'Body weight min must be between 500g and 3000g';
+    }
+
+    if (input.bodyWeight.max < 500 || input.bodyWeight.max > 3000) {
+      fields['bodyWeightMax'] = 'Body weight max must be between 500g and 3000g';
+    }
+
+    if (input.bodyWeight.min > input.bodyWeight.max) {
+      fields['bodyWeights'] = 'Body weight min cannot exceed max';
+    }
+
+    if (input.bodyWeight.avg < input.bodyWeight.min || input.bodyWeight.avg > input.bodyWeight.max) {
+      fields['bodyWeightAvg'] = 'Body weight avg must be between min and max';
+    }
   }
 
-  if (input.bodyWeight.avg < input.bodyWeight.min || input.bodyWeight.avg > input.bodyWeight.max) {
-    fields['bodyWeightAvg'] = 'Body weight avg must be between min and max';
-  }
-
-  if (input.eggsProduced > input.birdCount) {
-    fields['eggsProduced'] = 'Egg production cannot exceed bird count';
+  const maxEggs = Math.floor(input.birdCount * 0.95);
+  if (input.eggsProduced > maxEggs) {
+    fields['eggsProduced'] = `Egg production cannot exceed 95% of bird count (maximum allowed: ${maxEggs})`;
   }
 
   if (input.selectionEggs > input.eggsProduced) {
     fields['selectionEggs'] = 'Selection eggs cannot exceed egg production';
   }
 
-  if (input.temperature < -10 || input.temperature > 60) {
-    fields['temperature'] = 'Temperature must be between -10 and 60 degrees';
+  if (input.damagedEggs !== undefined && input.damagedEggs !== null) {
+    if (input.damagedEggs < 0 || !Number.isInteger(input.damagedEggs)) {
+      fields['damagedEggs'] = 'Damaged eggs must be a non-negative whole number';
+    }
   }
 
-  if (input.ammoniaPpm < 0) {
-    fields['ammoniaPpm'] = 'Ammonia result cannot be negative';
+  if (input.floorEggs !== undefined && input.floorEggs !== null) {
+    if (input.floorEggs < 0 || !Number.isInteger(input.floorEggs)) {
+      fields['floorEggs'] = 'Floor eggs must be a non-negative whole number';
+    }
   }
 
-  if (input.ammoniaPpm > 100) {
-    fields['ammoniaPpm'] = 'Ammonia result cannot exceed 100 ppm';
+  if (input.temperature < 10 || input.temperature > 50) {
+    fields['temperature'] = 'Temperature must be between 10 and 50 degrees';
+  }
+
+  if (input.ammoniaPpm !== undefined && input.ammoniaPpm !== null) {
+    if (input.ammoniaPpm < 0) {
+      fields['ammoniaPpm'] = 'Ammonia result cannot be negative';
+    }
+
+    if (input.ammoniaPpm > 50) {
+      fields['ammoniaPpm'] = 'Ammonia result cannot exceed 50 ppm';
+    }
   }
 
   if (Object.keys(fields).length > 0) {

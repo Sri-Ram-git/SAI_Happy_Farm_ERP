@@ -49,7 +49,7 @@ function createApp(): express.Express {
   }));
 
 
-  app.use(express.json({ limit: '100kb' }));
+  app.use(express.json({ limit: '10mb' }));
 
   app.use((req, _res, next) => {
     req.requestId = generateRequestId();

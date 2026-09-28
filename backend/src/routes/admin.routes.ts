@@ -16,6 +16,7 @@ import {
   getUsers,
   deleteUserAccount,
 } from '../controllers/farmer.controller';
+import importRouter from './import.routes';
 
 const router = Router();
 
@@ -60,6 +61,8 @@ router.patch(
   validateBody(UpdateSupervisorFarmsSchema),
   updateSupervisorAllocation,
 );
+
+router.use('/import', importRouter);
 
 export default router;
 

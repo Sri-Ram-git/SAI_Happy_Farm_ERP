@@ -13,13 +13,23 @@ describe('Business Rule Validation', () => {
     selectionEggs: 100,
     temperature: 25.5,
     eggWeight: { min: 58, max: 62, avg: 60 },
-    bodyWeight: { min: 1.7, max: 1.9, avg: 1.8 },
+    bodyWeight: { min: 1700, max: 1900, avg: 1800 },
     remarks: '',
     ammoniaPpm: 10,
   };
 
   it('should pass for valid input', () => {
     expect(() => validateDailyReportBusinessRules(validInput)).not.toThrow();
+  });
+
+  it('should pass without bodyWeight or ammoniaPpm (optional weekly fields)', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        bodyWeight: undefined,
+        ammoniaPpm: undefined,
+      }),
+    ).not.toThrow();
   });
 
   it('should reject mortality > birdCount', () => {
@@ -44,6 +54,24 @@ describe('Business Rule Validation', () => {
     ).toThrow();
   });
 
+  it('should reject eggWeight min < 30', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        eggWeight: { min: 25, max: 60, avg: 45 },
+      }),
+    ).toThrow();
+  });
+
+  it('should reject eggWeight max > 80', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        eggWeight: { min: 60, max: 85, avg: 70 },
+      }),
+    ).toThrow();
+  });
+
   it('should reject eggWeight min > max', () => {
     expect(() =>
       validateDailyReportBusinessRules({
@@ -62,11 +90,29 @@ describe('Business Rule Validation', () => {
     ).toThrow();
   });
 
+  it('should reject bodyWeight min < 500', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        bodyWeight: { min: 450, max: 1500, avg: 1000 },
+      }),
+    ).toThrow();
+  });
+
+  it('should reject bodyWeight max > 3000', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        bodyWeight: { min: 1500, max: 3200, avg: 2000 },
+      }),
+    ).toThrow();
+  });
+
   it('should reject bodyWeight min > max', () => {
     expect(() =>
       validateDailyReportBusinessRules({
         ...validInput,
-        bodyWeight: { min: 2.5, max: 1.5, avg: 2.0 },
+        bodyWeight: { min: 2500, max: 1500, avg: 2000 },
       }),
     ).toThrow();
   });
@@ -75,18 +121,28 @@ describe('Business Rule Validation', () => {
     expect(() =>
       validateDailyReportBusinessRules({
         ...validInput,
-        bodyWeight: { min: 1.7, max: 1.9, avg: 2.5 },
+        bodyWeight: { min: 1700, max: 1900, avg: 2500 },
       }),
     ).toThrow();
   });
 
-  it('should reject eggsProduced > birdCount', () => {
+  it('should reject eggsProduced > 95% of birdCount', () => {
+    // 5000 birds -> max 4750 eggs
     expect(() =>
       validateDailyReportBusinessRules({
         ...validInput,
-        eggsProduced: 6000,
+        eggsProduced: 4751,
       }),
     ).toThrow();
+  });
+
+  it('should allow eggsProduced exactly at 95% of birdCount', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        eggsProduced: 4750,
+      }),
+    ).not.toThrow();
   });
 
   it('should reject selectionEggs > eggsProduced', () => {
@@ -98,20 +154,20 @@ describe('Business Rule Validation', () => {
     ).toThrow();
   });
 
-  it('should reject temperature < -10', () => {
+  it('should reject temperature < 10', () => {
     expect(() =>
       validateDailyReportBusinessRules({
         ...validInput,
-        temperature: -15,
+        temperature: 9,
       }),
     ).toThrow();
   });
 
-  it('should reject temperature > 60', () => {
+  it('should reject temperature > 50', () => {
     expect(() =>
       validateDailyReportBusinessRules({
         ...validInput,
-        temperature: 65,
+        temperature: 51,
       }),
     ).toThrow();
   });
@@ -125,11 +181,62 @@ describe('Business Rule Validation', () => {
     ).toThrow();
   });
 
-  it('should reject ammoniaPpm > 100', () => {
+  it('should reject ammoniaPpm > 50', () => {
     expect(() =>
       validateDailyReportBusinessRules({
         ...validInput,
-        ammoniaPpm: 150,
+        ammoniaPpm: 55,
+      }),
+    ).toThrow();
+  });
+
+  it('should accept ammoniaPpm <= 50', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        ammoniaPpm: 50,
+      }),
+    ).not.toThrow();
+  });
+
+  it('should accept valid non-negative integer damagedEggs and floorEggs', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        damagedEggs: 12,
+        floorEggs: 6,
+      }),
+    ).not.toThrow();
+  });
+
+  it('should reject negative damagedEggs or floorEggs', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        damagedEggs: -1,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        floorEggs: -3,
+      }),
+    ).toThrow();
+  });
+
+  it('should reject non-integer decimal damagedEggs or floorEggs', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        damagedEggs: 4.5,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        floorEggs: 1.2,
       }),
     ).toThrow();
   });

@@ -106,6 +106,18 @@ export async function updateFeedInventory(
   }, { merge: true });
 }
 
+export interface FeedLogDoc {
+  logId: string;
+  farmId: string;
+  quantityKg: number;
+  previousStockKg: number;
+  newStockKg: number;
+  loadedAt: string;
+  recordedBy: string;
+  notes?: string;
+  type: 'FEED_LOAD';
+}
+
 export async function addFeedLoad(
   farmId: string,
   feedLoadKg: number,
@@ -116,6 +128,8 @@ export async function addFeedLoad(
   const reportDate = getIstDate();
 
   const farmRef = db.collection('farms').doc(farmId);
+  const feedLogRef = db.collection('logs').doc(farmId).collection('feedLogs').doc();
+  const txRef = db.collection('farms').doc(farmId).collection('feedTransactions').doc();
 
   await db.runTransaction(async (transaction: any) => {
     const farmSnap = await transaction.get(farmRef);
@@ -125,16 +139,32 @@ export async function addFeedLoad(
     const farmData = farmSnap.data();
     const currentStock = Number(farmData.currentFeedKg ?? 0);
     const totalLoaded = Number(farmData.totalFeedLoadedKg ?? 0);
+    const newStockKg = currentStock + feedLoadKg;
+    const newTotalLoadedKg = totalLoaded + feedLoadKg;
 
+    // 1. Update master farm document
     transaction.set(farmRef, {
-      currentFeedKg: currentStock + feedLoadKg,
-      totalFeedLoadedKg: totalLoaded + feedLoadKg,
+      currentFeedKg: newStockKg,
+      totalFeedLoadedKg: newTotalLoadedKg,
       inventoryUpdatedAt: now,
       lastTransactionDate: reportDate,
       updatedAt: now,
     }, { merge: true });
 
-    const txRef = db.collection('farms').doc(farmId).collection('feedTransactions').doc();
+    // 2. Write to farm-wise feed log: logs/{farmId}/feedLogs/{feedLogId}
+    transaction.set(feedLogRef, {
+      logId: feedLogRef.id,
+      farmId,
+      quantityKg: feedLoadKg,
+      previousStockKg: currentStock,
+      newStockKg,
+      loadedAt: now,
+      recordedBy: loadedBy,
+      notes: notes || '',
+      type: 'FEED_LOAD',
+    });
+
+    // 3. Keep legacy feedTransaction for backward compatibility
     transaction.set(txRef, {
       farmId,
       type: 'FEED_LOAD',
@@ -142,9 +172,39 @@ export async function addFeedLoad(
       reportDate,
       createdAt: now,
       loadedBy,
-      notes,
+      notes: notes || '',
     });
   });
+}
+
+export async function getFeedLogsByFarm(farmId: string): Promise<FeedLogDoc[]> {
+  if (!farmId) return [];
+  const snap = await db.collection('logs').doc(farmId).collection('feedLogs').get();
+  return snap.docs
+    .map((doc: any) => ({ logId: doc.id, ...doc.data() } as FeedLogDoc))
+    .sort((a: FeedLogDoc, b: FeedLogDoc) => (b.loadedAt || '').localeCompare(a.loadedAt || ''));
+}
+
+export function subscribeToFeedLogsByFarm(
+  farmId: string,
+  callback: (logs: FeedLogDoc[]) => void,
+): () => void {
+  if (!farmId) {
+    callback([]);
+    return () => {};
+  }
+  return db.collection('logs').doc(farmId).collection('feedLogs').onSnapshot(
+    (snap: any) => {
+      const logs = snap.docs
+        .map((doc: any) => ({ logId: doc.id, ...doc.data() } as FeedLogDoc))
+        .sort((a: FeedLogDoc, b: FeedLogDoc) => (b.loadedAt || '').localeCompare(a.loadedAt || ''));
+      callback(logs);
+    },
+    (err: any) => {
+      console.error('[inventoryService] subscribeToFeedLogsByFarm error:', err.message || err);
+      callback([]);
+    },
+  );
 }
 
 function getIstDate(): string {

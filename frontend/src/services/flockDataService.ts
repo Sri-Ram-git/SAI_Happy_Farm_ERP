@@ -21,6 +21,23 @@ export interface FlockDoc {
   updatedAt: string;
 }
 
+export interface FlockLogDoc {
+  logId: string;
+  farmId: string;
+  flockId: string;
+  flockName: string;
+  initialBirds: number;
+  currentBirds: number;
+  startDate: string;
+  breedType: string;
+  status: string;
+  batchNumber?: number;
+  isInitialFlock?: boolean;
+  notes?: string;
+  createdAt: string;
+  type?: 'FLOCK_CREATION';
+}
+
 export async function getFlockById(flockId: string): Promise<FlockDoc | null> {
   const doc = await db.collection('flocks').doc(flockId).get();
   if (!doc.exists) return null;
@@ -194,9 +211,87 @@ export async function createFlock(data: {
       createdAt: now,
       notes: data.notes || (isInitialFlock ? 'Initial flock creation from farm inventory' : `Flock batch ${batchNumber} addition`),
     });
+
+    // 4. Record Farm-wise Flock Log: logs/{farmId}/flockLogs/{flockLogId}
+    const flockLogRef = db.collection('logs').doc(data.farmId).collection('flockLogs').doc(flockRef.id);
+    transaction.set(flockLogRef, {
+      logId: flockRef.id,
+      farmId: data.farmId,
+      flockId: flockRef.id,
+      flockName: resolvedFlockName,
+      initialBirds: flockInitialBirds,
+      currentBirds: flockCurrentBirds,
+      startDate: data.startDate,
+      breedType: data.breedType || 'BV-300',
+      status: 'active',
+      batchNumber,
+      isInitialFlock,
+      createdAt: now,
+      notes: data.notes || '',
+      type: 'FLOCK_CREATION',
+    });
   });
 
   return flockRef.id;
+}
+
+export async function getFlockLogsByFarm(farmId: string): Promise<FlockLogDoc[]> {
+  if (!farmId) return [];
+  const snap = await db.collection('logs').doc(farmId).collection('flockLogs').get();
+  return snap.docs
+    .map((doc: any) => ({ logId: doc.id, ...doc.data() } as FlockLogDoc))
+    .sort((a: FlockLogDoc, b: FlockLogDoc) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+}
+
+export function subscribeToFlockLogsByFarm(
+  farmId: string,
+  callback: (logs: FlockLogDoc[]) => void,
+): () => void {
+  if (!farmId) {
+    callback([]);
+    return () => {};
+  }
+  return db.collection('logs').doc(farmId).collection('flockLogs').onSnapshot(
+    (snap: any) => {
+      const logs = snap.docs
+        .map((doc: any) => ({ logId: doc.id, ...doc.data() } as FlockLogDoc))
+        .sort((a: FlockLogDoc, b: FlockLogDoc) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      callback(logs);
+    },
+    (err: any) => {
+      console.error('[flockDataService] subscribeToFlockLogsByFarm error:', err.message || err);
+      callback([]);
+    },
+  );
+}
+
+export async function syncExistingFlocksToLogs(): Promise<void> {
+  const flocksSnap = await db.collection('flocks').get();
+  for (const doc of flocksSnap.docs) {
+    const flock = doc.data();
+    if (flock.farmId) {
+      const logRef = db.collection('logs').doc(flock.farmId).collection('flockLogs').doc(doc.id);
+      const logSnap = await logRef.get();
+      if (!logSnap.exists) {
+        await logRef.set({
+          logId: doc.id,
+          farmId: flock.farmId,
+          flockId: doc.id,
+          flockName: flock.flockName || 'Flock 1',
+          initialBirds: flock.initialBirds || 0,
+          currentBirds: flock.currentBirds || 0,
+          startDate: flock.startDate || '',
+          breedType: flock.breedType || 'BV-300',
+          status: flock.status || 'active',
+          batchNumber: flock.batchNumber || 1,
+          isInitialFlock: !!flock.isInitialFlock,
+          createdAt: flock.createdAt || new Date().toISOString(),
+          notes: flock.notes || '',
+          type: 'FLOCK_CREATION',
+        });
+      }
+    }
+  }
 }
 
 export async function updateFlock(flockId: string, updates: Partial<FlockDoc>): Promise<void> {

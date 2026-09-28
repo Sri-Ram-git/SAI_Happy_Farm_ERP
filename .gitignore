@@ -32,7 +32,9 @@ coverage/
 .idea/
 .DS_Store
 
-# Temporary scratch
+# Temporary scratch & Office lock files
 scratch/
 backend/scratch/
+~$*
+*.tmp
 

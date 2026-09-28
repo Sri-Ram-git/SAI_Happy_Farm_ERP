@@ -64,12 +64,12 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
 
   // Mobile viewport tracker for responsive modal charts
   const [isMobileScreen, setIsMobileScreen] = useState(() => {
-    return typeof window !== 'undefined' ? window.innerWidth <= 768 : false;
+    return typeof window !== 'undefined' ? (window.innerWidth <= 768 || window.innerHeight <= 550) : false;
   });
 
   useEffect(() => {
     const handleResize = () => {
-      setIsMobileScreen(window.innerWidth <= 768);
+      setIsMobileScreen(window.innerWidth <= 768 || window.innerHeight <= 550);
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -174,10 +174,10 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
     }).filter((r) => {
       if (!r.farmId) return false;
       if (selectedFarmId && r.farmId !== selectedFarmId) return false;
-      if (selectedFlockId && r.flockId !== selectedFlockId) return false;
+      if (role !== 'supervisor' && variant !== 'overview' && selectedFlockId && r.flockId !== selectedFlockId) return false;
       return true;
     });
-  }, [rawReports, selectedFarmId, selectedFlockId, users]);
+  }, [rawReports, selectedFarmId, selectedFlockId, users, variant, role]);
 
   const activeFarms = useMemo(() => farms.filter((f) => f.active !== false), [farms]);
   const expectedFarms = useMemo(() => (selectedFarmId ? 1 : activeFarms.length || farms.length), [selectedFarmId, activeFarms, farms]);
@@ -310,9 +310,39 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
   const alerts = useMemo(() => {
     const list: { id: string; type: 'critical' | 'warning' | 'info'; title: string; desc: string; farmId: string }[] = [];
 
-    // Check missing submissions today for active farms
-    activeFarms.forEach((f) => {
-      if (!submittedFarmIdsToday.has(f.farmId)) {
+    // While data is still loading, do not produce false missing report warnings
+    if (reportsLoading || dataLoading) {
+      return list;
+    }
+
+    if (reportsError) {
+      list.push({
+        id: 'query_error',
+        type: 'warning',
+        title: 'Unable to Verify Reports',
+        desc: 'Report submission status could not be verified due to a query or network error.',
+        farmId: 'ALL',
+      });
+      return list;
+    }
+
+    const targetFarms = selectedFarmId ? activeFarms.filter((f) => f.farmId === selectedFarmId) : activeFarms;
+
+    // Only farms that have at least one active assigned farmer are expected to submit reports
+    const expectedFarmsToReport = targetFarms.filter((f) =>
+      farmers.some((u) => u.farmIds?.some((id) => id?.trim().toUpperCase() === f.farmId?.trim().toUpperCase()))
+    );
+
+    // Map of normalized submitted farm IDs for today (excluding drafts)
+    const validTodayReports = todayReports.filter((r) => r.status !== 'draft');
+    const submittedFarmIdsSet = new Set(
+      validTodayReports.map((r) => r.farmId?.trim().toUpperCase()).filter(Boolean)
+    );
+
+    // Check missing submissions today for farms expected to report
+    expectedFarmsToReport.forEach((f) => {
+      const normalizedId = f.farmId?.trim().toUpperCase();
+      if (!submittedFarmIdsSet.has(normalizedId)) {
         const farmLabel = f.name ? `Farm ${f.farmId} (${f.name})` : `Farm ${f.farmId}`;
         list.push({
           id: `missing_${f.farmId}`,
@@ -324,9 +354,9 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
       }
     });
 
-    // Check recent high mortality or low production
-    todayReports.forEach((r) => {
-      const farmObj = activeFarms.find((f) => f.farmId === r.farmId);
+    // Check recent high mortality or low production on valid reports
+    validTodayReports.forEach((r) => {
+      const farmObj = activeFarms.find((f) => f.farmId?.trim().toUpperCase() === r.farmId?.trim().toUpperCase());
       const farmLabel = farmObj?.name ? `Farm ${r.farmId} (${farmObj.name})` : `Farm ${r.farmId || 'Unknown'}`;
 
       const base = r.openingBirdCount || r.birdCount;
@@ -361,19 +391,19 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           farmId: r.farmId,
         });
       }
-      if (r.temperature && (r.temperature > 36 || r.temperature < 18)) {
+      if (r.temperature && (r.temperature > 50 || r.temperature < 10)) {
         list.push({
           id: `temp_${r.farmId}`,
           type: 'warning',
           title: `Abnormal Temperature Warning`,
-          desc: `${farmLabel} temperature recorded at ${r.temperature}°C.`,
+          desc: `${farmLabel} temperature recorded at ${r.temperature}°C (acceptable: 10°C – 50°C).`,
           farmId: r.farmId,
         });
       }
     });
 
     return list;
-  }, [activeFarms, submittedFarmIdsToday, todayReports, today]);
+  }, [activeFarms, todayReports, today, reportsLoading, dataLoading, reportsError, selectedFarmId, farmers]);
 
   // Farm Ranking & Multi-KPI Comparison
   const farmRankings = useMemo(() => {
@@ -474,6 +504,7 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
       const bodyWtMax = dayReports.length > 0 ? calcAverage(dayReports.map((r) => r.bodyWeight?.max)) : null;
       const bodyWtAvg = dayReports.length > 0 ? calcAverage(dayReports.map((r) => r.bodyWeight?.avg)) : null;
 
+      const selectionCount = dayReports.reduce((s, r) => s + (Number(r.selectionEggs) || 0), 0);
       const selectionPct = dayReports.length > 0
         ? calcAverage(dayReports.map((r) => calcSelectionRate(r.selectionEggs ?? 0, r.eggsProduced ?? 0)))
         : null;
@@ -503,6 +534,7 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
         bodyWtMin: bodyWtMin !== 0 ? bodyWtMin : null,
         bodyWtMax: bodyWtMax !== 0 ? bodyWtMax : null,
         bodyWtAvg: bodyWtAvg !== 0 ? bodyWtAvg : null,
+        selectionCount,
         selectionPct: selectionPct !== null ? Number(selectionPct.toFixed(1)) : null,
         tempMin: tempMin !== 0 ? tempMin : null,
         tempMax: tempMax !== 0 ? tempMax : null,
@@ -525,8 +557,16 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
       {/* CLEAN APP PAGE HEADER & GLOBAL FILTERS */}
       <div className="mgmt-page-header">
         <div>
-          <h2>{role === 'admin' ? 'Admin Overview' : 'Supervisor Overview'}</h2>
-          <p className="welcome-subtitle">Real-time farm operations and performance analytics</p>
+          <h2>
+            {variant === 'analytics'
+              ? (role === 'admin' ? 'Admin Analytics' : 'Supervisor Analytics')
+              : (role === 'admin' ? 'Admin Overview' : 'Supervisor Overview')}
+          </h2>
+          <p className="welcome-subtitle">
+            {variant === 'analytics'
+              ? 'Deep-dive operational metrics, trends, and performance analytics'
+              : 'Real-time farm operations and performance analytics'}
+          </p>
         </div>
 
         <div className="mgmt-header-actions">
@@ -544,18 +584,20 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
             ))}
           </select>
 
-          <select
-            className="form-input form-input--sm mgmt-filter-select"
-            value={selectedFlockId}
-            onChange={(e) => setSelectedFlockId(e.target.value)}
-          >
-            <option value="">All Flocks ({flocks.length})</option>
-            {flocks
-              .filter((fl) => !selectedFarmId || fl.farmId === selectedFarmId)
-              .map((fl) => (
-                <option key={fl.flockId} value={fl.flockId}>{fl.flockName}</option>
-              ))}
-          </select>
+          {variant === 'analytics' && (
+            <select
+              className="form-input form-input--sm mgmt-filter-select"
+              value={selectedFlockId}
+              onChange={(e) => setSelectedFlockId(e.target.value)}
+            >
+              <option value="">All Flocks ({flocks.length})</option>
+              {flocks
+                .filter((fl) => !selectedFarmId || fl.farmId === selectedFarmId)
+                .map((fl) => (
+                  <option key={fl.flockId} value={fl.flockId}>{fl.flockName}</option>
+                ))}
+            </select>
+          )}
 
           <DateFilter days={days} onChange={setDays} />
         </div>
@@ -586,7 +628,7 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
               value={avgMort !== null ? `${avgMort}%` : '--'}
               icon={<HeartPulse size={20} />}
               color={avgMort !== null && avgMort > 2.0 ? '#dc2626' : '#15803d'}
-              onClick={() => setExpandedMetric({ type: 'mortality', title: 'Avg Mortality %', sub: 'Daily mortality rate and culling counts' })}
+              onClick={() => setExpandedMetric({ type: 'mortality', title: 'Avg Mortality %', sub: 'Daily mortality rate and dead bird counts' })}
             />
             <KpiCard
               title="Avg Feed / Bird"
@@ -756,14 +798,14 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           className="ent-chart-card ent-chart-card--clickable"
           onClick={() => setExpandedMetric({
             type: 'mortality',
-            title: 'Mortality & Culling Tracking',
-            sub: 'Daily dead bird count, culling count, and mortality % rate',
+            title: 'Mortality Tracking',
+            sub: 'Daily dead bird count and mortality % rate',
           })}
         >
           <div className="ent-chart-header">
             <div>
-              <h3>Mortality & Culling Tracking</h3>
-              <p className="ent-chart-sub">Daily dead bird count, culling count, and mortality % rate</p>
+              <h3>Mortality Tracking</h3>
+              <p className="ent-chart-sub">Daily dead bird count and mortality % rate</p>
             </div>
             <Maximize2 size={16} className="ent-expand-icon" />
           </div>
@@ -776,7 +818,6 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
               <Tooltip />
               <Legend />
               <Bar yAxisId="left" dataKey="mortalityCount" fill="#ef4444" name="Mortality Count" radius={[4, 4, 0, 0]} />
-              <Bar yAxisId="left" dataKey="cullingCount" fill="#f59e0b" name="Culling Count" radius={[4, 4, 0, 0]} />
               <Line yAxisId="right" type="monotone" dataKey="mortality" stroke="#b91c1c" strokeWidth={2} name="Mortality Rate %" dot={{ r: 3 }} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>
@@ -819,35 +860,48 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           </ResponsiveContainer>
         </div>
 
-        {/* GRAPH 4: EGG QUALITY & WEIGHT METRICS */}
+        {/* GRAPH 4: EGG SELECTION (SUPERVISOR) OR EGG QUALITY & WEIGHT (ADMIN) */}
         <div
           className="ent-chart-card ent-chart-card--clickable"
           onClick={() => setExpandedMetric({
             type: 'eggQuality',
-            title: 'Egg Weight & Selection Quality',
-            sub: 'Min, Max, Avg egg weights (g) and selection egg percentage',
+            title: role === 'supervisor' ? 'Egg Selection Analytics' : 'Egg Weight & Selection Quality',
+            sub: role === 'supervisor' ? 'Daily selected eggs quantity and selection % rate' : 'Min, Max, Avg egg weights (g) and selection egg percentage',
           })}
         >
           <div className="ent-chart-header">
             <div>
-              <h3>Egg Weight & Selection Quality</h3>
-              <p className="ent-chart-sub">Min, Max, Avg egg weights (g) and selection egg percentage</p>
+              <h3>{role === 'supervisor' ? 'Egg Selection Analytics' : 'Egg Weight & Selection Quality'}</h3>
+              <p className="ent-chart-sub">{role === 'supervisor' ? 'Daily selected eggs quantity and selection % rate' : 'Min, Max, Avg egg weights (g) and selection egg percentage'}</p>
             </div>
             <Maximize2 size={16} className="ent-expand-icon" />
           </div>
           <ResponsiveContainer width="100%" height={280}>
-            <ComposedChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-              <YAxis yAxisId="left" domain={[40, 80]} tick={{ fontSize: 12 }} unit=" g" />
-              <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
-              <Tooltip />
-              <Legend />
-              <Line yAxisId="left" type="monotone" dataKey="eggWtAvg" stroke="#0284c7" strokeWidth={2} name="Avg Egg Wt (g)" dot={{ r: 3 }} connectNulls />
-              <Line yAxisId="left" type="monotone" dataKey="eggWtMin" stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" name="Min Egg Wt" connectNulls />
-              <Line yAxisId="left" type="monotone" dataKey="eggWtMax" stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" name="Max Egg Wt" connectNulls />
-              <Line yAxisId="right" type="monotone" dataKey="selectionPct" stroke="#16a34a" strokeWidth={2} name="Selection %" dot={{ r: 3 }} connectNulls />
-            </ComposedChart>
+            {role === 'supervisor' ? (
+              <ComposedChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                <YAxis yAxisId="left" tick={{ fontSize: 12 }} />
+                <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
+                <Tooltip />
+                <Legend />
+                <Bar yAxisId="left" dataKey="selectionCount" fill="#16a34a" name="Selected Eggs" radius={[4, 4, 0, 0]} />
+                <Line yAxisId="right" type="monotone" dataKey="selectionPct" stroke="#059669" strokeWidth={2} name="Selection %" dot={{ r: 3 }} connectNulls />
+              </ComposedChart>
+            ) : (
+              <ComposedChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 12 }} />
+                <YAxis yAxisId="left" domain={[40, 80]} tick={{ fontSize: 12 }} unit=" g" />
+                <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
+                <Tooltip />
+                <Legend />
+                <Line yAxisId="left" type="monotone" dataKey="eggWtAvg" stroke="#0284c7" strokeWidth={2} name="Avg Egg Wt (g)" dot={{ r: 3 }} connectNulls />
+                <Line yAxisId="left" type="monotone" dataKey="eggWtMin" stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" name="Min Egg Wt" connectNulls />
+                <Line yAxisId="left" type="monotone" dataKey="eggWtMax" stroke="#94a3b8" strokeWidth={1} strokeDasharray="3 3" name="Max Egg Wt" connectNulls />
+                <Line yAxisId="right" type="monotone" dataKey="selectionPct" stroke="#16a34a" strokeWidth={2} name="Selection %" dot={{ r: 3 }} connectNulls />
+              </ComposedChart>
+            )}
           </ResponsiveContainer>
         </div>
 
@@ -955,13 +1009,14 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           chartData={chartData}
           days={days}
           farmFilter={selectedFarmId}
-          flockFilter={selectedFlockId}
+          flockFilter={role === 'supervisor' || variant === 'overview' ? '' : selectedFlockId}
           activeFarms={activeFarms}
           farmInventories={farmInventories}
           reports={reports}
           submissionMatrix={submissionMatrix}
           standardCurveType={standardCurveType}
           onStandardCurveChange={setStandardCurveType}
+          role={role}
           renderChartContent={() => {
             const chartHeight = getModalChartHeight(expandedMetric.type);
             const chartMargin = isMobileScreen
@@ -1000,7 +1055,6 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
                         <Tooltip />
                         <Legend wrapperStyle={legendStyle} />
                         <Bar yAxisId="left" dataKey="mortalityCount" fill="#ef4444" name="Mortality Count" radius={[4, 4, 0, 0]} />
-                        <Bar yAxisId="left" dataKey="cullingCount" fill="#f59e0b" name="Culling Count" radius={[4, 4, 0, 0]} />
                         <Line yAxisId="right" type="monotone" dataKey="mortality" stroke="#b91c1c" strokeWidth={2} name="Mortality Rate %" dot={{ r: isMobileScreen ? 3 : 4 }} connectNulls />
                       </ComposedChart>
                     </ResponsiveContainer>
@@ -1026,6 +1080,25 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
                 );
 
               case 'eggQuality':
+                if (role === 'supervisor') {
+                  return (
+                    <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
+                      <ResponsiveContainer width="100%" height={chartHeight}>
+                        <ComposedChart data={chartData} margin={chartMargin}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                          <XAxis dataKey="date" tick={axisTick} />
+                          <YAxis yAxisId="left" tick={axisTick} />
+                          <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={axisTick} unit="%" />
+                          <Tooltip />
+                          <Legend wrapperStyle={legendStyle} />
+                          <Bar yAxisId="left" dataKey="selectionCount" fill="#16a34a" name="Selected Eggs" radius={[4, 4, 0, 0]} />
+                          <Line yAxisId="right" type="monotone" dataKey="selectionPct" stroke="#059669" strokeWidth={2} name="Selection %" dot={{ r: isMobileScreen ? 3 : 4 }} connectNulls />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+                  );
+                }
+
                 return (
                   <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
                     <ResponsiveContainer width="100%" height={chartHeight}>
