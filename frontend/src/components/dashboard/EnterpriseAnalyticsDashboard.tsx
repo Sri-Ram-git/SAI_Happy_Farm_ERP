@@ -5,7 +5,7 @@ import { LoadingState } from './LoadingState';
 import { EmptyState } from './EmptyState';
 import { DateFilter } from './DateFilter';
 import { type ReportDoc } from '../../services/reportDataService';
-import { type FarmDoc, subscribeToAllFarms } from '../../services/farmDataService';
+import { type FarmDoc, subscribeToFarms } from '../../services/farmDataService';
 import { type UserDoc, subscribeToAllUsers } from '../../services/userDataService';
 import { type BirdInventory, subscribeToAllBirdInventories } from '../../services/inventoryService';
 import { type FlockDoc, subscribeToAllFlocks } from '../../services/flockDataService';
@@ -118,16 +118,11 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
     setDataLoading(true);
     let initialDataLoaded = false;
 
-    const unsubFarms = subscribeToAllFarms((frms) => {
-      let filtered = frms;
-      if (role === 'supervisor') {
-        const farmSet = new Set(assignedFarmIds || []);
-        filtered = frms.filter((f) => farmSet.has(f.farmId));
-      }
-      setFarms(filtered);
+    const unsubFarms = subscribeToFarms(role === 'supervisor' ? assignedFarmIds : undefined, (frms) => {
+      setFarms(frms);
 
       if (!initialDataLoaded) {
-        const activeIds = filtered.filter((f) => f.active !== false).map((f) => f.farmId);
+        const activeIds = frms.filter((f) => f.active !== false).map((f) => f.farmId);
         if (activeIds.length > 0) {
           unsubRefs.current.push(
             subscribeToAllBirdInventories(activeIds, (invMap) => {

@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
-import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
+import { getAllFarms, getFarmsByIds, type FarmDoc } from '../../services/farmDataService';
 import {
   getFeedInventory,
   addFeedLoad,
@@ -63,9 +63,10 @@ export function FeedLoadPage() {
     let mounted = true;
     (async () => {
       try {
-        const allFarms = await getAllFarms();
-        const farmIds = role === 'supervisor' ? (userProfile?.farmIds ?? []) : allFarms.map((f) => f.farmId);
-        const filteredFarms = allFarms.filter((f) => farmIds.includes(f.farmId));
+        const assignedIds = userProfile?.farmIds ?? [];
+        const filteredFarms = role === 'supervisor'
+          ? (assignedIds.length > 0 ? await getFarmsByIds(assignedIds) : [])
+          : await getAllFarms();
 
         const farmsWithFeed = await Promise.all(
           filteredFarms.map(async (farm) => {

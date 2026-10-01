@@ -43,12 +43,17 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isSupervisor());
       allow create, delete: if isAdmin();
-      allow update: if isAdmin() || (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'farmIds', 'active']));
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'role', 'farmIds', 'active', 'createdat', 'createdAt', 'created_at', 'email', 'uid'
+        ])
+      );
     }
 
     // Farms Collection
     match /farms/{farmId} {
-      allow read: if isAuthenticated() && isUserActive();
+      allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
       allow create, delete: if isAdmin();
       allow update: if isAdmin() || (isUserActive() && hasFarmAccess(farmId));
 
@@ -70,7 +75,13 @@ service cloud.firestore {
     match /flocks/{flockId} {
       allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId);
       allow create, delete: if isAdmin();
-      allow update: if isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId);
+      allow update: if isAdmin() || (
+        isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'farmId', 'flockId', 'initialBirds', 'startDate', 'breedType',
+          'productionCurve', 'batchNumber', 'isInitialFlock', 'status'
+        ])
+      );
     }
 
 // Daily Reports (Root Collection & Subcollections)
@@ -111,9 +122,12 @@ service cloud.firestore {
 
     // Daily Report Locks (Duplicate Prevention)
     match /dailyReportLocks/{lockId} {
-      allow read: if isAuthenticated() && isUserActive();
+      allow read: if isAuthenticated() && isUserActive() && (
+        isAdmin() ||
+        (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+      );
       allow create, update: if isAuthenticated() && isUserActive() && (isAdmin() || hasFarmAccess(request.resource.data.farmId));
-      allow delete: if isAuthenticated() && isUserActive() && (isAdmin() || hasFarmAccess(resource.data.farmId));
+      allow delete: if isAdmin();
     }
 
     // Audit Logs

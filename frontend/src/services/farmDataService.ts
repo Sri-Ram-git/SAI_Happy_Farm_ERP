@@ -76,3 +76,30 @@ export function subscribeToAllFarms(callback: (farms: FarmDoc[]) => void): () =>
     },
   );
 }
+
+export function subscribeToFarms(
+  farmIds: string[] | undefined,
+  callback: (farms: FarmDoc[]) => void
+): () => void {
+  if (farmIds === undefined) {
+    return subscribeToAllFarms(callback);
+  }
+  if (farmIds.length === 0) {
+    callback([]);
+    return () => {};
+  }
+  const farmMap = new Map<string, FarmDoc>();
+  const unsubs = farmIds.map((id) =>
+    subscribeToFarm(id, (farm) => {
+      if (farm) {
+        farmMap.set(id, farm);
+      } else {
+        farmMap.delete(id);
+      }
+      callback(Array.from(farmMap.values()));
+    })
+  );
+  return () => {
+    unsubs.forEach((unsub) => unsub());
+  };
+}

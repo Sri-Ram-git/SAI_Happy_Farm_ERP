@@ -1,9 +1,7 @@
 export function getFriendlyError(code: string): string {
   switch (code) {
     case 'auth/user-not-found':
-      return 'No account found with this email.';
     case 'auth/wrong-password':
-      return 'Wrong password.';
     case 'auth/invalid-credential':
       return 'Invalid email or password.';
     case 'auth/too-many-requests':

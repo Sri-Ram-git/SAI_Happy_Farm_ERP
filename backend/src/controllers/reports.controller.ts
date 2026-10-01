@@ -79,10 +79,46 @@ export async function exportProductionCurveReport(
     const farmIdParam = req.query['farmId'] as string | undefined;
     let targetFarmIds: string[] | undefined = undefined;
 
-    if (farmIdParam) {
-      targetFarmIds = [farmIdParam];
-    } else if (user && user.role !== UserRole.ADMIN && user.role !== UserRole.OFFICE_STAFF) {
-      targetFarmIds = user.farmIds;
+    if (user && user.role !== UserRole.ADMIN && user.role !== UserRole.OFFICE_STAFF) {
+      if (farmIdParam) {
+        if (!user.farmIds.includes(farmIdParam)) {
+          logger.warn('Export denied: unauthorized farmId parameter', {
+            requestId,
+            userId: user.uid,
+            requestedFarmId: farmIdParam,
+            allowedFarmIds: user.farmIds,
+          });
+          res.status(403).json({
+            success: false,
+            error: {
+              code: 'AUTHORIZATION_DENIED',
+              message: 'Access to this farm is denied',
+            },
+          });
+          return;
+        }
+        targetFarmIds = [farmIdParam];
+      } else {
+        if (!user.farmIds || user.farmIds.length === 0) {
+          logger.warn('Export denied: user has no assigned farms', {
+            requestId,
+            userId: user.uid,
+          });
+          res.status(403).json({
+            success: false,
+            error: {
+              code: 'AUTHORIZATION_DENIED',
+              message: 'No assigned farms found for export',
+            },
+          });
+          return;
+        }
+        targetFarmIds = user.farmIds;
+      }
+    } else {
+      if (farmIdParam) {
+        targetFarmIds = [farmIdParam];
+      }
     }
 
     const { buffer, filename } = await reportsService.generateProductionCurveExport(
