@@ -99,7 +99,8 @@ export async function getRevertPreview(
       throw new NotFoundError('Import batch');
     }
 
-    const preview = await importService.getRevertPreview(batchId, user, requestId);
+    const worksheetKey = typeof req.query['worksheetKey'] === 'string' ? req.query['worksheetKey'] : undefined;
+    const preview = await importService.getRevertPreview(batchId, user, requestId, worksheetKey);
 
     res.status(200).json({
       success: true,

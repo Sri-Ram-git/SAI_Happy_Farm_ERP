@@ -52,6 +52,8 @@ export function FeedLoadPage() {
   // Feed load history state
   const [feedLogs, setFeedLogs] = useState<FeedLogDoc[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [errorLogs, setErrorLogs] = useState<string | null>(null);
+  const [historyRetryKey, setHistoryRetryKey] = useState(0);
   const [usersMap, setUsersMap] = useState<Record<string, string>>({});
 
   const farmIdsKey = userProfile?.farmIds ? userProfile.farmIds.slice().sort().join(',') : '';
@@ -117,19 +119,30 @@ export function FeedLoadPage() {
     if (!selectedFarmId) {
       setFeedLogs([]);
       setLoadingLogs(false);
+      setErrorLogs(null);
       return;
     }
 
     setLoadingLogs(true);
-    const unsubscribe = subscribeToFeedLogsByFarm(selectedFarmId, (logs) => {
-      setFeedLogs(logs);
-      setLoadingLogs(false);
-    });
+    setErrorLogs(null);
+    const unsubscribe = subscribeToFeedLogsByFarm(
+      selectedFarmId,
+      (logs) => {
+        setFeedLogs(logs);
+        setLoadingLogs(false);
+        setErrorLogs(null);
+      },
+      (err) => {
+        console.error('[FeedLoadPage] subscribeToFeedLogsByFarm error:', err);
+        setLoadingLogs(false);
+        setErrorLogs('Unable to load feed load history. Please try again or check network access.');
+      }
+    );
 
     return () => {
       unsubscribe();
     };
-  }, [selectedFarmId]);
+  }, [selectedFarmId, historyRetryKey]);
 
   const selectedFarm = farms.find((f) => f.farmId === selectedFarmId);
 
@@ -349,6 +362,27 @@ export function FeedLoadPage() {
               <span className="spinner" />
               <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: 'var(--gray-500)' }}>Loading history...</p>
             </div>
+          ) : errorLogs ? (
+            <div style={{
+              padding: '24px 16px',
+              textAlign: 'center',
+              background: '#fef2f2',
+              borderRadius: 10,
+              border: '1px solid #fecaca',
+              color: '#991b1b',
+            }}>
+              <p style={{ margin: 0, fontWeight: 600, fontSize: '14px' }}>
+                {errorLogs}
+              </p>
+              <button
+                type="button"
+                className="btn btn--outline btn--sm"
+                style={{ marginTop: 12 }}
+                onClick={() => setHistoryRetryKey((k) => k + 1)}
+              >
+                Retry
+              </button>
+            </div>
           ) : feedLogs.length === 0 ? (
             <div style={{
               padding: '36px 16px',
@@ -377,10 +411,12 @@ export function FeedLoadPage() {
                   {feedLogs.map((log) => (
                     <tr key={log.logId}>
                       <td className="td-bold" style={{ whiteSpace: 'nowrap' }}>
-                        {formatDisplayDate(log.loadedAt)}
-                        <div style={{ fontSize: '12px', color: 'var(--gray-400)', fontWeight: 'normal', marginTop: 2 }}>
-                          {formatTime(log.loadedAt)}
-                        </div>
+                        {formatDisplayDate(log.loadedAt) || '--'}
+                        {typeof log.loadedAt === 'string' && log.loadedAt.includes('T') && (
+                          <div style={{ fontSize: '12px', color: 'var(--gray-400)', fontWeight: 'normal', marginTop: 2 }}>
+                            {formatTime(log.loadedAt)}
+                          </div>
+                        )}
                       </td>
                       <td>
                         <span style={{

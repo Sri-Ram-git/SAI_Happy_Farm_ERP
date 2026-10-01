@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { createAdmin, type CreateAdminPayload } from '../../services/userDataService';
+import { FormLoadingOverlay } from '../../components/common/FormLoadingOverlay';
 
 export function AdminCreateAdminPage() {
   const { userProfile } = useAuth();
@@ -40,7 +41,7 @@ export function AdminCreateAdminPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (submitting || !validate()) return;
 
     setSubmitting(true);
     setGeneralError(null);
@@ -56,19 +57,19 @@ export function AdminCreateAdminPage() {
 
       const result = await createAdmin(payload);
       setSuccessMessage(`Admin "${result.email}" created successfully.`);
+      setSubmitting(false);
 
       setTimeout(() => {
         navigate('/admin/users');
-      }, 1500);
+      }, 1200);
     } catch (err: any) {
       console.error('[AdminCreateAdmin] Error:', err);
+      setSubmitting(false);
       if (err.fields && Object.keys(err.fields).length > 0) {
         setErrors(err.fields);
       } else {
         setGeneralError(err.message || 'Failed to create admin account');
       }
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -80,12 +81,20 @@ export function AdminCreateAdminPage() {
             <h2>Create Admin Account</h2>
             <p style={{ color: '#6b7280', marginTop: 4 }}>Add a new administrator account with system-wide privileges</p>
           </div>
-          <button className="btn btn--outline" onClick={() => navigate('/admin/users')}>
+          <button className="btn btn--outline" onClick={() => navigate('/admin/users')} disabled={submitting}>
             ← Back to Users
           </button>
         </div>
 
-        <div className="section-card" style={{ padding: 24, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb' }}>
+        <div className="section-card" style={{ position: 'relative', padding: 24, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', minHeight: 300 }}>
+          {submitting && (
+            <FormLoadingOverlay
+              title="Creating admin account..."
+              subtitle="Please wait while we securely save the account details."
+              role="admin"
+            />
+          )}
+
           {generalError && <div className="alert alert--error" style={{ marginBottom: 16 }}>{generalError}</div>}
           {successMessage && <div className="alert alert--success" style={{ marginBottom: 16 }}>{successMessage}</div>}
 

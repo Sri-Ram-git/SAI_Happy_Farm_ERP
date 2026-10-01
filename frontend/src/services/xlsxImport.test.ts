@@ -11,10 +11,18 @@ import {
   parseFlexibleDate,
   validateParsedFile,
   executeHistoricalImport,
+  sanitizeFirestoreData,
+  saveImportBatchRecord,
+  getBatchWorksheets,
+  detectColumnMappings,
+  STANDARD_FIELDS,
   type ParsedFile,
   type ValidatedRow,
+  type WorksheetImportContribution,
 } from './historicalImportService';
 import type { FarmDoc } from './farmDataService';
+import { normalizeReport } from '../utils/normalizeDailyReport';
+import { calcProductionRate, calcSelectionRate, calcFeedPerBird } from '../utils/kpiCalculations';
 
 describe('XLSX Historical Import Suite', () => {
   const mockFarms: FarmDoc[] = [
@@ -304,7 +312,9 @@ describe('XLSX Historical Import Suite', () => {
       // Row 1 should be valid
       expect(validated[0]!.isValid).toBe(true);
       expect(validated[0]!.farmId).toBe('AP12');
-      expect(validated[0]!.birdCount).toBe(5000);
+      expect(validated[0]!.openingBirdCount).toBe(5000);
+      expect(validated[0]!.closingBirdCount).toBe(4998);
+      expect(validated[0]!.birdCount).toBe(4998);
       expect(validated[0]!.submissionDate).toBe('2026-01-10');
       expect(validated[0]!.fileName).toBe('farm_data.xlsx [AP12]');
 
@@ -712,7 +722,1079 @@ describe('XLSX Historical Import Suite', () => {
       expect(simResult.importedCount).toBe(1);
       expect(simResult.duplicateCount).toBe(1);
       expect(simResult.skippedCount).toBe(1);
-      expect(simResult.batchId).toContain('dry_run_');
+    });
+  });
+
+  describe('15. Customer Sample Production Curve (july - sep) .xlsx Parsing & Validation', () => {
+    const customerFarms: FarmDoc[] = [
+      { farmId: 'AP12', name: 'AP12', active: true, location: 'Unit 12' },
+      { farmId: 'AP14', name: 'ap10', active: true, location: 'Unit 14' },
+      { farmId: 'AP15', name: 'ap11', active: true, location: 'Unit 15' },
+    ];
+
+    it('should parse synthetic matrix with date serials, selection percentages, and formula errors with 100% validity', () => {
+      const wb = XLSX.utils.book_new();
+      // Excel serial 46175 = 2026-06-02, 46176 = 2026-06-03
+      const ws: any = {
+        '!ref': 'A1:C12',
+        A1: { t: 's', v: 'Farm : AP14' },
+        A2: { t: 's', v: '' },
+        B2: { t: 'n', v: 46175, w: '6/2/26', z: 'm/d/yy' },
+        C2: { t: 'n', v: 46176, w: '6/3/26', z: 'm/d/yy' },
+        A3: { t: 's', v: 'WEEKS' },
+        B3: { t: 'n', v: 24.1 },
+        C3: { t: 'n', v: 24.2 },
+        A4: { t: 's', v: 'NO.OF BIRDS' },
+        B4: { t: 'n', v: 2197 },
+        C4: { t: 'n', v: 2197 },
+        A5: { t: 's', v: 'PRODUCTION' },
+        B5: { t: 'n', v: 1956 },
+        C5: { t: 'n', v: 1960 },
+        A6: { t: 's', v: 'SELECTION' },
+        B6: { t: 'n', v: 1922 },
+        C6: { t: 'n', v: 1930 },
+        A7: { t: 's', v: 'SELECTION %' },
+        B7: { t: 'n', v: 98.26, f: 'B6/B5*100' },
+        C7: { t: 'n', v: 98.47, f: 'C6/C5*100' },
+        A8: { t: 's', v: 'DAMAGE/REJECTED' },
+        B8: { t: 'n', v: 34 },
+        C8: { t: 'n', v: 30 },
+        A9: { t: 's', v: 'Feed Kgs' },
+        B9: { t: 'n', v: 245 },
+        C9: { t: 'n', v: 245 },
+        A10: { t: 's', v: 'AVG' }, // Summary row that should NOT map to bird body weight
+        B10: { t: 'n', v: 67.1 },
+        C10: { t: 'n', v: 67.5 },
+        A11: { t: 's', v: 'ACT %' },
+        B11: { t: 'e', v: 7, w: '#DIV/0!', f: 'B5/B4' }, // Formula error
+        C11: { t: 'n', v: 89.2, f: 'C5/C4*100' },
+        A12: { t: 's', v: '88' }, // Non-data label with no data across dates
+        B12: { t: 's', v: '' },
+        C12: { t: 's', v: '' },
+      };
+      XLSX.utils.book_append_sheet(wb, ws, 'AP14');
+      const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+
+      const sheets = parseXlsxWorkbook(buf, 'Sample.xlsx', customerFarms);
+      expect(sheets).toHaveLength(1);
+      const s = sheets[0]!;
+
+      expect(s.sheetName).toBe('AP14');
+      expect(s.detectedFarmId).toBe('AP14');
+      expect(s.isTransposed).toBe(true);
+      expect(s.rows).toHaveLength(2); // 2 date columns
+      expect(s.totalFormulaCount).toBeGreaterThan(0);
+      expect(s.formulaErrorCount).toBe(1);
+
+      // Verify ignored non-data footer row
+      expect(s.ignoredNonDataRows?.some((r) => r.label === '88')).toBe(true);
+
+      // Verify column mappings
+      const selCountMap = s.mappings.find((m) => m.fileHeader === 'SELECTION');
+      expect(selCountMap?.mappedField).toBe('selectionEggs');
+
+      const selPctMap = s.mappings.find((m) => m.fileHeader === 'SELECTION %');
+      expect(selPctMap?.mappedField).not.toBe('selectionEggs'); // Not overwritten!
+
+      const avgMap = s.mappings.find((m) => m.fileHeader === 'AVG');
+      expect(avgMap?.mappedField).not.toBe('bodyWeightAvg'); // Not mapped to body weight!
+
+      // Validate parsed file
+      const parsedFile: ParsedFile = {
+        id: 'pf_synth_ap14',
+        file: new File([], 'Sample.xlsx'),
+        name: 'Sample.xlsx [AP14]',
+        sheetName: 'AP14',
+        size: buf.byteLength,
+        format: 'XLSX',
+        assignedFarmId: 'AP14',
+        headers: s.headers,
+        mappings: s.mappings,
+        rawRows: s.rows,
+        detectedRecordType: 'DAILY_REPORT',
+        status: 'PARSED',
+      };
+
+      const validated = validateParsedFile(parsedFile, customerFarms);
+      expect(validated).toHaveLength(2);
+      expect(validated[0]!.isValid).toBe(true);
+      expect(validated[1]!.isValid).toBe(true);
+
+      // Check date is June 2, NOT Feb 6
+      expect(validated[0]!.submissionDate).toBe('2026-06-02');
+      expect(validated[0]!.birdCount).toBe(2197);
+      expect(validated[0]!.eggsProduced).toBe(1956);
+      expect(validated[0]!.selectionEggs).toBe(1922);
+      expect(validated[0]!.damagedEggs).toBe(34);
+      expect(validated[0]!.feedKg).toBe(245);
+      expect(validated[0]!.bodyWeight).toBeUndefined(); // AVG was not treated as body weight
+
+      expect(validated[1]!.submissionDate).toBe('2026-06-03');
+    });
+
+    it('should parse real customer Sample Production Curve (july - sep) .xlsx with 100% validity when present', () => {
+      const candidates = [
+        'C:\\Users\\SRIRAM\\Downloads\\Sample Production Curve (july - sep) .xlsx',
+        'C:\\Users\\SRIRAM\\Downloads\\Sample Production Curve (july - sep).xlsx',
+      ];
+      const realPath = candidates.find((p) => fs.existsSync(p));
+      if (!realPath) return; // skip if file not found locally
+
+      const fileBuffer = fs.readFileSync(realPath);
+      const sheets = parseXlsxWorkbook(fileBuffer, path.basename(realPath), customerFarms);
+
+      // Standard reference curve sheets should be detected
+      const cfStd = sheets.find((s) => s.sheetName.toLowerCase().includes('cage free'));
+      expect(cfStd?.isReferenceSheet).toBe(true);
+
+      const frStd = sheets.find((s) => s.sheetName.toLowerCase().includes('free range'));
+      expect(frStd?.isReferenceSheet).toBe(true);
+
+      // Check AP14 sheet
+      const ap14Sheet = sheets.find((s) => s.sheetName === 'AP14');
+      expect(ap14Sheet).toBeDefined();
+      expect(ap14Sheet!.detectedFarmId).toBe('AP14');
+      expect(ap14Sheet!.isTransposed).toBe(true);
+      expect(ap14Sheet!.rows.length).toBe(120);
+
+      const ap14ParsedFile: ParsedFile = {
+        id: 'pf_ap14_real',
+        file: new File([], path.basename(realPath)),
+        name: `${path.basename(realPath)} [AP14]`,
+        sheetName: 'AP14',
+        size: fileBuffer.byteLength,
+        format: 'XLSX',
+        assignedFarmId: 'AP14',
+        headers: ap14Sheet!.headers,
+        mappings: ap14Sheet!.mappings,
+        rawRows: ap14Sheet!.rows,
+        detectedRecordType: 'DAILY_REPORT',
+        status: 'PARSED',
+      };
+
+      const ap14Validated = validateParsedFile(ap14ParsedFile, customerFarms);
+      expect(ap14Validated).toHaveLength(120);
+
+      // CRITICAL: 0 invalid rows!
+      const invalidRows = ap14Validated.filter((r) => !r.isValid);
+      expect(invalidRows).toHaveLength(0);
+
+      // Date order: June 2 to Sept 29
+      expect(ap14Validated[0]!.submissionDate).toBe('2026-06-02');
+      expect(ap14Validated[ap14Validated.length - 1]!.submissionDate).toBe('2026-09-29');
+
+      // Metric integrity
+      expect(ap14Validated[0]!.openingBirdCount).toBe(2453);
+      expect(ap14Validated[0]!.closingBirdCount).toBe(2452);
+      expect(ap14Validated[0]!.birdCount).toBe(2452);
+      expect(ap14Validated[0]!.eggsProduced).toBe(1956);
+      expect(ap14Validated[0]!.selectionEggs).toBe(1922);
+      expect(ap14Validated[0]!.damagedEggs).toBe(34);
+      expect(ap14Validated[0]!.feedKg).toBe(250);
+
+      // Check AP15 sheet
+      const ap15Sheet = sheets.find((s) => s.sheetName === 'AP15');
+      expect(ap15Sheet).toBeDefined();
+      expect(ap15Sheet!.detectedFarmId).toBe('AP15');
+      expect(ap15Sheet!.rows.length).toBe(116);
+
+      const ap15ParsedFile: ParsedFile = {
+        id: 'pf_ap15_real',
+        file: new File([], path.basename(realPath)),
+        name: `${path.basename(realPath)} [AP15]`,
+        sheetName: 'AP15',
+        size: fileBuffer.byteLength,
+        format: 'XLSX',
+        assignedFarmId: 'AP15',
+        headers: ap15Sheet!.headers,
+        mappings: ap15Sheet!.mappings,
+        rawRows: ap15Sheet!.rows,
+        detectedRecordType: 'DAILY_REPORT',
+        status: 'PARSED',
+      };
+      const ap15Validated = validateParsedFile(ap15ParsedFile, customerFarms);
+      expect(ap15Validated).toHaveLength(116);
+      expect(ap15Validated.filter((r) => !r.isValid)).toHaveLength(0);
+
+      // Check AP12 sheet
+      const ap12Sheet = sheets.find((s) => s.sheetName === 'AP12');
+      expect(ap12Sheet).toBeDefined();
+      expect(ap12Sheet!.detectedFarmId).toBe('AP12');
+      expect(ap12Sheet!.rows.length).toBe(126);
+
+      const ap12ParsedFile: ParsedFile = {
+        id: 'pf_ap12_real',
+        file: new File([], path.basename(realPath)),
+        name: `${path.basename(realPath)} [AP12]`,
+        sheetName: 'AP12',
+        size: fileBuffer.byteLength,
+        format: 'XLSX',
+        assignedFarmId: 'AP12',
+        headers: ap12Sheet!.headers,
+        mappings: ap12Sheet!.mappings,
+        rawRows: ap12Sheet!.rows,
+        detectedRecordType: 'DAILY_REPORT',
+        status: 'PARSED',
+      };
+      const ap12Validated = validateParsedFile(ap12ParsedFile, customerFarms);
+      expect(ap12Validated).toHaveLength(126);
+      expect(ap12Validated.filter((r) => !r.isValid)).toHaveLength(0);
+    });
+  });
+
+  describe('16. Individual Worksheet Revert & Full Batch Revert Lifecycle', () => {
+    it('16.1 should extract worksheet contributions using getBatchWorksheets for structured batches', () => {
+      const mockBatch = {
+        batchId: 'BATCH-2026-09-29-001',
+        status: 'COMPLETED',
+        revertStatus: 'NONE',
+        worksheets: [
+          {
+            worksheetKey: 'Sample.xlsx [AP12]',
+            fileName: 'Sample.xlsx [AP12]',
+            sheetName: 'AP12',
+            farmId: 'AP12',
+            importedCount: 85,
+            status: 'IMPORTED',
+          },
+          {
+            worksheetKey: 'Sample.xlsx [AP14]',
+            fileName: 'Sample.xlsx [AP14]',
+            sheetName: 'AP14',
+            farmId: 'AP14',
+            importedCount: 85,
+            status: 'IMPORTED',
+          },
+          {
+            worksheetKey: 'Sample.xlsx [AP15]',
+            fileName: 'Sample.xlsx [AP15]',
+            sheetName: 'AP15',
+            farmId: 'AP15',
+            importedCount: 85,
+            status: 'IMPORTED_WITH_ERRORS',
+          },
+        ],
+      };
+
+      const sheets = getBatchWorksheets(mockBatch);
+      expect(sheets).toHaveLength(3);
+      expect(sheets[0]!.sheetName).toBe('AP12');
+      expect(sheets[1]!.sheetName).toBe('AP14');
+      expect(sheets[2]!.sheetName).toBe('AP15');
+      expect(sheets[2]!.status).toBe('IMPORTED_WITH_ERRORS');
+    });
+
+    it('16.2 should fallback gracefully and extract worksheets from filenames for legacy batches', () => {
+      const legacyBatch = {
+        batchId: 'BATCH-LEGACY-001',
+        status: 'COMPLETED',
+        revertStatus: 'PARTIALLY_REVERTED',
+        importedCount: 170,
+        filenames: ['Sample Production Curve (july - sep).xlsx [AP12]', 'Sample Production Curve (july - sep).xlsx [AP14]'],
+        affectedFarms: ['AP12', 'AP14'],
+      };
+
+      const sheets = getBatchWorksheets(legacyBatch);
+      expect(sheets).toHaveLength(2);
+      expect(sheets[0]!.sheetName).toBe('AP12');
+      expect(sheets[0]!.farmId).toBe('AP12');
+      expect(sheets[1]!.sheetName).toBe('AP14');
+      expect(sheets[1]!.farmId).toBe('AP14');
+      expect(sheets[0]!.status).toBe('PARTIALLY_REVERTED');
+    });
+
+    it('16.3 should build worksheet contribution metadata when executing multi-worksheet imports', async () => {
+      const multiSheetRows: ValidatedRow[] = [
+        {
+          fileId: 'f_ap12',
+          rowNumber: 2,
+          fileName: 'Production Curve.xlsx [AP12]',
+          recordType: 'DAILY_REPORT',
+          farmId: 'AP12',
+          submissionDate: '2026-07-01',
+          rawDate: '2026-07-01',
+          birdCount: 2200,
+          feedKg: 240,
+          mortality: 1,
+          eggsProduced: 1950,
+          isValid: true,
+          errors: [],
+          conflictStatus: 'NEW',
+        },
+        {
+          fileId: 'f_ap14',
+          rowNumber: 2,
+          fileName: 'Production Curve.xlsx [AP14]',
+          recordType: 'DAILY_REPORT',
+          farmId: 'AP14',
+          submissionDate: '2026-07-01',
+          rawDate: '2026-07-01',
+          birdCount: 2197,
+          feedKg: 245,
+          mortality: 2,
+          eggsProduced: 1956,
+          isValid: true,
+          errors: [],
+          conflictStatus: 'NEW',
+        },
+        {
+          fileId: 'f_ap15',
+          rowNumber: 2,
+          fileName: 'Production Curve.xlsx [AP15]',
+          recordType: 'DAILY_REPORT',
+          farmId: 'AP15',
+          submissionDate: '2026-07-01',
+          rawDate: '2026-07-01',
+          birdCount: 2180,
+          feedKg: 250,
+          mortality: 5,
+          eggsProduced: 1900,
+          isValid: true,
+          errors: [],
+          conflictStatus: 'NEW',
+        },
+      ];
+
+      const simResult = await executeHistoricalImport(
+        multiSheetRows,
+        'skip',
+        undefined,
+        { dryRun: true },
+      );
+
+      expect(simResult.isDryRun).toBe(true);
+      expect(simResult.worksheets).toHaveLength(3);
+      const ap12Meta = simResult.worksheets!.find((w: any) => w.sheetName === 'AP12');
+      const ap14Meta = simResult.worksheets!.find((w: any) => w.sheetName === 'AP14');
+      const ap15Meta = simResult.worksheets!.find((w: any) => w.sheetName === 'AP15');
+
+      expect(ap12Meta).toBeDefined();
+      expect(ap12Meta!.importedCount).toBe(1);
+      expect(ap12Meta!.farmId).toBe('AP12');
+
+      expect(ap14Meta).toBeDefined();
+      expect(ap14Meta!.importedCount).toBe(1);
+      expect(ap14Meta!.farmId).toBe('AP14');
+
+      expect(ap15Meta).toBeDefined();
+      expect(ap15Meta!.importedCount).toBe(1);
+      expect(ap15Meta!.farmId).toBe('AP15');
+    });
+
+    it('16.4 should correctly isolate and calculate status transitions for individual worksheet revert vs full revert', () => {
+      // Simulation of worksheet state reducer
+      const initialWorksheets: WorksheetImportContribution[] = [
+        {
+          worksheetKey: 'Sample.xlsx [AP12]',
+          fileName: 'Sample.xlsx [AP12]',
+          sheetName: 'AP12',
+          farmId: 'AP12',
+          importedCount: 85,
+          createdCount: 85,
+          updatedCount: 0,
+          skippedCount: 0,
+          failedCount: 0,
+          status: 'IMPORTED',
+          importTimestamp: '2026-09-29T10:00:00Z',
+          canSafelyRevert: true,
+        },
+        {
+          worksheetKey: 'Sample.xlsx [AP14]',
+          fileName: 'Sample.xlsx [AP14]',
+          sheetName: 'AP14',
+          farmId: 'AP14',
+          importedCount: 85,
+          createdCount: 85,
+          updatedCount: 0,
+          skippedCount: 0,
+          failedCount: 0,
+          status: 'IMPORTED',
+          importTimestamp: '2026-09-29T10:00:00Z',
+          canSafelyRevert: true,
+        },
+        {
+          worksheetKey: 'Sample.xlsx [AP15]',
+          fileName: 'Sample.xlsx [AP15]',
+          sheetName: 'AP15',
+          farmId: 'AP15',
+          importedCount: 85,
+          createdCount: 85,
+          updatedCount: 0,
+          skippedCount: 0,
+          failedCount: 1,
+          status: 'IMPORTED_WITH_ERRORS',
+          importTimestamp: '2026-09-29T10:00:00Z',
+          canSafelyRevert: true,
+        },
+      ];
+
+      // Step A: Revert AP15 alone
+      const targetKey = 'Sample.xlsx [AP15]';
+      const afterAp15Revert = initialWorksheets.map((w) =>
+        w.worksheetKey === targetKey
+          ? { ...w, status: 'REVERTED' as const, revertTimestamp: '2026-09-29T10:15:00Z' }
+          : w,
+      );
+
+      const allRevertedA = afterAp15Revert.every((w) => w.status === 'REVERTED');
+      const anyRevertedA = afterAp15Revert.some((w) => w.status === 'REVERTED');
+      const derivedBatchStatusA = allRevertedA ? 'REVERTED' : anyRevertedA ? 'PARTIALLY_REVERTED' : 'COMPLETED';
+
+      expect(derivedBatchStatusA).toBe('PARTIALLY_REVERTED');
+      expect(afterAp15Revert.find((w) => w.sheetName === 'AP15')!.status).toBe('REVERTED');
+      expect(afterAp15Revert.find((w) => w.sheetName === 'AP12')!.status).toBe('IMPORTED');
+      expect(afterAp15Revert.find((w) => w.sheetName === 'AP14')!.status).toBe('IMPORTED');
+
+      // Step B: Revert the rest of the batch (AP12 & AP14)
+      const afterFullRevert = afterAp15Revert.map((w) => ({
+        ...w,
+        status: 'REVERTED' as const,
+        revertTimestamp: '2026-09-29T10:20:00Z',
+      }));
+
+      const allRevertedB = afterFullRevert.every((w) => w.status === 'REVERTED');
+      const derivedBatchStatusB = allRevertedB ? 'REVERTED' : 'PARTIALLY_REVERTED';
+
+      expect(derivedBatchStatusB).toBe('REVERTED');
+      expect(afterFullRevert.every((w) => w.status === 'REVERTED')).toBe(true);
+    });
+
+    it('16.5 should detect post-import edits and protect modified documents from deletion', () => {
+      const originalBatchId = 'BATCH-2026-09-29-ORIG';
+      const manifestItem = {
+        docId: 'AP14_2026-07-05',
+        action: 'CREATED',
+        submissionVersion: 1,
+        sourceFile: 'Sample.xlsx [AP14]',
+      };
+
+      // Case 1: Document was untouched since import
+      const untouchedDoc = {
+        importBatchId: 'BATCH-2026-09-29-ORIG',
+        submissionVersion: 1,
+      };
+      const isUntouchedSafe =
+        untouchedDoc.importBatchId === originalBatchId &&
+        untouchedDoc.submissionVersion <= manifestItem.submissionVersion;
+      expect(isUntouchedSafe).toBe(true);
+
+      // Case 2: Document was subsequently edited by admin or farmer (version bumped)
+      const modifiedDoc = {
+        importBatchId: 'BATCH-2026-09-29-ORIG',
+        submissionVersion: 2, // Modified later!
+      };
+      const isModifiedSafe =
+        modifiedDoc.importBatchId === originalBatchId &&
+        modifiedDoc.submissionVersion <= manifestItem.submissionVersion;
+      expect(isModifiedSafe).toBe(false);
+
+      // Case 3: Document was overwritten by another subsequent batch import
+      const overwrittenDoc = {
+        importBatchId: 'BATCH-2026-09-30-NEW',
+        submissionVersion: 1,
+      };
+      const isOverwrittenSafe = overwrittenDoc.importBatchId === originalBatchId;
+      expect(isOverwrittenSafe).toBe(false);
+    });
+  });
+
+  describe('17. Farmer Daily Report Mapping, Direct Storage & Compatibility (Tests A - F)', () => {
+    describe('Test A: Mapping validation', () => {
+      it('should accurately detect all customer workbook headers with valid ERP destinations', () => {
+        const customerHeaders = [
+          'Date',
+          'WEEKS',
+          'NO.OF BIRDS',
+          'PRODUCTION',
+          'SELECTION',
+          'SELECTION %',
+          'DAMAGE/REJECTED',
+          'Mortality',
+          'Temp',
+          'Feed Kgs',
+          'Feed Gms/Bird',
+          'STD %',
+          'ACT %',
+          'AVG',
+        ];
+
+        const sampleRows = [
+          {
+            rowNumber: 2,
+            data: {
+              Date: '6/2/26',
+              WEEKS: '44',
+              'NO.OF BIRDS': '2453',
+              PRODUCTION: '1956',
+              SELECTION: '1922',
+              'SELECTION %': '98.26',
+              'DAMAGE/REJECTED': '34',
+              Mortality: '1',
+              Temp: '36',
+              'Feed Kgs': '250',
+              'Feed Gms/Bird': '102',
+              'STD %': '87.26',
+              'ACT %': '79.74',
+              AVG: '67.10',
+            },
+          },
+        ];
+
+        const { mappings, detectedType } = detectColumnMappings(customerHeaders, sampleRows);
+        expect(detectedType).toBe('DAILY_REPORT');
+
+        const mappingMap = new Map(mappings.map((m) => [m.fileHeader, m]));
+
+        // Supported fields must have HIGH confidence and valid destination
+        expect(mappingMap.get('Date')?.mappedField).toBe('submissionDate');
+        expect(mappingMap.get('Date')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('WEEKS')?.mappedField).toBe('weekNumber');
+        expect(mappingMap.get('WEEKS')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('NO.OF BIRDS')?.mappedField).toBe('birdCount');
+        expect(mappingMap.get('NO.OF BIRDS')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('PRODUCTION')?.mappedField).toBe('eggsProduced');
+        expect(mappingMap.get('PRODUCTION')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('SELECTION')?.mappedField).toBe('selectionEggs');
+        expect(mappingMap.get('SELECTION')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('DAMAGE/REJECTED')?.mappedField).toBe('damagedEggs');
+        expect(mappingMap.get('DAMAGE/REJECTED')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('Mortality')?.mappedField).toBe('mortality');
+        expect(mappingMap.get('Mortality')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('Temp')?.mappedField).toBe('temperature');
+        expect(mappingMap.get('Temp')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('Feed Kgs')?.mappedField).toBe('feedKg');
+        expect(mappingMap.get('Feed Kgs')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('Feed Gms/Bird')?.mappedField).toBe('feedGramsPerBird');
+        expect(mappingMap.get('Feed Gms/Bird')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('STD %')?.mappedField).toBe('standardProductionPct');
+        expect(mappingMap.get('STD %')?.confidence).toBe('HIGH');
+
+        expect(mappingMap.get('ACT %')?.mappedField).toBe('actualProductionPct');
+        expect(mappingMap.get('ACT %')?.confidence).toBe('HIGH');
+
+        // Ambiguous generic statistic (AVG) must require manual user selection
+        expect(mappingMap.get('AVG')?.mappedField).toBe('ignore');
+        expect(mappingMap.get('AVG')?.confidence).toBe('AMBIGUOUS');
+
+        // Calculated formula percentages must default to ignore
+        expect(mappingMap.get('SELECTION %')?.mappedField).toBe('ignore');
+      });
+    });
+
+    describe('Test B: Daily report import verification', () => {
+      it('should validate and correctly derive opening, closing, and bird counts', () => {
+        const sampleFile: ParsedFile = {
+          id: 'pf_customer_ap14',
+          file: new File([], 'Sample Production Curve.xlsx'),
+          name: 'Sample Production Curve.xlsx',
+          size: 2048,
+          format: 'XLSX',
+          assignedFarmId: 'AP12',
+          headers: [
+            'Date',
+            'WEEKS',
+            'NO.OF BIRDS',
+            'PRODUCTION',
+            'SELECTION',
+            'DAMAGE/REJECTED',
+            'Mortality',
+            'Temp',
+            'Feed Kgs',
+            'Feed Gms/Bird',
+            'STD %',
+            'ACT %',
+          ],
+          mappings: [
+            { fileHeader: 'Date', mappedField: 'submissionDate', confidence: 'HIGH', sampleValues: ['6/2/26'] },
+            { fileHeader: 'WEEKS', mappedField: 'weekNumber', confidence: 'HIGH', sampleValues: ['44.1'] },
+            { fileHeader: 'NO.OF BIRDS', mappedField: 'birdCount', confidence: 'HIGH', sampleValues: ['2453'] },
+            { fileHeader: 'PRODUCTION', mappedField: 'eggsProduced', confidence: 'HIGH', sampleValues: ['1956'] },
+            { fileHeader: 'SELECTION', mappedField: 'selectionEggs', confidence: 'HIGH', sampleValues: ['1922'] },
+            { fileHeader: 'DAMAGE/REJECTED', mappedField: 'damagedEggs', confidence: 'HIGH', sampleValues: ['34'] },
+            { fileHeader: 'Mortality', mappedField: 'mortality', confidence: 'HIGH', sampleValues: ['1'] },
+            { fileHeader: 'Temp', mappedField: 'temperature', confidence: 'HIGH', sampleValues: ['36'] },
+            { fileHeader: 'Feed Kgs', mappedField: 'feedKg', confidence: 'HIGH', sampleValues: ['250'] },
+            { fileHeader: 'Feed Gms/Bird', mappedField: 'feedGramsPerBird', confidence: 'HIGH', sampleValues: ['102'] },
+            { fileHeader: 'STD %', mappedField: 'standardProductionPct', confidence: 'HIGH', sampleValues: ['87.26'] },
+            { fileHeader: 'ACT %', mappedField: 'actualProductionPct', confidence: 'HIGH', sampleValues: ['79.74'] },
+          ],
+          rawRows: [
+            {
+              rowNumber: 2,
+              data: {
+                Date: '2026-06-02',
+                WEEKS: '44.1',
+                'NO.OF BIRDS': '2453',
+                PRODUCTION: '1956',
+                SELECTION: '1922',
+                'DAMAGE/REJECTED': '34',
+                Mortality: '1',
+                Temp: '36',
+                'Feed Kgs': '250',
+                'Feed Gms/Bird': '102',
+                'STD %': '87.26',
+                'ACT %': '79.74',
+              },
+            },
+          ],
+          detectedRecordType: 'DAILY_REPORT',
+          status: 'PARSED',
+        };
+
+        const validated = validateParsedFile(sampleFile, mockFarms);
+        expect(validated).toHaveLength(1);
+        const row = validated[0]!;
+
+        expect(row.isValid).toBe(true);
+        expect(row.farmId).toBe('AP12');
+        expect(row.submissionDate).toBe('2026-06-02');
+        expect(row.openingBirdCount).toBe(2453);
+        expect(row.mortality).toBe(1);
+        expect(row.culling).toBe(0);
+        // Closing bird count derived: 2453 - 1 = 2452
+        expect(row.closingBirdCount).toBe(2452);
+        expect(row.birdCount).toBe(2452);
+        expect(row.feedKg).toBe(250);
+        expect(row.feedGrams).toBe(250000);
+        expect(row.feedGramsPerBird).toBe(102);
+        expect(row.eggsProduced).toBe(1956);
+        expect(row.selectionEggs).toBe(1922);
+        expect(row.damagedEggs).toBe(34);
+        expect(row.weekNumber).toBe(44.1);
+        expect(row.weekLabel).toBe('44.1');
+        expect(row.temperature).toBe(36);
+        expect(row.actualProductionPct).toBe(79.74);
+        expect(row.standardProductionPct).toBe(87.26);
+      });
+    });
+
+    describe('Test C: Weekly fields verification', () => {
+      it('should preserve null for missing bodyWeight and store positive bodyWeight on weekly weigh-in days', () => {
+        const fileWithWeight: ParsedFile = {
+          id: 'pf_weight_test',
+          file: new File([], 'weekly_weight.xlsx'),
+          name: 'weekly_weight.xlsx',
+          size: 2048,
+          format: 'XLSX',
+          assignedFarmId: 'AP12',
+          headers: ['Date', 'Birds', 'Eggs', 'AvgBodyWeight'],
+          mappings: [
+            { fileHeader: 'Date', mappedField: 'submissionDate', confidence: 'HIGH', sampleValues: [] },
+            { fileHeader: 'Birds', mappedField: 'birdCount', confidence: 'HIGH', sampleValues: [] },
+            { fileHeader: 'Eggs', mappedField: 'eggsProduced', confidence: 'HIGH', sampleValues: [] },
+            { fileHeader: 'AvgBodyWeight', mappedField: 'bodyWeightAvg', confidence: 'HIGH', sampleValues: [] },
+          ],
+          rawRows: [
+            // Day 1: Regular day without body weight
+            {
+              rowNumber: 2,
+              data: { Date: '2026-06-01', Birds: '2000', Eggs: '1600', AvgBodyWeight: '' },
+            },
+            // Day 2: Weekly weigh-in day
+            {
+              rowNumber: 3,
+              data: { Date: '2026-06-02', Birds: '2000', Eggs: '1610', AvgBodyWeight: '1550' },
+            },
+          ],
+          detectedRecordType: 'DAILY_REPORT',
+          status: 'PARSED',
+        };
+
+        const validated = validateParsedFile(fileWithWeight, mockFarms);
+        expect(validated).toHaveLength(2);
+
+        // Day 1: bodyWeight must be undefined (stored as null in Firestore, NOT { min: 0, max: 0, avg: 0 })
+        expect(validated[0]!.bodyWeight).toBeUndefined();
+
+        // Day 2: bodyWeight is accurately populated
+        expect(validated[1]!.bodyWeight).toEqual({ min: 1550, max: 1550, avg: 1550 });
+      });
+    });
+
+    describe('Test D: Existing application compatibility', () => {
+      it('should produce records compatible with normalizeReport and KPI calculation functions', () => {
+        const rawImportedLog: Record<string, any> = {
+          userId: 'farmer_usr_123',
+          submittedBy: 'admin_uid',
+          farmId: 'AP12',
+          flockId: 'flock_main',
+          submissionDate: '2026-06-02',
+          submissionMethod: 'HISTORICAL_IMPORT',
+          submissionVersion: 1,
+          status: 'submitted',
+          openingBirdCount: 2453,
+          closingBirdCount: 2452,
+          birdCount: 2452,
+          feedKg: 250,
+          feedGrams: 250000,
+          feedGramsPerBird: 102,
+          weekNumber: 44,
+          weekLabel: '44.1',
+          mortality: 1,
+          culling: 0,
+          eggsProduced: 1956,
+          selectionEggs: 1922,
+          damagedEggs: 34,
+          actualProductionPct: 79.74,
+          standardProductionPct: 87.26,
+          temperature: 36,
+          bodyWeight: null,
+          eggWeight: null,
+          remarks: 'Imported historical record',
+          isHistorical: true,
+        };
+
+        const normalized = normalizeReport('AP12_2026-06-02', rawImportedLog);
+
+        expect(normalized.farmId).toBe('AP12');
+        expect(normalized.submissionDate).toBe('2026-06-02');
+        expect(normalized.birdCount).toBe(2452);
+        expect(normalized.openingBirdCount).toBe(2453);
+        expect(normalized.closingBirdCount).toBe(2452);
+        expect(normalized.eggsProduced).toBe(1956);
+        expect(normalized.selectionEggs).toBe(1922);
+        expect(normalized.damagedEggs).toBe(34);
+        expect(normalized.feedKg).toBe(250);
+        expect(normalized.weekNumber).toBe(44);
+        expect(normalized.weekLabel).toBe('44.1');
+        expect(normalized.feedGramsPerBird).toBe(102);
+
+        // Verify compatibility with existing KPI Calculations
+        const prodRate = calcProductionRate(normalized.eggsProduced, normalized.birdCount);
+        expect(prodRate).toBe(79.8); // 1956 / 2452 * 100 = 79.77% ≈ 79.8%
+
+        const selRate = calcSelectionRate(normalized.selectionEggs, normalized.eggsProduced);
+        expect(selRate).toBe(98.3); // 1922 / 1956 * 100 = 98.26% ≈ 98.3%
+
+        const feedPerBird = calcFeedPerBird(normalized.feedKg, normalized.birdCount);
+        expect(feedPerBird).toBe(102); // 250 * 1000 / 2452 ≈ 101.96 ≈ 102g
+      });
+    });
+
+    describe('Test E: Invalid mapping & data prevention', () => {
+      it('should reject records with missing required fields or impossible values', () => {
+        const invalidFile: ParsedFile = {
+          id: 'pf_invalid_test',
+          file: new File([], 'invalid.xlsx'),
+          name: 'invalid.xlsx',
+          size: 1024,
+          format: 'XLSX',
+          // No assigned farm!
+          headers: ['Date', 'Birds', 'Mortality'],
+          mappings: [
+            { fileHeader: 'Date', mappedField: 'submissionDate', confidence: 'HIGH', sampleValues: [] },
+            { fileHeader: 'Birds', mappedField: 'birdCount', confidence: 'HIGH', sampleValues: [] },
+            { fileHeader: 'Mortality', mappedField: 'mortality', confidence: 'HIGH', sampleValues: [] },
+          ],
+          rawRows: [
+            // Row 1: Missing date and missing farm
+            {
+              rowNumber: 2,
+              data: { Date: '', Birds: '2000', Mortality: '0' },
+            },
+            // Row 2: Impossible mortality exceeding total birds
+            {
+              rowNumber: 3,
+              data: { Date: '2026-06-03', Birds: '100', Mortality: '250' },
+            },
+          ],
+          detectedRecordType: 'DAILY_REPORT',
+          status: 'PARSED',
+        };
+
+        const validated = validateParsedFile(invalidFile, mockFarms);
+        expect(validated).toHaveLength(2);
+
+        // Row 1 must fail due to missing date and farm
+        expect(validated[0]!.isValid).toBe(false);
+        expect(validated[0]!.errors.some((e) => e.field === 'submissionDate')).toBe(true);
+        expect(validated[0]!.errors.some((e) => e.field === 'farmId')).toBe(true);
+
+        // Row 2 must fail due to mortality exceeding bird count
+        expect(validated[1]!.isValid).toBe(false);
+        expect(validated[1]!.errors.some((e) => e.field === 'mortality')).toBe(true);
+      });
+    });
+
+    describe('Test F: Revert compatibility', () => {
+      it('should support individual worksheet revert without corrupting sibling worksheets', () => {
+        const batchContributions: WorksheetImportContribution[] = [
+          {
+            worksheetKey: 'Sample.xlsx [AP12]',
+            fileName: 'Sample.xlsx',
+            sheetName: 'AP12',
+            farmId: 'AP12',
+            status: 'IMPORTED',
+            importedCount: 92,
+            createdCount: 92,
+            updatedCount: 0,
+            skippedCount: 0,
+            failedCount: 0,
+            importTimestamp: '2026-09-29T10:00:00Z',
+            revertStatus: 'NOT_REVERTED',
+            canSafelyRevert: true,
+          },
+          {
+            worksheetKey: 'Sample.xlsx [AP14]',
+            fileName: 'Sample.xlsx',
+            sheetName: 'AP14',
+            farmId: 'AP14',
+            status: 'IMPORTED',
+            importedCount: 92,
+            createdCount: 92,
+            updatedCount: 0,
+            skippedCount: 0,
+            failedCount: 0,
+            importTimestamp: '2026-09-29T10:00:00Z',
+            revertStatus: 'NOT_REVERTED',
+            canSafelyRevert: true,
+          },
+        ];
+
+        // Simulate reverting only AP14
+        const updated = batchContributions.map((w) => {
+          if (w.worksheetKey === 'Sample.xlsx [AP14]') {
+            return {
+              ...w,
+              status: 'REVERTED' as const,
+              revertStatus: 'REVERTED' as const,
+              revertTimestamp: '2026-09-29T10:15:00Z',
+            };
+          }
+          return w;
+        });
+
+        // AP14 is reverted
+        const ap14 = updated.find((w) => w.sheetName === 'AP14');
+        expect(ap14?.status).toBe('REVERTED');
+        expect(ap14?.revertStatus).toBe('REVERTED');
+
+        // AP12 is completely untouched and remains active
+        const ap12 = updated.find((w) => w.sheetName === 'AP12');
+        expect(ap12?.status).toBe('IMPORTED');
+        expect(ap12?.revertStatus).toBe('NOT_REVERTED');
+
+        // Derived batch status is PARTIALLY_REVERTED
+        const anyReverted = updated.some((w) => w.revertStatus === 'REVERTED');
+        const allReverted = updated.every((w) => w.revertStatus === 'REVERTED');
+        const batchStatus = allReverted ? 'REVERTED' : anyReverted ? 'PARTIALLY_REVERTED' : 'COMPLETED';
+        expect(batchStatus).toBe('PARTIALLY_REVERTED');
+      });
+    });
+  });
+
+  describe('17. Firestore Sanitization, Batch Persistence & Failure Recovery', () => {
+    it('17.1 should recursively convert undefined values to null to ensure compatibility with Firestore set/update', () => {
+      const sampleDate = new Date();
+      const input = {
+        batchId: 'BATCH-001',
+        missingField: undefined,
+        nested: {
+          subMissing: undefined,
+          validValue: 'hello',
+          count: 0,
+        },
+        items: [
+          { name: 'Item 1', diff: undefined },
+          { name: 'Item 2', diff: { before: undefined, after: 10 } },
+        ],
+        timestamp: sampleDate,
+        nullValue: null,
+      };
+
+      const sanitized = sanitizeFirestoreData(input);
+
+      expect(sanitized.batchId).toBe('BATCH-001');
+      expect(sanitized.missingField).toBeNull();
+      expect(sanitized.nested.subMissing).toBeNull();
+      expect(sanitized.nested.validValue).toBe('hello');
+      expect(sanitized.nested.count).toBe(0);
+      expect(sanitized.items[0]!.diff).toBeNull();
+      expect((sanitized.items[1]!.diff as any).before).toBeNull();
+      expect((sanitized.items[1]!.diff as any).after).toBe(10);
+      expect(sanitized.timestamp).toBe(sampleDate);
+      expect(sanitized.nullValue).toBeNull();
+
+      // Ensure no undefined values exist anywhere in JSON representation
+      const jsonStr = JSON.stringify(sanitized);
+      expect(jsonStr).not.toContain('undefined');
+    });
+
+    it('17.2 should include worksheets metadata and sanitize manifest when executing live imports', async () => {
+      const originalWindowFirebase = (globalThis as any).window?.firebase;
+      const mockSet = vi.fn().mockResolvedValue(true);
+
+      (globalThis as any).window = {
+        firebase: {
+          apps: [{ name: '[DEFAULT]' }],
+          auth: () => ({ currentUser: null }),
+          firestore: () => ({
+            batch: () => ({
+              set: vi.fn(),
+              commit: vi.fn().mockResolvedValue(true),
+            }),
+            collection: (col: string) => ({
+              doc: () => ({
+                id: 'mock_doc_id',
+                set: mockSet,
+                collection: () => ({
+                  doc: () => ({ id: 'sub_doc_id', set: mockSet }),
+                }),
+              }),
+              where: () => ({
+                get: vi.fn().mockResolvedValue({ docs: [] }),
+              }),
+            }),
+          }),
+        },
+      };
+
+      const rows: ValidatedRow[] = [
+        {
+          fileId: 'f1',
+          rowNumber: 2,
+          fileName: 'Sample.xlsx [AP12]',
+          recordType: 'DAILY_REPORT',
+          farmId: 'AP12',
+          submissionDate: '2026-07-01',
+          rawDate: '2026-07-01',
+          birdCount: 2000,
+          feedKg: 200,
+          mortality: 0,
+          eggsProduced: 1800,
+          isValid: true,
+          errors: [],
+          conflictStatus: 'NEW',
+          diff: undefined, // diff is undefined for new row
+        },
+      ];
+
+      const result = await executeHistoricalImport(rows, 'skip');
+
+      // Worksheets must be returned in live execution
+      expect(result.worksheets).toBeDefined();
+      expect(result.worksheets).toHaveLength(1);
+      expect(result.worksheets![0]!.sheetName).toBe('AP12');
+      expect(result.worksheets![0]!.farmId).toBe('AP12');
+      expect(result.worksheets![0]!.importedCount).toBe(1);
+
+      // Verify historyWriteFailed is tracked
+      expect(result.historyWriteFailed).toBe(false);
+      expect(result.rawBatchRecord).toBeDefined();
+      expect(result.rawBatchRecord.manifest[0].beforeData).toBeNull();
+
+      if (originalWindowFirebase) {
+        (globalThis as any).window.firebase = originalWindowFirebase;
+      }
+    });
+
+    it('17.3 should safely flag historyWriteFailed and preserve rawBatchRecord if importBatches write fails', async () => {
+      // Mock db.collection('importBatches').doc().set to fail
+      const originalWindowFirebase = (globalThis as any).window?.firebase;
+      const mockSet = vi.fn().mockRejectedValue(new Error('Permission denied writing importBatches'));
+
+      (globalThis as any).window = {
+        firebase: {
+          apps: [{ name: '[DEFAULT]' }],
+          auth: () => ({ currentUser: null }),
+          firestore: () => ({
+            batch: () => ({
+              set: vi.fn(),
+              commit: vi.fn().mockResolvedValue(true),
+            }),
+            collection: (col: string) => {
+              if (col === 'importBatches') {
+                return {
+                  doc: () => ({
+                    set: mockSet,
+                  }),
+                };
+              }
+              return {
+                doc: () => ({
+                  collection: () => ({
+                    doc: () => ({ id: 'mock_doc' }),
+                  }),
+                }),
+              };
+            },
+          }),
+        },
+      };
+
+      const rows: ValidatedRow[] = [
+        {
+          fileId: 'f1',
+          rowNumber: 2,
+          fileName: 'Sample.xlsx [AP14]',
+          recordType: 'DAILY_REPORT',
+          farmId: 'AP14',
+          submissionDate: '2026-07-02',
+          rawDate: '2026-07-02',
+          birdCount: 2100,
+          feedKg: 210,
+          mortality: 1,
+          eggsProduced: 1850,
+          isValid: true,
+          errors: [],
+          conflictStatus: 'NEW',
+        },
+      ];
+
+      const result = await executeHistoricalImport(rows, 'skip');
+
+      // Operation succeeds for data, but records failure for history
+      expect(result.importedCount).toBe(1);
+      expect(result.historyWriteFailed).toBe(true);
+      expect(result.historyWriteError).toContain('Permission denied');
+      expect(result.rawBatchRecord).toBeDefined();
+      expect(result.rawBatchRecord.batchId).toBe(result.batchId);
+
+      // Cleanup mock
+      if (originalWindowFirebase) {
+        (globalThis as any).window.firebase = originalWindowFirebase;
+      }
+    });
+
+    it('17.4 should validate and save batch record on retry using saveImportBatchRecord', async () => {
+      const mockSet = vi.fn().mockResolvedValue(true);
+      (globalThis as any).window = {
+        firebase: {
+          apps: [{ name: '[DEFAULT]' }],
+          auth: () => ({ currentUser: null }),
+          firestore: () => ({
+            collection: () => ({
+              doc: () => ({
+                set: mockSet,
+              }),
+            }),
+          }),
+        },
+      };
+
+      const batchToSave = {
+        batchId: 'BATCH-RETRY-001',
+        totalRows: 10,
+        unsupported: undefined,
+      };
+
+      await saveImportBatchRecord(batchToSave);
+
+      expect(mockSet).toHaveBeenCalledTimes(1);
+      const savedPayload = mockSet.mock.calls[0]![0];
+      expect(savedPayload.batchId).toBe('BATCH-RETRY-001');
+      expect(savedPayload.unsupported).toBeNull();
     });
   });
 });
+

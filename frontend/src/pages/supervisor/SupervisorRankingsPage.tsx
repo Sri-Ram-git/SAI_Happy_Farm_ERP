@@ -16,6 +16,7 @@ import { useAuth } from '../../context/AuthContext';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
+import { DateFilter } from '../../components/dashboard/DateFilter';
 import { useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { getFarmsByIds, type FarmDoc } from '../../services/farmDataService';
 import { getIstDate, getDaysAgo, formatDisplayDate } from '../../utils/dateUtils';
@@ -43,24 +44,42 @@ export function SupervisorRankingsPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('ranking');
   const [activeMetric, setActiveMetric] = useState<RankingMetric>('productionGap');
 
-  // Reporting Week / Date selection
+  // Date Filtering: Presets (Today: 1, 7 Days: 7, 30 Days: 30, 90 Days: 90) vs Custom Calendar
+  const [presetDays, setPresetDays] = useState<number | null>(7);
   const [selectedDate, setSelectedDate] = useState<string>(getIstDate());
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [farmsLoading, setFarmsLoading] = useState(true);
 
-  // Compute Monday-Sunday week bounds and week number
+  // Compute Monday-Sunday week bounds and week number for calendar fallback
   const weekInfo = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
   const reportingWeek = useMemo(() => {
     return calculateReportingWeek(userProfile?.createdAt || '2026-01-01', selectedDate, 3);
   }, [userProfile?.createdAt, selectedDate]);
 
+  // Compute effective date range based on active preset or calendar selection
+  const { startDate, endDate, expectedDays, periodTitle, periodSubtitle } = useMemo(() => {
+    if (presetDays !== null) {
+      const start = getDaysAgo(presetDays === 1 ? 0 : presetDays - 1);
+      const end = getIstDate();
+      const title = presetDays === 1 ? `Today (${formatDisplayDate(end)})` : `${presetDays} Days`;
+      const subtitle = `${formatDisplayDate(start)} — ${formatDisplayDate(end)}`;
+      return { startDate: start, endDate: end, expectedDays: presetDays, periodTitle: title, periodSubtitle: subtitle };
+    } else {
+      const start = weekInfo.startDate;
+      const end = weekInfo.endDate;
+      const title = reportingWeek.label;
+      const subtitle = weekInfo.label;
+      return { startDate: start, endDate: end, expectedDays: 7, periodTitle: title, periodSubtitle: subtitle };
+    }
+  }, [presetDays, selectedDate, weekInfo, reportingWeek]);
+
   const assignedFarmIds = useMemo(() => userProfile?.farmIds ?? [], [userProfile?.farmIds]);
 
-  // Load daily reports for assigned farms within the reporting week
+  // Load daily reports for assigned farms within the active date range
   const { reports, loading: reportsLoading, error: reportsError } = useDailyReportsByFarms(
     assignedFarmIds,
-    weekInfo.startDate,
-    weekInfo.endDate
+    startDate,
+    endDate
   );
 
   useEffect(() => {
@@ -152,8 +171,8 @@ export function SupervisorRankingsPage() {
 
       // Sheet 1: Weekly Data (Source Inputs & Formula Results)
       const weeklyDataAoa = [
-        ['WEEKLY PERFORMANCE REPORT — SOURCE INPUTS & FORMULA OUTPUTS'],
-        ['Report Date', selectedDate, 'Week Label', reportingWeek.label, 'Week Cycle', weekInfo.label],
+        ['FARM PERFORMANCE REPORT — SOURCE INPUTS & FORMULA OUTPUTS'],
+        ['Report Period', periodTitle, 'Date Range', `${startDate} to ${endDate}`, 'Cycle/Preset', presetDays ? `${presetDays} Days Preset` : weekInfo.label],
         [],
         [
           'Farm ID',
@@ -202,6 +221,7 @@ export function SupervisorRankingsPage() {
         ['SUPERVISOR FARM PERFORMANCE RANKING'],
         ['Primary Sorting Metric', getMetricTitle(activeMetric)],
         ['Documented Tie-Breaker', getTieBreakerText(activeMetric)],
+        ['Reporting Period', `${periodTitle} (${periodSubtitle})`],
         ['Business Rule Notice', 'Overall composite ranking pending verified multi-metric normalization scale.'],
         [],
         [
@@ -224,7 +244,7 @@ export function SupervisorRankingsPage() {
           k.eggDamagePct !== null ? `${k.eggDamagePct}%` : 'N/A',
           k.mortalityPct !== null ? `${k.mortalityPct}%` : 'N/A',
           k.selectionPct !== null ? `${k.selectionPct}%` : 'N/A',
-          `${k.reportCount} days`,
+          `${k.reportCount} / ${expectedDays} days`,
         ]),
       ];
       const wsRanking = XLSX.utils.aoa_to_sheet(rankingAoa);
@@ -232,13 +252,13 @@ export function SupervisorRankingsPage() {
 
       // Sheet 3: Summary Dashboard
       const summaryAoa = [
-        ['WEEKLY SUMMARY DASHBOARD'],
-        ['Reporting Period', weekInfo.label],
-        ['Reporting Week', reportingWeek.label],
+        ['PERFORMANCE SUMMARY DASHBOARD'],
+        ['Reporting Period', `${periodTitle} (${periodSubtitle})`],
+        ['Date Range', `${startDate} to ${endDate}`],
         [],
         ['Metric Description', 'Aggregate Value', 'Unit'],
         ['Total Assigned Farms', summaryAggregates.totalFarms, 'Farms'],
-        ['Farms Reporting in Week', summaryAggregates.reportingFarms, 'Farms'],
+        ['Farms Reporting in Period', summaryAggregates.reportingFarms, 'Farms'],
         ['Total Bird Population', summaryAggregates.totalBirds, 'Birds'],
         ['Total Feed Consumed', summaryAggregates.totalFeedKg, 'Kg'],
         ['Total Eggs Produced', summaryAggregates.totalEggs, 'Eggs'],
@@ -254,11 +274,11 @@ export function SupervisorRankingsPage() {
       const wsSummary = XLSX.utils.aoa_to_sheet(summaryAoa);
       XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary Dashboard');
 
-      const filename = `Supervisor_Weekly_Performance_Week_${reportingWeek.weekNumber || 'Weekly'}_${weekInfo.startDate}_to_${weekInfo.endDate}.xlsx`;
+      const filename = `Supervisor_Farm_Rankings_${startDate}_to_${endDate}.xlsx`;
       XLSX.writeFile(wb, filename);
     } catch (err) {
       console.error('[SupervisorRankings] Export spreadsheet error:', err);
-      alert('Failed to export weekly spreadsheet. Check console for details.');
+      alert('Failed to export report spreadsheet. Check console for details.');
     }
   };
 
@@ -288,20 +308,28 @@ export function SupervisorRankingsPage() {
           <div>
             <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
               <Trophy size={24} style={{ color: '#f59e0b' }} />
-              <span>Weekly Farm Performance & Rankings</span>
+              <span>Farm Performance & Rankings</span>
             </h2>
             <p style={{ margin: '4px 0 0 0', color: '#64748b', fontSize: 13 }}>
-              Reporting Week: <strong style={{ color: '#0f172a' }}>{reportingWeek.label}</strong> ({weekInfo.label})
+              Period: <strong style={{ color: '#0f172a' }}>{periodTitle}</strong> ({periodSubtitle})
             </p>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 6, padding: '4px 10px' }}>
+            <DateFilter days={presetDays ?? 0} onChange={(d) => setPresetDays(d)} />
+
+            <div
+              style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: '1px solid #cbd5e1', borderRadius: 6, padding: '4px 10px' }}
+              title="Select custom week ending date"
+            >
               <Calendar size={15} style={{ color: '#64748b' }} />
               <input
                 type="date"
                 value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
+                onChange={(e) => {
+                  setPresetDays(null);
+                  setSelectedDate(e.target.value);
+                }}
                 style={{ border: 'none', outline: 'none', fontSize: 13, background: 'transparent', cursor: 'pointer' }}
               />
             </div>
@@ -313,7 +341,7 @@ export function SupervisorRankingsPage() {
               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', fontSize: 13, fontWeight: 600 }}
             >
               <Download size={15} />
-              <span>Export Weekly Report (.xlsx)</span>
+              <span>Export Report (.xlsx)</span>
             </button>
           </div>
         </div>
@@ -501,7 +529,14 @@ export function SupervisorRankingsPage() {
                         #{i + 1}
                       </td>
                       <td>
-                        <div className="td-bold">{k.farmId}</div>
+                        <div className="td-bold" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span>{k.farmId}</span>
+                          {k.mortalityPct !== null && k.mortalityPct >= 100 && (
+                            <span style={{ fontSize: 10, background: '#fee2e2', color: '#dc2626', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                              CRITICAL LOSS
+                            </span>
+                          )}
+                        </div>
                         <div className="td-muted">{k.farmName}</div>
                       </td>
                       <td style={{ background: activeMetric === 'productionGap' ? '#f0f9ff' : undefined }}>
@@ -510,7 +545,9 @@ export function SupervisorRankingsPage() {
                             {k.productionGapPct >= 0 ? `+${k.productionGapPct}%` : `${k.productionGapPct}%`}
                           </span>
                         ) : (
-                          <span className="text-muted">--</span>
+                          <span className="text-muted" title={k.kpiReasons?.productionGap || 'No data'} style={{ cursor: 'help' }}>
+                            --
+                          </span>
                         )}
                       </td>
                       <td style={{ background: activeMetric === 'fcr' ? '#f0f9ff' : undefined }}>
@@ -519,7 +556,9 @@ export function SupervisorRankingsPage() {
                             {k.fcr}
                           </span>
                         ) : (
-                          <span className="text-muted">--</span>
+                          <span className="text-muted" title={k.kpiReasons?.fcr || 'No data'} style={{ cursor: 'help' }}>
+                            --
+                          </span>
                         )}
                       </td>
                       <td style={{ background: activeMetric === 'eggDamage' ? '#f0f9ff' : undefined }}>
@@ -528,16 +567,21 @@ export function SupervisorRankingsPage() {
                             {k.eggDamagePct}%
                           </span>
                         ) : (
-                          <span className="text-muted">--</span>
+                          <span className="text-muted" title={k.kpiReasons?.eggDamage || 'No data'} style={{ cursor: 'help' }}>
+                            --
+                          </span>
                         )}
                       </td>
                       <td style={{ background: activeMetric === 'mortality' ? '#f0f9ff' : undefined }}>
                         {k.mortalityPct !== null ? (
                           <span style={{ fontWeight: 600, color: k.mortalityPct <= 1.0 ? '#15803d' : '#dc2626' }}>
                             {k.mortalityPct}%
+                            {k.mortalityPct >= 100 && ' (100% LOSS)'}
                           </span>
                         ) : (
-                          <span className="text-muted">--</span>
+                          <span className="text-muted" title={k.kpiReasons?.mortality || 'No data'} style={{ cursor: 'help' }}>
+                            --
+                          </span>
                         )}
                       </td>
                       <td style={{ background: activeMetric === 'selection' ? '#f0f9ff' : undefined }}>
@@ -546,12 +590,14 @@ export function SupervisorRankingsPage() {
                             {k.selectionPct}%
                           </span>
                         ) : (
-                          <span className="text-muted">--</span>
+                          <span className="text-muted" title={k.kpiReasons?.selection || 'No data'} style={{ cursor: 'help' }}>
+                            --
+                          </span>
                         )}
                       </td>
                       <td>
-                        <span style={{ fontSize: 12, color: k.reportCount >= 7 ? '#15803d' : '#d97706' }}>
-                          {k.reportCount} / 7 days
+                        <span style={{ fontSize: 12, color: k.reportCount >= expectedDays ? '#15803d' : '#d97706' }}>
+                          {k.reportCount} / {expectedDays} days
                         </span>
                       </td>
                     </tr>
@@ -598,7 +644,7 @@ export function SupervisorRankingsPage() {
                   <tr>
                     <th>Farm ID</th>
                     <th>Farm Name</th>
-                    <th>Reports</th>
+                    <th>Reports ({expectedDays}d)</th>
                     <th>Bird Count (D)</th>
                     <th>Actual Prod % (G)</th>
                     <th>Feed (Kg) (H)</th>
@@ -619,22 +665,28 @@ export function SupervisorRankingsPage() {
                     <tr key={k.farmId}>
                       <td className="td-bold">{k.farmId}</td>
                       <td>{k.farmName}</td>
-                      <td>{k.reportCount}</td>
+                      <td>
+                        <span style={{ color: k.reportCount >= expectedDays ? '#15803d' : '#d97706', fontWeight: 600 }}>
+                          {k.reportCount} / {expectedDays}
+                        </span>
+                      </td>
                       <td style={{ fontWeight: 600 }}>{k.birdCount.toLocaleString()}</td>
-                      <td>{k.actualProductionPct !== null ? `${k.actualProductionPct}%` : <span className="text-muted">--</span>}</td>
+                      <td>{k.actualProductionPct !== null ? `${k.actualProductionPct}%` : <span className="text-muted" title={k.kpiReasons?.productionGap || 'No data'} style={{ cursor: 'help' }}>--</span>}</td>
                       <td>{k.feedConsumedKg.toLocaleString()}</td>
                       <td>{k.eggsProduced.toLocaleString()}</td>
-                      <td>{k.avgEggWeightG !== null ? `${k.avgEggWeightG} g` : <span className="text-muted">--</span>}</td>
+                      <td>{k.avgEggWeightG !== null ? `${k.avgEggWeightG} g` : <span className="text-muted" title={k.kpiReasons?.fcr || 'Missing egg weight'} style={{ cursor: 'help' }}>--</span>}</td>
                       <td>{k.eggsReceived.toLocaleString()}</td>
                       <td style={{ color: k.damageCount > 0 ? '#dc2626' : undefined }}>{k.damageCount.toLocaleString()}</td>
                       <td>{k.selectedEggs.toLocaleString()}</td>
                       <td style={{ fontWeight: 600, color: k.productionGapPct !== null && k.productionGapPct >= 0 ? '#15803d' : '#dc2626' }}>
-                        {k.productionGapPct !== null ? `${k.productionGapPct >= 0 ? '+' : ''}${k.productionGapPct}%` : '--'}
+                        {k.productionGapPct !== null ? `${k.productionGapPct >= 0 ? '+' : ''}${k.productionGapPct}%` : <span className="text-muted" title={k.kpiReasons?.productionGap || 'No data'} style={{ cursor: 'help' }}>--</span>}
                       </td>
-                      <td style={{ fontWeight: 600 }}>{k.fcr !== null ? k.fcr : '--'}</td>
-                      <td>{k.eggDamagePct !== null ? `${k.eggDamagePct}%` : '--'}</td>
-                      <td>{k.mortalityPct !== null ? `${k.mortalityPct}%` : '--'}</td>
-                      <td>{k.selectionPct !== null ? `${k.selectionPct}%` : '--'}</td>
+                      <td style={{ fontWeight: 600 }}>{k.fcr !== null ? k.fcr : <span className="text-muted" title={k.kpiReasons?.fcr || 'No data'} style={{ cursor: 'help' }}>--</span>}</td>
+                      <td>{k.eggDamagePct !== null ? `${k.eggDamagePct}%` : <span className="text-muted" title={k.kpiReasons?.eggDamage || 'No data'} style={{ cursor: 'help' }}>--</span>}</td>
+                      <td style={{ color: k.mortalityPct !== null && k.mortalityPct > 10 ? '#dc2626' : undefined, fontWeight: k.mortalityPct !== null && k.mortalityPct >= 100 ? 700 : undefined }}>
+                        {k.mortalityPct !== null ? `${k.mortalityPct}%${k.mortalityPct >= 100 ? ' (100% LOSS)' : ''}` : <span className="text-muted" title={k.kpiReasons?.mortality || 'No data'} style={{ cursor: 'help' }}>--</span>}
+                      </td>
+                      <td>{k.selectionPct !== null ? `${k.selectionPct}%` : <span className="text-muted" title={k.kpiReasons?.selection || 'No data'} style={{ cursor: 'help' }}>--</span>}</td>
                     </tr>
                   ))}
                 </tbody>

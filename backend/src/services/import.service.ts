@@ -330,6 +330,23 @@ export class ImportService {
           const lockRef = this.db.collection('dailyReportLocks').doc(identityKey);
           const topLevelReportRef = this.db.collection('dailyReports').doc(identityKey);
 
+          const openingBirdCount = record.openingBirdCount ?? record.birdCount ?? null;
+          const mortality = record.mortality ?? 0;
+          const culling = record.culling ?? 0;
+          const closingBirdCount =
+            record.closingBirdCount ??
+            (openingBirdCount != null ? Math.max(0, openingBirdCount - (mortality + culling)) : null);
+
+          let intWeekNumber: number | null = null;
+          if (record.weekNumber != null) {
+            intWeekNumber =
+              typeof record.weekNumber === 'number'
+                ? Math.floor(record.weekNumber)
+                : parseInt(String(record.weekNumber), 10);
+            if (isNaN(intWeekNumber)) intWeekNumber = null;
+          }
+          const weekLabel = record.weekLabel || (record.weekNumber != null ? String(record.weekNumber) : null);
+
           const reportData: Record<string, any> = {
             userId: assignedUserId,
             submittedBy: user.uid,
@@ -339,16 +356,21 @@ export class ImportService {
             submissionMethod: 'HISTORICAL_IMPORT',
             submissionVersion: existingReport ? Number(existingReport.submissionVersion || 1) + 1 : 1,
             status: 'submitted',
-            birdCount: record.birdCount ?? null,
-            openingBirdCount: record.birdCount ?? null,
-            closingBirdCount: record.birdCount ?? null,
+            openingBirdCount,
+            closingBirdCount,
+            birdCount: closingBirdCount ?? openingBirdCount ?? null,
             feedKg: record.feedKg ?? null,
             feedGrams: record.feedGrams ?? (record.feedKg != null ? record.feedKg * 1000 : null),
             feedG: record.feedG ?? (record.feedKg != null ? record.feedKg * 1000 : null),
-            feedGramsPerBird: record.feedGramsPerBird ?? null,
-            weekNumber: record.weekNumber ?? null,
-            mortality: record.mortality ?? 0,
-            culling: record.culling ?? 0,
+            feedGramsPerBird:
+              record.feedGramsPerBird ??
+              (openingBirdCount && record.feedKg
+                ? Number(((record.feedKg * 1000) / openingBirdCount).toFixed(1))
+                : null),
+            weekNumber: intWeekNumber,
+            weekLabel,
+            mortality,
+            culling,
             eggsProduced: record.eggsProduced ?? 0,
             selectionEggs: record.selectionEggs ?? 0,
             damagedEggs: record.damagedEggs ?? 0,
@@ -359,8 +381,8 @@ export class ImportService {
             tempMin: record.tempMin ?? record.temperature ?? null,
             tempMax: record.tempMax ?? record.temperature ?? null,
             ammoniaPpm: record.ammoniaPpm ?? null,
-            eggWeight: record.eggWeight ?? { min: 0, max: 0, avg: 0 },
-            bodyWeight: record.bodyWeight ?? { min: 0, max: 0, avg: 0 },
+            eggWeight: record.eggWeight ?? null,
+            bodyWeight: record.bodyWeight ?? null,
             remarks: record.remarks ?? '',
             isHistorical: true,
             importBatchId: batchId,
@@ -388,8 +410,24 @@ export class ImportService {
           });
 
           currentBatch.set(topLevelReportRef, reportData, { merge: true });
-
           operationsInCurrentBatch += 4;
+
+          if (record.bodyWeight && (record.bodyWeight.avg > 0 || record.bodyWeight.min > 0) && intWeekNumber) {
+            const weeklyLockRef = this.db.collection('dailyReportLocks').doc(`weekly_${record.farmId}_W${intWeekNumber}`);
+            currentBatch.set(weeklyLockRef, {
+              farmId: record.farmId,
+              weekNumber: intWeekNumber,
+              reportDate: record.submissionDate,
+              bodyWeight: record.bodyWeight,
+              ammoniaPpm: record.ammoniaPpm ?? null,
+              submittedBy: assignedUserId,
+              submittedAt: now,
+              updatedAt: now,
+              importBatchId: batchId,
+              isHistorical: true,
+            }, { merge: true });
+            operationsInCurrentBatch += 1;
+          }
           importedCount++;
 
           const isExisting = Boolean(existingReport || existingLock);
@@ -399,12 +437,13 @@ export class ImportService {
             action,
             farmId: record.farmId,
             submissionDate: record.submissionDate,
+            sourceFile: record.sourceFile,
             targetDocs: [
               { collectionPath: `dailyReports/${assignedUserId}/dailyLogs`, docId },
               { collectionPath: 'dailyReportLocks', docId: identityKey },
               { collectionPath: 'dailyReports', docId: identityKey },
             ],
-            beforeData: isExisting ? { ...(existingReport || {}), ...(existingLock || {}) } : undefined,
+            beforeData: isExisting ? { ...(existingReport || {}), ...(existingLock || {}) } : null,
             importedData: reportData,
             importedAt: now,
             submissionVersion: reportData.submissionVersion,
@@ -450,6 +489,7 @@ export class ImportService {
             action: 'CREATED',
             farmId: record.farmId,
             submissionDate: record.submissionDate,
+            sourceFile: record.sourceFile,
             targetDocs: [
               { collectionPath: `logs/${record.farmId}/feedLogs`, docId: feedLogRef.id },
               { collectionPath: `farms/${record.farmId}/feedTransactions`, docId: txRef.id },
@@ -489,6 +529,7 @@ export class ImportService {
             action: 'CREATED',
             farmId: record.farmId,
             submissionDate: record.submissionDate,
+            sourceFile: record.sourceFile,
             targetDocs: [
               { collectionPath: 'flocks', docId: flockRef.id },
             ],
@@ -506,6 +547,47 @@ export class ImportService {
       // Commit any remaining operations
       await commitCurrentBatch();
 
+      // Build worksheet contributions
+      const worksheetKeys = Array.from(new Set(records.map((r) => r.sourceFile)));
+      const worksheets = worksheetKeys.map((wsKey) => {
+        const wsRecords = records.filter((r) => r.sourceFile === wsKey);
+        const wsManifest = manifest.filter((m) => m.sourceFile === wsKey);
+        const wsErrors = errors.filter((e) => e.file === wsKey);
+
+        const sheetMatch = wsKey.match(/^(.*?)\s*\[(.*?)\]$/);
+        const fileName = sheetMatch ? sheetMatch[1]!.trim() : wsKey;
+        const sheetName = sheetMatch ? sheetMatch[2]!.trim() : null;
+
+        const dates = wsRecords.map((r) => r.submissionDate).filter(Boolean).sort();
+        const minDate = dates[0] || '';
+        const maxDate = dates[dates.length - 1] || '';
+
+        const createdCount = wsManifest.filter((m) => m.action === 'CREATED').length;
+        const updatedCount = wsManifest.filter((m) => m.action === 'UPDATED').length;
+        const countImported = wsManifest.length;
+        const failedCount = wsErrors.length;
+        const countSkipped = wsRecords.length - countImported - failedCount;
+
+        const farmId = wsRecords[0]?.farmId || '';
+
+        return {
+          worksheetKey: wsKey,
+          fileName,
+          sheetName,
+          farmId,
+          status: (failedCount > 0 ? 'IMPORTED_WITH_ERRORS' : 'IMPORTED') as any,
+          importedCount: countImported,
+          createdCount,
+          updatedCount,
+          skippedCount: Math.max(0, countSkipped),
+          failedCount,
+          dateRange: minDate && maxDate ? { minDate, maxDate } : null,
+          importTimestamp: now,
+          revertStatus: 'NOT_REVERTED' as any,
+          canSafelyRevert: countImported > 0,
+        };
+      });
+
       if (req.dryRun) {
         return {
           batchId: `dry_run_${batchId}`,
@@ -516,6 +598,7 @@ export class ImportService {
           conflictCount,
           failedCount: errors.length,
           errors,
+          worksheets,
           status: 'COMPLETED',
           isDryRun: true,
         };
@@ -548,6 +631,7 @@ export class ImportService {
         errors,
         overwrittenRecords,
         manifest,
+        worksheets,
         revertStatus: 'NOT_REVERTED',
       };
 
@@ -587,6 +671,7 @@ export class ImportService {
         conflictCount,
         failedCount: errors.length,
         errors,
+        worksheets,
         status,
       };
     } catch (error) {
@@ -640,6 +725,7 @@ export class ImportService {
     batchId: string,
     _user: AuthenticatedUser,
     requestId: string,
+    worksheetKey?: string,
   ): Promise<RevertPreviewResponse> {
     try {
       const batchDoc = await this.db.collection('importBatches').doc(batchId).get();
@@ -649,31 +735,49 @@ export class ImportService {
 
       const batch = batchDoc.data() as ImportBatchRecord;
 
-      if (batch.revertStatus === 'REVERTED') {
+      const ws = worksheetKey
+        ? batch.worksheets?.find(
+            (w) =>
+              w.worksheetKey === worksheetKey ||
+              w.fileName === worksheetKey ||
+              (w.sheetName && w.sheetName === worksheetKey),
+          )
+        : undefined;
+
+      const isWsAlreadyReverted = ws ? ws.revertStatus === 'REVERTED' : batch.revertStatus === 'REVERTED';
+      const isBatchReverting = batch.revertStatus === 'REVERTING';
+
+      if (isWsAlreadyReverted) {
         return {
           batchId,
+          worksheetKey,
+          worksheetName: ws?.sheetName || ws?.fileName || worksheetKey,
           importTimestamp: batch.importTimestamp,
-          filenames: batch.filenames || [],
-          affectedFarms: batch.affectedFarms || [],
-          totalImported: batch.importedCount || 0,
+          filenames: ws ? [ws.fileName] : (batch.filenames || []),
+          affectedFarms: ws?.farmId ? [ws.farmId] : (batch.affectedFarms || []),
+          totalImported: ws ? ws.importedCount : (batch.importedCount || 0),
           canSafelyRevert: 0,
           requiresReview: 0,
           willDelete: 0,
           willRestore: 0,
           isReversible: false,
           revertStatus: 'REVERTED',
-          notReversibleReason: 'This batch has already been reverted.',
+          notReversibleReason: worksheetKey
+            ? `Worksheet '${ws?.sheetName || worksheetKey}' has already been reverted.`
+            : 'This batch has already been reverted.',
           sampleRecords: [],
         };
       }
 
-      if (batch.revertStatus === 'REVERTING') {
+      if (isBatchReverting) {
         return {
           batchId,
+          worksheetKey,
+          worksheetName: ws?.sheetName || ws?.fileName || worksheetKey,
           importTimestamp: batch.importTimestamp,
-          filenames: batch.filenames || [],
-          affectedFarms: batch.affectedFarms || [],
-          totalImported: batch.importedCount || 0,
+          filenames: ws ? [ws.fileName] : (batch.filenames || []),
+          affectedFarms: ws?.farmId ? [ws.farmId] : (batch.affectedFarms || []),
+          totalImported: ws ? ws.importedCount : (batch.importedCount || 0),
           canSafelyRevert: 0,
           requiresReview: 0,
           willDelete: 0,
@@ -685,7 +789,16 @@ export class ImportService {
         };
       }
 
-      const manifestItems = await this.resolveBatchItems(batch);
+      const allManifestItems = await this.resolveBatchItems(batch);
+      const manifestItems = worksheetKey
+        ? allManifestItems.filter(
+            (m) =>
+              m.sourceFile === worksheetKey ||
+              (ws && m.sourceFile === ws.worksheetKey) ||
+              (ws && ws.sheetName && m.sourceFile && m.sourceFile.includes(ws.sheetName)) ||
+              (ws && ws.farmId && m.farmId === ws.farmId),
+          )
+        : allManifestItems.filter((m) => m.reversalStatus !== 'REVERTED');
 
       let canSafelyRevert = 0;
       let requiresReview = 0;
@@ -738,29 +851,34 @@ export class ImportService {
             submissionDate: item.submissionDate,
             recordType: item.recordType,
             action: item.action,
+            sourceFile: item.sourceFile,
             canSafelyRevert: isSafe,
             reason,
           });
         }
       }
 
-      const affectedFarms = batch.affectedFarms && batch.affectedFarms.length > 0
-        ? batch.affectedFarms
-        : Array.from(new Set(manifestItems.map((m) => m.farmId)));
+      const affectedFarms = ws?.farmId
+        ? [ws.farmId]
+        : batch.affectedFarms && batch.affectedFarms.length > 0
+          ? batch.affectedFarms
+          : Array.from(new Set(manifestItems.map((m) => m.farmId)));
 
       return {
         batchId,
+        worksheetKey,
+        worksheetName: ws?.sheetName || ws?.fileName || worksheetKey,
         importTimestamp: batch.importTimestamp,
-        filenames: batch.filenames || [],
+        filenames: ws ? [ws.fileName] : (batch.filenames || []),
         affectedFarms,
-        totalImported: batch.importedCount || manifestItems.length,
+        totalImported: ws ? ws.importedCount : (batch.importedCount || manifestItems.length),
         canSafelyRevert,
         requiresReview,
         willDelete,
         willRestore,
         isReversible: canSafelyRevert > 0,
-        revertStatus: batch.revertStatus || 'NOT_REVERTED',
-        notReversibleReason: canSafelyRevert === 0 ? 'No reversible records found in this batch' : undefined,
+        revertStatus: ws?.revertStatus || batch.revertStatus || 'NOT_REVERTED',
+        notReversibleReason: canSafelyRevert === 0 ? 'No reversible records found' : undefined,
         sampleRecords,
       };
     } catch (error) {
@@ -775,7 +893,7 @@ export class ImportService {
   }
 
   /**
-   * Reverts a specific historical import batch.
+   * Reverts a specific historical import batch or an individual worksheet contribution.
    * Ensures that live farm balances are never touched,
    * only records tagged with this importBatchId are deleted or restored,
    * and concurrent revert calls are blocked.
@@ -800,17 +918,30 @@ export class ImportService {
 
     const batch = batchDoc.data() as ImportBatchRecord;
 
-    if (batch.revertStatus === 'REVERTING') {
-      throw new DuplicateError('Revert operation is already in progress for this batch');
+    const wsKey = req.worksheetKey;
+    const ws = wsKey
+      ? batch.worksheets?.find(
+          (w) =>
+            w.worksheetKey === wsKey ||
+            w.fileName === wsKey ||
+            (w.sheetName && w.sheetName === wsKey),
+        )
+      : undefined;
+
+    if (wsKey && ws && ws.revertStatus === 'REVERTED') {
+      throw new DuplicateError(`Worksheet '${ws.sheetName || wsKey}' has already been reverted`);
     }
-    if (batch.revertStatus === 'REVERTED') {
+    if (!wsKey && batch.revertStatus === 'REVERTED') {
       throw new DuplicateError('This batch has already been reverted');
+    }
+    if (batch.revertStatus === 'REVERTING') {
+      throw new DuplicateError('A revert operation is already in progress for this batch');
     }
 
     const revertOperationId = `revert_${Date.now()}_${uuidv4().substring(0, 8)}`;
     const revertTimestamp = new Date().toISOString();
 
-    // Set status to REVERTING immediately as concurrency guard
+    // Concurrency guard: set status to REVERTING
     await batchRef.update({
       revertStatus: 'REVERTING',
       'revertAudit.revertOperationId': revertOperationId,
@@ -818,7 +949,16 @@ export class ImportService {
       'revertAudit.revertTimestamp': revertTimestamp,
     });
 
-    const manifestItems = await this.resolveBatchItems(batch);
+    const allManifestItems = await this.resolveBatchItems(batch);
+    const manifestItems = wsKey
+      ? allManifestItems.filter(
+          (m) =>
+            m.sourceFile === wsKey ||
+            (ws && m.sourceFile === ws.worksheetKey) ||
+            (ws && ws.sheetName && m.sourceFile && m.sourceFile.includes(ws.sheetName)) ||
+            (ws && ws.farmId && m.farmId === ws.farmId),
+        )
+      : allManifestItems.filter((m) => m.reversalStatus !== 'REVERTED');
 
     let deletedCount = 0;
     let restoredCount = 0;
@@ -874,11 +1014,13 @@ export class ImportService {
 
             if (!canDelete) {
               conflictCount++;
+              item.reversalStatus = 'CONFLICT';
               continue;
             }
 
             if (refsToDelete.length === 0) {
               skippedCount++;
+              item.reversalStatus = 'SKIPPED';
               continue;
             }
 
@@ -890,10 +1032,12 @@ export class ImportService {
               }
             }
 
+            item.reversalStatus = 'REVERTED';
             deletedCount++;
           } else if (item.action === 'UPDATED') {
             if (!item.beforeData) {
               conflictCount++;
+              item.reversalStatus = 'CONFLICT';
               errors.push({
                 docId: `${item.farmId}_${item.submissionDate}`,
                 reason: 'No original snapshot exists to restore. Skipped.',
@@ -908,6 +1052,7 @@ export class ImportService {
                 const data = snap.data() || {};
                 if (data['importBatchId'] && data['importBatchId'] !== batchId) {
                   conflictCount++;
+                  item.reversalStatus = 'CONFLICT';
                   errors.push({
                     docId: tDoc.docId,
                     reason: `Record was subsequently modified by another batch '${data['importBatchId']}'. Skipped restore.`,
@@ -927,10 +1072,12 @@ export class ImportService {
               }
             }
 
+            item.reversalStatus = 'REVERTED';
             restoredCount++;
           }
         } catch (itemErr: any) {
           failedCount++;
+          item.reversalStatus = 'CONFLICT';
           errors.push({
             reason: itemErr instanceof Error ? itemErr.message : 'Unknown item error',
           });
@@ -939,12 +1086,73 @@ export class ImportService {
 
       await commitBatch();
 
-      const finalStatus: RevertBatchStatus =
+      const wsFinalStatus =
         failedCount > 0
-          ? 'PARTIALLY_REVERTED'
+          ? 'REVERT_FAILED'
           : conflictCount > 0
-            ? 'REVERT_REQUIRES_REVIEW'
+            ? 'REVERT_CONFLICT'
             : 'REVERTED';
+
+      // Update worksheets array
+      let updatedWorksheets = batch.worksheets || [];
+      if (wsKey) {
+        updatedWorksheets = updatedWorksheets.map((w) => {
+          if (
+            w.worksheetKey === wsKey ||
+            w.fileName === wsKey ||
+            (w.sheetName && w.sheetName === wsKey) ||
+            (ws && w.worksheetKey === ws.worksheetKey)
+          ) {
+            return {
+              ...w,
+              status: wsFinalStatus as any,
+              revertStatus: wsFinalStatus as any,
+              revertTimestamp,
+              revertAudit: {
+                deletedCount,
+                restoredCount,
+                failedCount,
+                conflictsCount: conflictCount,
+              },
+            };
+          }
+          return w;
+        });
+      } else {
+        updatedWorksheets = updatedWorksheets.map((w) => ({
+          ...w,
+          status: wsFinalStatus as any,
+          revertStatus: wsFinalStatus as any,
+          revertTimestamp,
+          revertAudit: {
+            deletedCount,
+            restoredCount,
+            failedCount,
+            conflictsCount: conflictCount,
+          },
+        }));
+      }
+
+      // Determine batch-level revertStatus based on all child worksheets
+      let overallBatchStatus: RevertBatchStatus;
+      if (wsKey) {
+        const allReverted = updatedWorksheets.length > 0 && updatedWorksheets.every((w) => w.revertStatus === 'REVERTED');
+        const anyReverted = updatedWorksheets.some((w) => w.revertStatus === 'REVERTED' || w.revertStatus === 'PARTIALLY_REVERTED');
+        overallBatchStatus = allReverted
+          ? 'REVERTED'
+          : anyReverted
+            ? 'PARTIALLY_REVERTED'
+            : conflictCount > 0
+              ? 'REVERT_REQUIRES_REVIEW'
+              : 'PARTIALLY_REVERTED';
+      } else {
+        overallBatchStatus =
+          failedCount > 0
+            ? 'PARTIALLY_REVERTED'
+            : conflictCount > 0
+              ? 'REVERT_REQUIRES_REVIEW'
+              : 'REVERTED';
+      }
 
       const revertAudit = {
         revertOperationId,
@@ -952,49 +1160,46 @@ export class ImportService {
         revertedByEmail: user.email,
         revertTimestamp,
         revertCompletedTimestamp: new Date().toISOString(),
-        deletedRecordsCount: deletedCount,
-        restoredRecordsCount: restoredCount,
-        skippedRecordsCount: skippedCount,
-        conflictsCount: conflictCount,
-        failedCount,
-        errors,
+        deletedRecordsCount: (batch.revertAudit?.deletedRecordsCount || 0) + deletedCount,
+        restoredRecordsCount: (batch.revertAudit?.restoredRecordsCount || 0) + restoredCount,
+        skippedRecordsCount: (batch.revertAudit?.skippedRecordsCount || 0) + skippedCount,
+        conflictsCount: (batch.revertAudit?.conflictsCount || 0) + conflictCount,
+        failedCount: (batch.revertAudit?.failedCount || 0) + failedCount,
+        errors: [...(batch.revertAudit?.errors || []), ...errors],
       };
 
       await batchRef.update({
-        revertStatus: finalStatus,
+        revertStatus: overallBatchStatus,
+        worksheets: updatedWorksheets,
+        manifest: allManifestItems,
         revertAudit,
       });
 
       await auditService.log({
-        eventType: 'HISTORICAL_IMPORT_REVERT',
+        eventType: wsKey ? 'HISTORICAL_IMPORT_WORKSHEET_REVERT' : 'HISTORICAL_IMPORT_REVERT',
         uid: user.uid,
         resourceId: batchId,
         requestId,
         metadata: {
           batchId,
+          worksheetKey: wsKey || 'ALL',
           revertOperationId,
           deletedCount,
           restoredCount,
           skippedCount,
           conflictCount,
           failedCount,
-          finalStatus,
+          finalStatus: overallBatchStatus,
+          worksheetStatus: wsKey ? wsFinalStatus : undefined,
         },
-      });
-
-      logger.info('Historical import batch reverted', {
-        requestId,
-        batchId,
-        revertOperationId,
-        deletedCount,
-        restoredCount,
-        finalStatus,
       });
 
       return {
         revertOperationId,
         batchId,
-        status: finalStatus,
+        worksheetKey: wsKey,
+        status: overallBatchStatus,
+        worksheetStatus: wsKey ? wsFinalStatus : undefined,
         deletedCount,
         restoredCount,
         skippedCount,
@@ -1067,6 +1272,7 @@ export class ImportService {
         action,
         farmId,
         submissionDate,
+        sourceFile: reportData?.['sourceFile'] || (batch.filenames && batch.filenames.length === 1 ? batch.filenames[0] : undefined),
         targetDocs,
         beforeData,
         importedData: reportData || undefined,

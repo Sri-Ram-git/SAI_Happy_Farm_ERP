@@ -8,9 +8,9 @@ import { EmptyState } from '../../components/dashboard/EmptyState';
 import { DateFilter } from '../../components/dashboard/DateFilter';
 import { type ReportDoc } from '../../services/reportDataService';
 import { getFarmById, type FarmDoc } from '../../services/farmDataService';
-import { getUserByUid, type UserDoc } from '../../services/userDataService';
+import { getUserByUid, getActiveFarmers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, getDaysAgo, formatDisplayDate, formatTime } from '../../utils/dateUtils';
-import { calcProductionRate, calcMortalityRate, calcFeedPerBird, aggregateReports } from '../../utils/kpiCalculations';
+import { calcProductionRate, calcMortalityRate, calcFeedPerBird, aggregateReports, getEligibleBirdCount } from '../../utils/kpiCalculations';
 import { useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { KPI_THRESHOLDS } from '../../config/kpiThresholds';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
@@ -45,12 +45,23 @@ export function AdminFarmDetailPage() {
   }, [farmId]);
 
   useEffect(() => {
-    if (!farmId || reports.length === 0) return;
+    if (!farmId) return;
     let mounted = true;
     (async () => {
       try {
-        const u = await getUserByUid(reports[0].submittedBy);
-        if (mounted) setFarmer(u);
+        if (reports.length > 0 && reports[0]?.submittedBy) {
+          const u = await getUserByUid(reports[0].submittedBy);
+          if (mounted && u) {
+            setFarmer(u);
+            return;
+          }
+        }
+        // Fallback: look up active farmer assigned to this farm
+        const activeFarmers = await getActiveFarmers();
+        const assigned = activeFarmers.find((f) => f.farmIds?.includes(farmId));
+        if (mounted && assigned) {
+          setFarmer(assigned);
+        }
       } catch (err) {
         console.error('[AdminFarmDetail] Farmer load error:', err);
       }
@@ -58,19 +69,28 @@ export function AdminFarmDetailPage() {
     return () => { mounted = false; };
   }, [farmId, reports.length > 0 ? reports[0].submittedBy : '']);
 
-  const chartData = reports.map((r) => ({
-    date: r.submissionDate.slice(5),
-    production: calcProductionRate(r.eggsProduced ?? 0, r.birdCount ?? 0),
-    mortality: calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0),
-    temperature: r.temperature ?? 0,
-    feed: calcFeedPerBird(r.feedKg ?? 0, r.birdCount ?? 0),
-  }));
+  const chartData = reports.map((r) => {
+    const base = getEligibleBirdCount(r);
+    return {
+      date: r.submissionDate.slice(5),
+      production: base > 0 ? calcProductionRate(r.eggsProduced ?? 0, base) : 0,
+      mortality: base > 0 ? calcMortalityRate(r.mortality ?? 0, base) : 0,
+      temperature: r.temperature ?? 0,
+      feed: base > 0 ? calcFeedPerBird(r.feedKg ?? 0, base) : 0,
+    };
+  });
 
   const agg = aggregateReports(reports);
   const todayReport = reports.find((r) => r.submissionDate === getIstDate());
 
   const attentionItems: string[] = [];
-  if (agg.avgMortalityRate > KPI_THRESHOLDS.mortalityRateCritical) attentionItems.push('High mortality rate');
+  const hasTotalFlockLoss = reports.some((r) => {
+    const b = getEligibleBirdCount(r);
+    return b > 0 && (r.mortality ?? 0) >= b;
+  });
+  if (hasTotalFlockLoss) attentionItems.push('CRITICAL: Total flock mortality (100%) reported');
+  if (agg.avgMortalityRate >= KPI_THRESHOLDS.mortalityRateCritical) attentionItems.push(`Critical mortality rate (${agg.avgMortalityRate}%)`);
+  else if (agg.avgMortalityRate >= KPI_THRESHOLDS.mortalityRateWarning) attentionItems.push(`High mortality rate (${agg.avgMortalityRate}%)`);
   if (agg.avgTemperature > KPI_THRESHOLDS.temperatureCritical) attentionItems.push('High temperature');
   if (agg.avgAmmonia > KPI_THRESHOLDS.ammoniaCritical) attentionItems.push('High ammonia');
   if (!todayReport) attentionItems.push('No report submitted today');
@@ -154,19 +174,25 @@ export function AdminFarmDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {[...reports].reverse().map((r) => (
-                  <tr key={r.reportId}>
-                    <td>{formatDisplayDate(r.submissionDate)}</td>
-                    <td>{r.birdCount}</td>
-                    <td>{calcProductionRate(r.eggsProduced ?? 0, r.birdCount ?? 0)}%</td>
-                    <td className={calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0) > 10 ? 'text-danger' : ''}>
-                      {calcMortalityRate(r.mortality ?? 0, r.birdCount ?? 0)}%
-                    </td>
-                    <td>{calcFeedPerBird(r.feedKg ?? 0, r.birdCount ?? 0)}g</td>
-                    <td>{r.temperature}°C</td>
-                    <td>{formatTime(r.createdAt)}</td>
-                  </tr>
-                ))}
+                {[...reports].reverse().map((r) => {
+                  const eligible = getEligibleBirdCount(r);
+                  const mortRate = eligible > 0 ? calcMortalityRate(r.mortality ?? 0, eligible) : 0;
+                  const isCriticalMort = mortRate >= (KPI_THRESHOLDS.mortalityRateCritical ?? 10) || (eligible > 0 && (r.mortality ?? 0) >= eligible);
+                  return (
+                    <tr key={r.reportId}>
+                      <td>{formatDisplayDate(r.submissionDate)}</td>
+                      <td>{eligible || r.birdCount}</td>
+                      <td>{eligible > 0 ? calcProductionRate(r.eggsProduced ?? 0, eligible) : 0}%</td>
+                      <td className={isCriticalMort ? 'text-danger' : ''} style={{ fontWeight: isCriticalMort ? 700 : undefined }}>
+                        {mortRate}%
+                        {eligible > 0 && (r.mortality ?? 0) >= eligible ? ' (100% LOSS)' : ''}
+                      </td>
+                      <td>{eligible > 0 ? calcFeedPerBird(r.feedKg ?? 0, eligible) : 0}g</td>
+                      <td>{r.temperature}°C</td>
+                      <td>{formatTime(r.createdAt)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -6,6 +6,7 @@ import { LoadingState } from '../../components/dashboard/LoadingState';
 import { getUserByUid, updateSupervisorAllocation, type UserDoc } from '../../services/userDataService';
 import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { FarmMultiSelect } from '../../components/common/FarmMultiSelect';
+import { FormLoadingOverlay } from '../../components/common/FormLoadingOverlay';
 
 export function AdminEditSupervisorPage() {
   const { userProfile } = useAuth();
@@ -64,7 +65,7 @@ export function AdminEditSupervisorPage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userId || !supervisor) return;
+    if (saving || !userId || !supervisor) return;
 
     setSaving(true);
     setGeneralError(null);
@@ -73,15 +74,15 @@ export function AdminEditSupervisorPage() {
     try {
       await updateSupervisorAllocation(userId, selectedFarmIds);
       setSuccessMessage('Supervisor farm allocation updated successfully.');
+      setSaving(false);
 
       setTimeout(() => {
         navigate('/admin/users');
-      }, 1500);
+      }, 1200);
     } catch (err: any) {
       console.error('[AdminEditSupervisor] Save error:', err);
-      setGeneralError(err.message || 'Failed to update supervisor farm allocation');
-    } finally {
       setSaving(false);
+      setGeneralError(err.message || 'Failed to update supervisor farm allocation');
     }
   };
 
@@ -101,7 +102,7 @@ export function AdminEditSupervisorPage() {
             <h2>Edit Supervisor Allocation</h2>
             <p style={{ color: '#6b7280', marginTop: 4 }}>Modify farm responsibilities for supervisor</p>
           </div>
-          <button className="btn btn--outline" onClick={() => navigate('/admin/users')}>
+          <button className="btn btn--outline" onClick={() => navigate('/admin/users')} disabled={saving}>
             ← Back to Users
           </button>
         </div>
@@ -119,7 +120,14 @@ export function AdminEditSupervisorPage() {
         )}
 
         {supervisor && (
-          <div className="section-card" style={{ padding: 24, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb' }}>
+          <div className="section-card" style={{ position: 'relative', padding: 24, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', minHeight: 300 }}>
+            {saving && (
+              <FormLoadingOverlay
+                title="Updating farm allocation..."
+                subtitle="Please wait while supervisor farm assignments are saved."
+                role="supervisor"
+              />
+            )}
             <div style={{ marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid #e5e7eb' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div>

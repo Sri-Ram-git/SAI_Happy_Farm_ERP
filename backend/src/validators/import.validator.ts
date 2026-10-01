@@ -5,6 +5,8 @@ const HistoricalImportRecordSchema = z.object({
   farmId: z.string().min(1, 'Farm ID is required'),
   submissionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format'),
   birdCount: z.number().int().nonnegative().optional(),
+  openingBirdCount: z.number().int().nonnegative().optional(),
+  closingBirdCount: z.number().int().nonnegative().optional(),
   feedKg: z.number().nonnegative().optional(),
   feedGrams: z.number().nonnegative().optional(),
   feedG: z.number().nonnegative().optional(),
@@ -22,6 +24,7 @@ const HistoricalImportRecordSchema = z.object({
       max: z.number().nonnegative(),
       avg: z.number().nonnegative(),
     })
+    .nullable()
     .optional(),
   bodyWeight: z
     .object({
@@ -29,12 +32,14 @@ const HistoricalImportRecordSchema = z.object({
       max: z.number().nonnegative(),
       avg: z.number().nonnegative(),
     })
+    .nullable()
     .optional(),
   remarks: z.string().optional(),
   flockId: z.string().optional(),
   sourceFile: z.string().min(1, 'Source file name is required'),
   sourceRow: z.number().int().min(1, 'Source row must be at least 1'),
   weekNumber: z.number().optional(),
+  weekLabel: z.string().optional(),
   damagedEggs: z.number().int().nonnegative().optional(),
   floorEggs: z.number().int().nonnegative().optional(),
   feedGramsPerBird: z.number().nonnegative().optional(),
@@ -62,4 +67,5 @@ export const ExecuteImportSchema = z.object({
 
 export const RevertBatchSchema = z.object({
   confirmationBatchId: z.string().min(1, 'Confirmation batch ID is required to authorize revert'),
+  worksheetKey: z.string().optional(),
 });

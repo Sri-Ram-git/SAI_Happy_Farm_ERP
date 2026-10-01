@@ -165,6 +165,8 @@ export interface CreateFarmerPayload {
 export interface CreateFarmerResult {
   uid: string;
   email: string;
+  farmId?: string;
+  flockId?: string;
   message: string;
 }
 

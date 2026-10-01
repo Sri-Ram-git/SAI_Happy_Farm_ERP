@@ -11,12 +11,14 @@ import {
   validateParsedFile,
   checkServerConflicts,
   executeHistoricalImport,
+  saveImportBatchRecord,
   fetchImportBatches,
   generateErrorReportCsv,
   fetchRevertPreview,
   executeRevertImportBatch,
   parseXlsxWorkbook,
   applyMappingToMatchingFiles,
+  getBatchWorksheets,
   type ParsedFile,
   type ValidatedRow,
   type StandardFieldKey,
@@ -24,6 +26,7 @@ import {
   type RevertPreviewResponse,
   type RevertBatchResponse,
   type XlsxWorksheetInfo,
+  type WorksheetImportContribution,
 } from '../../services/historicalImportService';
 import { formatDisplayDate } from '../../utils/dateUtils';
 import {
@@ -93,10 +96,13 @@ export function AdminImportPage() {
   // History Tab State
   const [importBatches, setImportBatches] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [retryingSaveHistory, setRetryingSaveHistory] = useState(false);
   const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
 
   // Revert Modal State
   const [revertModalBatch, setRevertModalBatch] = useState<any | null>(null);
+  const [revertTargetWorksheet, setRevertTargetWorksheet] = useState<WorksheetImportContribution | null>(null);
   const [revertPreview, setRevertPreview] = useState<RevertPreviewResponse | null>(null);
   const [loadingRevertPreview, setLoadingRevertPreview] = useState(false);
   const [revertConfirmationInput, setRevertConfirmationInput] = useState('');
@@ -132,8 +138,9 @@ export function AdminImportPage() {
     }
   };
 
-  const handleOpenRevertModal = async (batch: any) => {
+  const handleOpenRevertModal = async (batch: any, worksheet?: WorksheetImportContribution) => {
     setRevertModalBatch(batch);
+    setRevertTargetWorksheet(worksheet || null);
     setRevertConfirmationInput('');
     setRevertAckChecked(false);
     setRevertError(null);
@@ -142,7 +149,7 @@ export function AdminImportPage() {
     setLoadingRevertPreview(true);
 
     try {
-      const preview = await fetchRevertPreview(batch.batchId);
+      const preview = await fetchRevertPreview(batch.batchId, worksheet?.worksheetKey);
       setRevertPreview(preview);
     } catch (err: any) {
       console.error('[handleOpenRevertModal] Failed loading revert preview:', err);
@@ -154,6 +161,7 @@ export function AdminImportPage() {
 
   const handleCloseRevertModal = () => {
     setRevertModalBatch(null);
+    setRevertTargetWorksheet(null);
     setRevertPreview(null);
     setRevertConfirmationInput('');
     setRevertAckChecked(false);
@@ -163,8 +171,16 @@ export function AdminImportPage() {
 
   const handleExecuteRevert = async () => {
     if (!revertModalBatch) return;
-    if (revertConfirmationInput.trim() !== revertModalBatch.batchId) {
-      setRevertError(`Confirmation batch ID mismatch. Expected '${revertModalBatch.batchId}'.`);
+
+    // Unmistakable confirmation input:
+    // If reverting a specific worksheet: require the worksheet sheet name or key (e.g. AP15).
+    // If reverting the full batch: require the exact batch ID.
+    const expectedConfirmation = revertTargetWorksheet
+      ? (revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey).trim()
+      : revertModalBatch.batchId.trim();
+
+    if (revertConfirmationInput.trim().toUpperCase() !== expectedConfirmation.toUpperCase()) {
+      setRevertError(`Confirmation mismatch. Expected '${expectedConfirmation}'.`);
       return;
     }
     if (!revertAckChecked) {
@@ -176,8 +192,37 @@ export function AdminImportPage() {
     setRevertError(null);
 
     try {
-      const res = await executeRevertImportBatch(revertModalBatch.batchId, revertConfirmationInput.trim());
+      const res = await executeRevertImportBatch(
+        revertModalBatch.batchId,
+        revertModalBatch.batchId,
+        revertTargetWorksheet?.worksheetKey,
+      );
       setRevertSuccessResult(res);
+
+      // Keep importResult (Step 5) updated in real-time if currently viewed
+      if (importResult && importResult.batchId === revertModalBatch.batchId) {
+        if (res.updatedBatch) {
+          setImportResult(res.updatedBatch);
+        } else if (revertTargetWorksheet) {
+          setImportResult((prev: any) => {
+            if (!prev) return prev;
+            const updatedWs = (prev.worksheets || []).map((w: any) =>
+              w.worksheetKey === revertTargetWorksheet.worksheetKey
+                ? { ...w, status: 'REVERTED' }
+                : w,
+            );
+            const allReverted = updatedWs.length > 0 && updatedWs.every((w: any) => w.status === 'REVERTED');
+            return {
+              ...prev,
+              worksheets: updatedWs,
+              revertStatus: allReverted ? 'REVERTED' : 'PARTIALLY_REVERTED',
+            };
+          });
+        } else {
+          setImportResult((prev: any) => (prev ? { ...prev, revertStatus: 'REVERTED' } : prev));
+        }
+      }
+
       await loadHistory();
     } catch (err: any) {
       console.error('[handleExecuteRevert] Error:', err);
@@ -214,11 +259,13 @@ export function AdminImportPage() {
 
   const loadHistory = async () => {
     setLoadingHistory(true);
+    setHistoryError(null);
     try {
       const batches = await fetchImportBatches();
       setImportBatches(batches);
-    } catch (err) {
+    } catch (err: any) {
       console.error('[AdminImportPage] Error loading history:', err);
+      setHistoryError(err?.message || 'Failed to load import batches from database.');
     } finally {
       setLoadingHistory(false);
     }
@@ -265,6 +312,12 @@ export function AdminImportPage() {
               assignedFarmId: sheet.detectedFarmId,
               detectedRecordType: sheet.detectedRecordType,
               formulaWarningsCount: sheet.formulaWarningCount,
+              totalFormulaCount: sheet.totalFormulaCount,
+              formulaErrorCount: sheet.formulaErrorCount,
+              ignoredNonDataRows: sheet.ignoredNonDataRows,
+              detectedFarmFromSheet: sheet.detectedFarmFromSheet,
+              detectedFarmFromFilename: sheet.detectedFarmFromFilename,
+              farmConflict: sheet.farmConflict,
               unusualLayoutWarning: sheet.unusualLayoutWarning,
               status: sheet.isEmpty ? 'ERROR' : 'PARSED',
               errorMessage: sheet.isEmpty ? 'Worksheet is completely empty' : undefined,
@@ -387,7 +440,7 @@ export function AdminImportPage() {
       // 1. Client-side syntactic & semantic validation
       let allRows: ValidatedRow[] = [];
       parsedFiles.forEach((f) => {
-        if (f.status === 'PARSED') {
+        if (f.status === 'PARSED' && f.isSelectedSheet !== false) {
           const rows = validateParsedFile(f, farms);
           allRows = allRows.concat(rows);
         }
@@ -478,11 +531,32 @@ export function AdminImportPage() {
 
       setImportResult(result);
       setStep(5);
+      // Auto-load history so background state is immediately fresh
+      loadHistory();
     } catch (err: any) {
       console.error('[handleExecuteImport] Error:', err);
       setImportError(err.message || 'Import execution failed');
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleRetrySaveBatchRecord = async () => {
+    if (!importResult?.rawBatchRecord) return;
+    setRetryingSaveHistory(true);
+    try {
+      await saveImportBatchRecord(importResult.rawBatchRecord);
+      setImportResult((prev: any) => ({
+        ...prev,
+        historyWriteFailed: false,
+        historyWriteError: undefined,
+      }));
+      await loadHistory();
+      alert('Import batch record saved successfully to Import History!');
+    } catch (err: any) {
+      alert(`Retry failed: ${err.message}`);
+    } finally {
+      setRetryingSaveHistory(false);
     }
   };
 
@@ -848,35 +922,89 @@ export function AdminImportPage() {
                         </div>
                       )}
 
-                      {file.formulaWarningsCount && file.formulaWarningsCount > 0 ? (
+                      {/* Formula status notification */}
+                      {file.totalFormulaCount && file.totalFormulaCount > 0 ? (
+                        <div className="alert alert--info" style={{ marginBottom: 12, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Info size={16} />
+                          <span>
+                            Detected <strong>{file.totalFormulaCount}</strong> formula cell{file.totalFormulaCount > 1 ? 's' : ''}. Cached calculated values will be imported.
+                          </span>
+                        </div>
+                      ) : file.formulaWarningsCount && file.formulaWarningsCount > 0 ? (
                         <div className="alert alert--info" style={{ marginBottom: 12, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8 }}>
                           <Info size={16} />
                           <span>Detected {file.formulaWarningsCount} formula cells. Cached calculated values will be imported.</span>
                         </div>
                       ) : null}
 
+                      {file.formulaErrorCount && file.formulaErrorCount > 0 ? (
+                        <div className="alert alert--warn" style={{ marginBottom: 12, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <AlertTriangle size={16} />
+                          <span>
+                            <strong>{file.formulaErrorCount}</strong> formula cell{file.formulaErrorCount > 1 ? 's' : ''} have calculation errors in Excel (e.g. <code>#DIV/0!</code>) and will be safely omitted.
+                          </span>
+                        </div>
+                      ) : null}
+
+                      {/* Ignored non-data rows notice */}
+                      {file.ignoredNonDataRows && file.ignoredNonDataRows.length > 0 && (
+                        <div className="alert alert--info" style={{ marginBottom: 12, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Info size={16} />
+                          <span>
+                            Filtered out <strong>{file.ignoredNonDataRows.length}</strong> non-data summary/footer row{file.ignoredNonDataRows.length > 1 ? 's' : ''} below the table (e.g. labels: {file.ignoredNonDataRows.map((r) => `"${r.label}"`).join(', ')}).
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Farm Conflict Alert if filename and sheet conflict */}
+                      {file.farmConflict && (
+                        <div className="alert alert--warn" style={{ marginBottom: 12, fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <AlertTriangle size={18} className="text-amber-600" />
+                            <span>
+                              <strong>Farm Conflict Detected:</strong> File name suggests <strong>{file.farmConflict.filenameFarm}</strong>, but worksheet tab is labeled <strong>{file.farmConflict.sheetFarm}</strong>. Assigned to <strong>{file.assignedFarmId}</strong>. You may override below.
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* If file has no Farm column, provide farm assignment fallback */}
                       {!hasFarmColumn && (
-                        <div className="alert alert--warn" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+                        <div
+                          className={`alert ${file.assignedFarmId ? 'alert--info' : 'alert--warn'}`}
+                          style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}
+                        >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             <Building2 size={18} />
                             <span>
-                              <strong>No Farm Column detected:</strong> Please select an existing farm to assign this file's records to:
+                              {file.assignedFarmId ? (
+                                <>
+                                  Target Farm: <strong>{file.assignedFarmId}</strong>{' '}
+                                  {file.sheetName && <span style={{ color: '#64748b' }}>(detected from sheet tab [{file.sheetName}])</span>}
+                                </>
+                              ) : (
+                                <>
+                                  <strong>No Farm Column detected:</strong> Please select an existing farm to assign this file's records to:
+                                </>
+                              )}
                             </span>
                           </div>
-                          <select
-                            value={file.assignedFarmId || ''}
-                            onChange={(e) => handleAssignFarm(file.id, e.target.value)}
-                            className="input-select-sm"
-                            style={{ fontWeight: 600, background: '#fff' }}
-                          >
-                            <option value="">-- Choose Farm --</option>
-                            {farms.map((farm) => (
-                              <option key={farm.farmId} value={farm.farmId}>
-                                {farm.farmId} - {farm.name}
-                              </option>
-                            ))}
-                          </select>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: '0.82rem', color: '#475569' }}>Farm:</span>
+                            <select
+                              value={file.assignedFarmId || ''}
+                              onChange={(e) => handleAssignFarm(file.id, e.target.value)}
+                              className="input-select-sm"
+                              style={{ fontWeight: 600, background: '#fff' }}
+                            >
+                              <option value="">-- Choose Farm --</option>
+                              {farms.map((farm) => (
+                                <option key={farm.farmId} value={farm.farmId}>
+                                  {farm.farmId} - {farm.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       )}
 
@@ -900,7 +1028,11 @@ export function AdminImportPage() {
                                 </td>
                                 <td>
                                   {mapping.mappedField === 'ignore' ? (
-                                    <span className="badge badge--neutral">Ignored</span>
+                                    mapping.confidence === 'AMBIGUOUS' ? (
+                                      <span className="badge badge--warning">Ambiguous (Choose)</span>
+                                    ) : (
+                                      <span className="badge badge--neutral">Ignored</span>
+                                    )
                                   ) : mapping.confidence === 'HIGH' ? (
                                     <span className="badge badge--success">Matched</span>
                                   ) : (
@@ -920,28 +1052,50 @@ export function AdminImportPage() {
                                       <option value="submissionDate">Report Date *</option>
                                       <option value="farmId">Farm ID / Code *</option>
                                       <option value="flockId">Flock / Batch ID</option>
+                                      <option value="weekNumber">Week Number / Age</option>
                                     </optgroup>
-                                    <optgroup label="Bird & Feed">
+                                    <optgroup label="Bird Count & Mortality">
                                       <option value="birdCount">Bird Count (Closing / Total)</option>
-                                      <option value="feedKg">Feed Consumed (Kg)</option>
-                                      <option value="feedGrams">Feed Consumed (Grams)</option>
                                       <option value="mortality">Mortality (Dead Birds)</option>
                                       <option value="culling">Culling (Rejected Birds)</option>
                                     </optgroup>
+                                    <optgroup label="Feed Consumed">
+                                      <option value="feedKg">Feed Consumed (Kg)</option>
+                                      <option value="feedGrams">Feed Consumed Total (Grams)</option>
+                                      <option value="feedGramsPerBird">Feed Consumed (Gms / Bird)</option>
+                                    </optgroup>
                                     <optgroup label="Production & Quality">
                                       <option value="eggsProduced">Eggs Produced</option>
-                                      <option value="selectionEggs">Selection Eggs (Waste)</option>
-                                      <option value="eggWeightAvg">Egg Weight Average (g)</option>
-                                      <option value="bodyWeightAvg">Body Weight Average (g)</option>
+                                      <option value="selectionEggs">Selection Eggs (Graded / Waste)</option>
+                                      <option value="damagedEggs">Damaged / Rejected Eggs</option>
+                                      <option value="floorEggs">Floor Eggs</option>
+                                      <option value="actualProductionPct">Actual Production %</option>
+                                      <option value="standardProductionPct">Standard Production %</option>
+                                    </optgroup>
+                                    <optgroup label="Weights">
+                                      <option value="eggWeightAvg">Average Egg Weight (g)</option>
+                                      <option value="bodyWeightAvg">Average Body Weight (g)</option>
+                                      <option value="eggWeightMin">Egg Weight Min (g)</option>
+                                      <option value="eggWeightMax">Egg Weight Max (g)</option>
+                                      <option value="bodyWeightMin">Body Weight Min (g)</option>
+                                      <option value="bodyWeightMax">Body Weight Max (g)</option>
                                     </optgroup>
                                     <optgroup label="Environment & Notes">
                                       <option value="temperature">Shed Temperature (°C)</option>
+                                      <option value="tempMin">Min Temperature (°C)</option>
+                                      <option value="tempMax">Max Temperature (°C)</option>
                                       <option value="ammoniaPpm">Ammonia (PPM)</option>
                                       <option value="remarks">Remarks / Notes</option>
                                     </optgroup>
                                     <optgroup label="Feed Delivery">
                                       <option value="feedLoadQuantityKg">Feed Delivery Quantity (Kg)</option>
                                       <option value="feedLoadNotes">Feed Delivery Notes</option>
+                                    </optgroup>
+                                    <optgroup label="Flock Setup">
+                                      <option value="flockName">Flock Name</option>
+                                      <option value="initialBirds">Initial Birds</option>
+                                      <option value="startDate">Start Date</option>
+                                      <option value="breedType">Breed Type</option>
                                     </optgroup>
                                   </select>
                                 </td>
@@ -1183,6 +1337,12 @@ export function AdminImportPage() {
                       </tbody>
                     </table>
                   </div>
+                  {parsedFiles.some((f) => f.ignoredNonDataRows && f.ignoredNonDataRows.length > 0) && (
+                    <div style={{ marginTop: 10, fontSize: '0.82rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Info size={14} className="text-slate-500" />
+                      <span>Non-data footer and summary rows (e.g. calculation summaries below data tables) were automatically filtered out.</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Filter and Search Bar */}
@@ -1527,6 +1687,41 @@ export function AdminImportPage() {
                   Batch ID: <code>{importResult.batchId}</code>
                 </p>
 
+                {importResult.historyWriteFailed && (
+                  <div
+                    style={{
+                      background: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      borderRadius: 8,
+                      padding: '16px 20px',
+                      margin: '0 auto 24px',
+                      maxWidth: 650,
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                      <AlertTriangle size={24} style={{ color: '#e11d48', flexShrink: 0, marginTop: 2 }} />
+                      <div style={{ flex: 1 }}>
+                        <h4 style={{ margin: '0 0 4px', color: '#9f1239', fontSize: '0.95rem', fontWeight: 600 }}>
+                          Historical Data Saved, but Import History Audit Record Failed to Write
+                        </h4>
+                        <p style={{ margin: '0 0 10px', fontSize: '0.85rem', color: '#be123c', lineHeight: 1.5 }}>
+                          The {importResult.importedCount} reports were successfully written to Firestore, but saving the batch record to <code>importBatches</code> failed ({importResult.historyWriteError || 'database error'}).
+                          Without this record, this batch will not appear in the Import History tab.
+                        </p>
+                        <button
+                          type="button"
+                          className="btn btn--primary btn--sm"
+                          onClick={handleRetrySaveBatchRecord}
+                          disabled={retryingSaveHistory}
+                        >
+                          {retryingSaveHistory ? 'Saving History...' : 'Retry Saving History Record'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="kpi-grid" style={{ maxWidth: 650, margin: '0 auto 28px' }}>
                   <div className="kpi-card">
                     <span className="kpi-card__title">Records Imported</span>
@@ -1547,6 +1742,117 @@ export function AdminImportPage() {
                     </span>
                   </div>
                 </div>
+
+                {/* Imported Worksheets Breakdown & Targeted Rollback */}
+                {(() => {
+                  const batchWorksheets = getBatchWorksheets(importResult);
+                  if (!batchWorksheets || batchWorksheets.length === 0) return null;
+
+                  const isFullReverted = importResult.revertStatus === 'REVERTED' || batchWorksheets.every((w) => w.status === 'REVERTED');
+
+                  return (
+                    <div
+                      style={{
+                        margin: '0 auto 28px',
+                        maxWidth: 780,
+                        textAlign: 'left',
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 8,
+                        padding: '16px 20px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '0.98rem', color: '#0f172a' }}>
+                            Worksheet Breakdown ({batchWorksheets.length})
+                          </h4>
+                          <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: '#64748b' }}>
+                            Rollback a specific worksheet without affecting other imported sheets in this batch.
+                          </p>
+                        </div>
+                        {!isFullReverted && (
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--outline-danger"
+                            onClick={() => handleOpenRevertModal(importResult)}
+                            style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+                          >
+                            <RotateCcw size={13} />
+                            <span>Revert All Worksheets</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="table-container" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, overflowX: 'auto' }}>
+                        <table className="data-table" style={{ fontSize: '0.84rem' }}>
+                          <thead>
+                            <tr>
+                              <th>Worksheet / Sheet</th>
+                              <th>Farm ID</th>
+                              <th>Date Range</th>
+                              <th>Imported</th>
+                              <th>Status</th>
+                              <th style={{ textAlign: 'right' }}>Rollback Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {batchWorksheets.map((ws) => {
+                              const isWsReverted = ws.status === 'REVERTED' || isFullReverted;
+                              return (
+                                <tr key={ws.worksheetKey}>
+                                  <td style={{ fontWeight: 600 }}>
+                                    <div>{ws.sheetName || ws.worksheetKey}</div>
+                                    {(ws.sourceFile || ws.fileName) && (ws.sourceFile || ws.fileName) !== ws.sheetName && (
+                                      <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 400 }}>{ws.sourceFile || ws.fileName}</div>
+                                    )}
+                                  </td>
+                                  <td className="td-bold">{ws.farmId || '--'}</td>
+                                  <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                                    {ws.dateRange?.minDate && ws.dateRange?.maxDate
+                                      ? `${ws.dateRange.minDate} → ${ws.dateRange.maxDate}`
+                                      : '--'}
+                                  </td>
+                                  <td>
+                                    <span style={{ color: '#15803d', fontWeight: 600 }}>{ws.importedCount}</span>
+                                    {ws.failedCount > 0 && <span style={{ color: '#dc2626', marginLeft: 6 }}>({ws.failedCount} err)</span>}
+                                  </td>
+                                  <td>
+                                    {isWsReverted ? (
+                                      <span className="badge badge--neutral" style={{ fontSize: '0.72rem' }}>Reverted</span>
+                                    ) : ws.status === 'PARTIALLY_REVERTED' ? (
+                                      <span className="badge badge--warning" style={{ fontSize: '0.72rem' }}>Partially Reverted</span>
+                                    ) : ws.failedCount > 0 ? (
+                                      <span className="badge badge--warning" style={{ fontSize: '0.72rem' }}>Partial Errors</span>
+                                    ) : (
+                                      <span className="badge badge--success" style={{ fontSize: '0.72rem' }}>Imported</span>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: 'right' }}>
+                                    {isWsReverted ? (
+                                      <span style={{ fontSize: '0.76rem', color: '#94a3b8', fontStyle: 'italic' }}>Reverted</span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="btn btn--sm btn--outline-danger"
+                                        onClick={() => handleOpenRevertModal(importResult, ws)}
+                                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', fontSize: '0.76rem' }}
+                                        title={`Revert records imported for ${ws.sheetName || ws.worksheetKey} only`}
+                                      >
+                                        <RotateCcw size={12} />
+                                        <span>Revert Worksheet</span>
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
                   <button
@@ -1611,6 +1917,31 @@ export function AdminImportPage() {
 
             {loadingHistory ? (
               <LoadingState message="Loading import history..." />
+            ) : historyError ? (
+              <div
+                style={{
+                  textAlign: 'center',
+                  padding: '36px 20px',
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  borderRadius: 8,
+                  color: '#991b1b',
+                  margin: '16px 0',
+                }}
+              >
+                <AlertTriangle size={36} style={{ margin: '0 auto 10px', color: '#dc2626' }} />
+                <h4 style={{ margin: '0 0 6px', fontSize: '1rem', fontWeight: 600 }}>Failed to Load Import History</h4>
+                <p style={{ margin: '0 0 14px', fontSize: '0.875rem', color: '#b91c1c' }}>{historyError}</p>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={loadHistory}
+                  disabled={loadingHistory}
+                >
+                  <RefreshCw size={14} style={{ marginRight: 6 }} />
+                  Retry Fetching History
+                </button>
+              </div>
             ) : importBatches.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '48px 16px', color: '#64748b' }}>
                 <History size={40} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
@@ -1657,16 +1988,26 @@ export function AdminImportPage() {
                             className={`badge ${
                               batch.revertStatus === 'REVERTED'
                                 ? 'badge--default'
+                                : batch.revertStatus === 'PARTIALLY_REVERTED'
+                                ? 'badge--warning'
                                 : batch.status === 'COMPLETED'
                                 ? 'badge--success'
                                 : batch.status === 'PARTIAL_FAILURE'
                                 ? 'badge--warning'
                                 : 'badge--danger'
                             }`}
-                            style={batch.revertStatus === 'REVERTED' ? { backgroundColor: '#f1f5f9', color: '#64748b' } : undefined}
+                            style={
+                              batch.revertStatus === 'REVERTED'
+                                ? { backgroundColor: '#f1f5f9', color: '#64748b' }
+                                : batch.revertStatus === 'PARTIALLY_REVERTED'
+                                ? { backgroundColor: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' }
+                                : undefined
+                            }
                           >
                             {batch.revertStatus === 'REVERTED'
                               ? 'REVERTED'
+                              : batch.revertStatus === 'PARTIALLY_REVERTED'
+                              ? 'PARTIALLY REVERTED'
                               : batch.revertStatus === 'REVERTING'
                               ? 'REVERTING...'
                               : batch.status}
@@ -1723,10 +2064,10 @@ export function AdminImportPage() {
                                 handleOpenRevertModal(batch);
                               }}
                               style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-                              title="Revert imported data for this batch"
+                              title={batch.revertStatus === 'PARTIALLY_REVERTED' ? 'Revert remaining worksheets in this batch' : 'Revert all records for this batch'}
                             >
                               <RotateCcw size={13} />
-                              <span>Revert</span>
+                              <span>{batch.revertStatus === 'PARTIALLY_REVERTED' ? 'Revert Remaining' : 'Revert All'}</span>
                             </button>
                           )}
 
@@ -1745,6 +2086,107 @@ export function AdminImportPage() {
                               <strong>Affected Farms:</strong> {batch.affectedFarms.join(', ')}
                             </div>
                           )}
+
+                          {/* Worksheets Breakdown & Targeted Rollback */}
+                          {(() => {
+                            const batchSheets = getBatchWorksheets(batch);
+                            if (!batchSheets || batchSheets.length === 0) return null;
+
+                            const isFullBatchReverted = batch.revertStatus === 'REVERTED' || batchSheets.every((w) => w.status === 'REVERTED');
+
+                            return (
+                              <div style={{ margin: '14px 0 16px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                  <strong style={{ fontSize: '0.85rem', color: '#1e293b' }}>
+                                    Worksheets in this Batch ({batchSheets.length}):
+                                  </strong>
+                                  {!isFullBatchReverted && (
+                                    <button
+                                      type="button"
+                                      className="btn btn--sm btn--outline-danger"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleOpenRevertModal(batch);
+                                      }}
+                                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', padding: '2px 8px' }}
+                                    >
+                                      <RotateCcw size={12} />
+                                      <span>Revert All Worksheets</span>
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="table-container" style={{ border: '1px solid #e2e8f0', borderRadius: 6 }}>
+                                  <table className="data-table" style={{ fontSize: '0.82rem' }}>
+                                    <thead>
+                                      <tr>
+                                        <th>Worksheet / Sheet</th>
+                                        <th>Farm ID</th>
+                                        <th>Date Range</th>
+                                        <th>Imported</th>
+                                        <th>Status</th>
+                                        <th style={{ textAlign: 'right' }}>Rollback Action</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {batchSheets.map((ws) => {
+                                        const isWsReverted = ws.status === 'REVERTED' || isFullBatchReverted;
+                                        return (
+                                          <tr key={ws.worksheetKey}>
+                                            <td style={{ fontWeight: 600 }}>
+                                              <div>{ws.sheetName || ws.worksheetKey}</div>
+                                              {(ws.sourceFile || ws.fileName) && (ws.sourceFile || ws.fileName) !== ws.sheetName && (
+                                                <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 400 }}>{ws.sourceFile || ws.fileName}</div>
+                                              )}
+                                            </td>
+                                            <td className="td-bold">{ws.farmId || '--'}</td>
+                                            <td style={{ fontFamily: 'monospace', fontSize: '0.78rem' }}>
+                                              {ws.dateRange?.minDate && ws.dateRange?.maxDate
+                                                ? `${ws.dateRange.minDate} → ${ws.dateRange.maxDate}`
+                                                : '--'}
+                                            </td>
+                                            <td>
+                                              <span style={{ color: '#15803d', fontWeight: 600 }}>{ws.importedCount}</span>
+                                              {ws.failedCount > 0 && <span style={{ color: '#dc2626', marginLeft: 6 }}>({ws.failedCount} err)</span>}
+                                            </td>
+                                            <td>
+                                              {isWsReverted ? (
+                                                <span className="badge badge--neutral" style={{ fontSize: '0.72rem' }}>Reverted</span>
+                                              ) : ws.status === 'PARTIALLY_REVERTED' ? (
+                                                <span className="badge badge--warning" style={{ fontSize: '0.72rem' }}>Partially Reverted</span>
+                                              ) : ws.failedCount > 0 ? (
+                                                <span className="badge badge--warning" style={{ fontSize: '0.72rem' }}>Partial Errors</span>
+                                              ) : (
+                                                <span className="badge badge--success" style={{ fontSize: '0.72rem' }}>Imported</span>
+                                              )}
+                                            </td>
+                                            <td style={{ textAlign: 'right' }}>
+                                              {isWsReverted ? (
+                                                <span style={{ fontSize: '0.75rem', color: '#94a3b8', fontStyle: 'italic' }}>Reverted</span>
+                                              ) : (
+                                                <button
+                                                  type="button"
+                                                  className="btn btn--sm btn--outline-danger"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleOpenRevertModal(batch, ws);
+                                                  }}
+                                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', fontSize: '0.75rem' }}
+                                                  title={`Revert records for ${ws.sheetName || ws.worksheetKey} only`}
+                                                >
+                                                  <RotateCcw size={11} />
+                                                  <span>Revert Worksheet</span>
+                                                </button>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           <div style={{ fontSize: '0.85rem', color: '#475569', marginBottom: 12 }}>
                             <strong>Conflict Resolution Chosen:</strong> {batch.conflictActionChosen || 'skip'}
@@ -1976,10 +2418,20 @@ export function AdminImportPage() {
                   <RotateCcw size={22} />
                 </div>
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#0f172a' }}>Revert Imported Data?</h3>
-                  <p style={{ margin: '2px 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-                    Batch ID: <code>{revertModalBatch.batchId}</code>
-                  </p>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem', color: '#0f172a' }}>
+                    {revertTargetWorksheet
+                      ? `Revert Worksheet: ${revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey}`
+                      : 'Revert Entire Import Batch?'}
+                  </h3>
+                  {revertTargetWorksheet ? (
+                    <p style={{ margin: '2px 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                      File: <strong>{revertTargetWorksheet.sourceFile || revertTargetWorksheet.fileName}</strong> • Farm: <strong>{revertTargetWorksheet.farmId}</strong> • Batch: <code>{revertModalBatch.batchId}</code>
+                    </p>
+                  ) : (
+                    <p style={{ margin: '2px 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                      Batch ID: <code>{revertModalBatch.batchId}</code> • Total Worksheets: <strong>{revertModalBatch.worksheets?.length || revertModalBatch.filenames?.length || 1}</strong>
+                    </p>
+                  )}
                 </div>
               </div>
               <button
@@ -2011,10 +2463,12 @@ export function AdminImportPage() {
                   <CheckCircle2 size={32} />
                 </div>
                 <h4 style={{ margin: '0 0 8px', fontSize: '1.2rem', color: '#0f172a' }}>
-                  Batch Successfully Reverted
+                  {revertTargetWorksheet ? 'Worksheet Successfully Reverted' : 'Batch Successfully Reverted'}
                 </h4>
                 <p style={{ color: '#475569', fontSize: '0.9rem', marginBottom: 20 }}>
-                  The records imported in batch <code>{revertModalBatch.batchId}</code> have been safely rolled back.
+                  {revertTargetWorksheet
+                    ? `The records imported from worksheet '${revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey}' have been safely rolled back.`
+                    : `The records imported in batch ${revertModalBatch.batchId} have been safely rolled back.`}
                 </p>
 
                 <div className="kpi-grid" style={{ marginBottom: 24 }}>
@@ -2046,26 +2500,51 @@ export function AdminImportPage() {
             ) : (
               <>
                 {/* Prominent Warning Callout */}
-                <div
-                  style={{
-                    backgroundColor: '#fff1f2',
-                    border: '1px solid #fecdd3',
-                    borderRadius: '8px',
-                    padding: '14px 16px',
-                    marginBottom: 20,
-                    display: 'flex',
-                    gap: 12,
-                    alignItems: 'flex-start',
-                  }}
-                >
-                  <AlertTriangle size={22} className="text-rose-600" style={{ flexShrink: 0, marginTop: 2 }} />
-                  <div style={{ fontSize: '0.88rem', color: '#881337', lineHeight: 1.5 }}>
-                    <strong>Caution: You are about to permanently revert this batch.</strong>
-                    <div style={{ marginTop: 4 }}>
-                      This action will delete daily reports, logs, and lock records created by this batch, and will restore original pre-import records if they were overwritten. This operation cannot be undone. Live physical farm balances (current bird population and feed inventory) will remain intact.
+                {revertTargetWorksheet ? (
+                  <div
+                    style={{
+                      backgroundColor: '#fff7ed',
+                      border: '1px solid #fed7aa',
+                      borderRadius: '8px',
+                      padding: '14px 16px',
+                      marginBottom: 20,
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'flex-start',
+                    }}
+                  >
+                    <AlertTriangle size={22} className="text-amber-600" style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ fontSize: '0.88rem', color: '#9a3412', lineHeight: 1.5 }}>
+                      <strong>Caution: Targeted Worksheet Rollback.</strong>
+                      <div style={{ marginTop: 4 }}>
+                        This action will undo daily reports, logs, and lock records imported <strong>ONLY</strong> from worksheet{' '}
+                        <strong>"{revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey}"</strong> for farm{' '}
+                        <strong>{revertTargetWorksheet.farmId}</strong>. All other worksheets in batch <code>{revertModalBatch.batchId}</code> will remain completely intact in Firestore.
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : (
+                  <div
+                    style={{
+                      backgroundColor: '#fff1f2',
+                      border: '1px solid #fecdd3',
+                      borderRadius: '8px',
+                      padding: '14px 16px',
+                      marginBottom: 20,
+                      display: 'flex',
+                      gap: 12,
+                      alignItems: 'flex-start',
+                    }}
+                  >
+                    <AlertTriangle size={22} className="text-rose-600" style={{ flexShrink: 0, marginTop: 2 }} />
+                    <div style={{ fontSize: '0.88rem', color: '#881337', lineHeight: 1.5 }}>
+                      <strong>Caution: You are about to permanently revert this ENTIRE batch.</strong>
+                      <div style={{ marginTop: 4 }}>
+                        This action will delete daily reports, logs, and lock records created across all worksheets in this batch, and will restore original pre-import records if they were overwritten. This operation cannot be undone. Live physical farm balances (current bird population and feed inventory) will remain intact.
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Loading Revert Preview */}
                 {loadingRevertPreview ? (
@@ -2087,7 +2566,7 @@ export function AdminImportPage() {
                       }}
                     >
                       <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Total Imported</div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Total in Scope</div>
                         <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0f172a' }}>
                           {revertPreview.totalImported}
                         </div>
@@ -2213,57 +2692,73 @@ export function AdminImportPage() {
                     )}
 
                     {/* Revert Form Inputs (Only enabled if reversible) */}
-                    {revertPreview.isReversible && (
-                      <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
-                        {/* Acknowledgment Checkbox */}
-                        <label
-                          style={{
-                            display: 'flex',
-                            alignItems: 'flex-start',
-                            gap: 10,
-                            cursor: 'pointer',
-                            marginBottom: 16,
-                            fontSize: '0.88rem',
-                            color: '#334155',
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={revertAckChecked}
-                            onChange={(e) => setRevertAckChecked(e.target.checked)}
-                            disabled={revertingBatch}
-                            style={{ marginTop: 3 }}
-                          />
-                          <span>
-                            I understand that reverting this batch will permanently remove imported records and restore pre-import data where applicable.
-                          </span>
-                        </label>
+                    {revertPreview.isReversible && (() => {
+                      const expectedConfirmation = revertTargetWorksheet
+                        ? (revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey).trim()
+                        : revertModalBatch.batchId.trim();
 
-                        {/* Confirmation Phrase Input */}
-                        <div style={{ marginBottom: 16 }}>
-                          <label style={{ display: 'block', fontSize: '0.85rem', color: '#475569', marginBottom: 6 }}>
-                            To confirm, type the exact batch ID{' '}
-                            <strong style={{ color: '#0f172a' }}>{revertModalBatch.batchId}</strong> below:
-                          </label>
-                          <input
-                            type="text"
-                            className="input"
-                            value={revertConfirmationInput}
-                            onChange={(e) => setRevertConfirmationInput(e.target.value)}
-                            placeholder={revertModalBatch.batchId}
-                            disabled={revertingBatch}
+                      return (
+                        <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
+                          {/* Acknowledgment Checkbox */}
+                          <label
                             style={{
-                              fontFamily: 'monospace',
-                              fontWeight: 600,
-                              borderColor:
-                                revertConfirmationInput && revertConfirmationInput.trim() !== revertModalBatch.batchId
-                                  ? '#f87171'
-                                  : undefined,
+                              display: 'flex',
+                              alignItems: 'flex-start',
+                              gap: 10,
+                              cursor: 'pointer',
+                              marginBottom: 16,
+                              fontSize: '0.88rem',
+                              color: '#334155',
                             }}
-                          />
+                          >
+                            <input
+                              type="checkbox"
+                              checked={revertAckChecked}
+                              onChange={(e) => setRevertAckChecked(e.target.checked)}
+                              disabled={revertingBatch}
+                              style={{ marginTop: 3 }}
+                            />
+                            <span>
+                              {revertTargetWorksheet
+                                ? `I understand that reverting this worksheet will remove its imported records without modifying records from other worksheets in batch ${revertModalBatch.batchId}.`
+                                : 'I understand that reverting this batch will permanently remove imported records across all worksheets and restore pre-import data where applicable.'}
+                            </span>
+                          </label>
+
+                          {/* Confirmation Phrase Input */}
+                          <div style={{ marginBottom: 16 }}>
+                            <label style={{ display: 'block', fontSize: '0.85rem', color: '#475569', marginBottom: 6 }}>
+                              {revertTargetWorksheet ? (
+                                <span>
+                                  To confirm worksheet rollback, type the worksheet name <strong style={{ color: '#0f172a' }}>{expectedConfirmation}</strong> below:
+                                </span>
+                              ) : (
+                                <span>
+                                  To confirm full batch rollback, type the exact batch ID <strong style={{ color: '#0f172a' }}>{expectedConfirmation}</strong> below:
+                                </span>
+                              )}
+                            </label>
+                            <input
+                              type="text"
+                              className="input"
+                              value={revertConfirmationInput}
+                              onChange={(e) => setRevertConfirmationInput(e.target.value)}
+                              placeholder={expectedConfirmation}
+                              disabled={revertingBatch}
+                              style={{
+                                fontFamily: 'monospace',
+                                fontWeight: 600,
+                                borderColor:
+                                  revertConfirmationInput &&
+                                  revertConfirmationInput.trim().toUpperCase() !== expectedConfirmation.toUpperCase()
+                                    ? '#f87171'
+                                    : undefined,
+                              }}
+                            />
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </>
                 ) : null}
 
@@ -2279,43 +2774,57 @@ export function AdminImportPage() {
                   <div style={{ margin: '16px 0', padding: 12, background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem', color: '#0f172a' }}>
                       <RefreshCw className="animate-spin text-rose-600" size={16} />
-                      <span>Reverting batch records and restoring documents... Please wait.</span>
+                      <span>Reverting records and restoring documents... Please wait.</span>
                     </div>
                   </div>
                 )}
 
                 {/* Modal Action Buttons */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24, borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    onClick={handleCloseRevertModal}
-                    disabled={revertingBatch}
-                  >
-                    Cancel
-                  </button>
+                {(() => {
+                  const expectedConfirmation = revertTargetWorksheet
+                    ? (revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey).trim()
+                    : revertModalBatch.batchId.trim();
 
-                  <button
-                    type="button"
-                    className="btn btn--danger"
-                    onClick={handleExecuteRevert}
-                    disabled={
-                      revertingBatch ||
-                      !revertAckChecked ||
-                      revertConfirmationInput.trim() !== revertModalBatch.batchId ||
-                      loadingRevertPreview ||
-                      !revertPreview?.isReversible
-                    }
-                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                  >
-                    {revertingBatch ? (
-                      <RefreshCw className="animate-spin" size={16} />
-                    ) : (
-                      <RotateCcw size={16} />
-                    )}
-                    <span>{revertingBatch ? 'Reverting...' : 'Confirm & Revert Batch'}</span>
-                  </button>
-                </div>
+                  return (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24, borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        onClick={handleCloseRevertModal}
+                        disabled={revertingBatch}
+                      >
+                        Cancel
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn--danger"
+                        onClick={handleExecuteRevert}
+                        disabled={
+                          revertingBatch ||
+                          !revertAckChecked ||
+                          revertConfirmationInput.trim().toUpperCase() !== expectedConfirmation.toUpperCase() ||
+                          loadingRevertPreview ||
+                          !revertPreview?.isReversible
+                        }
+                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                      >
+                        {revertingBatch ? (
+                          <RefreshCw className="animate-spin" size={16} />
+                        ) : (
+                          <RotateCcw size={16} />
+                        )}
+                        <span>
+                          {revertingBatch
+                            ? 'Reverting...'
+                            : revertTargetWorksheet
+                            ? 'Confirm & Revert Worksheet'
+                            : 'Confirm & Revert Batch'}
+                        </span>
+                      </button>
+                    </div>
+                  );
+                })()}
               </>
             )}
           </div>

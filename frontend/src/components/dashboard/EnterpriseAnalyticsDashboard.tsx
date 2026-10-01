@@ -22,7 +22,10 @@ import {
   calcFeedPerBird,
   calcAverage,
   calcPerformanceScore,
+  evaluateFarmHealth,
+  getEligibleBirdCount,
 } from '../../utils/kpiCalculations';
+import { KPI_THRESHOLDS } from '../../config/kpiThresholds';
 import { getStandardProductionAtAge } from '../../data/productionCurves';
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, AreaChart, Area,
@@ -359,17 +362,34 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
       const farmObj = activeFarms.find((f) => f.farmId?.trim().toUpperCase() === r.farmId?.trim().toUpperCase());
       const farmLabel = farmObj?.name ? `Farm ${r.farmId} (${farmObj.name})` : `Farm ${r.farmId || 'Unknown'}`;
 
-      const base = r.openingBirdCount || r.birdCount;
-      const mortPct = base > 0 ? calcMortalityRate(r.mortality ?? 0, base) : 0;
+      const base = getEligibleBirdCount(r);
+      const mort = Number(r.mortality) || 0;
+      const mortPct = base > 0 ? calcMortalityRate(mort, base) : 0;
       const prodPct = base > 0 ? calcProductionRate(r.eggsProduced ?? 0, base) : 0;
       const selectPct = calcSelectionRate(r.selectionEggs ?? 0, r.eggsProduced ?? 0);
 
-      if (mortPct > 2.0) {
+      if (base > 0 && mort >= base) {
         list.push({
-          id: `mort_${r.farmId}`,
+          id: `mort_disaster_${r.farmId}`,
           type: 'critical',
-          title: `High Daily Mortality Alert`,
-          desc: `${farmLabel} recorded ${r.mortality} dead birds (${mortPct}% mortality rate).`,
+          title: `TOTAL FLOCK MORTALITY DISASTER`,
+          desc: `${farmLabel} reported 100% loss of the entire eligible flock (${mort.toLocaleString()} dead birds). Immediate operational intervention required.`,
+          farmId: r.farmId,
+        });
+      } else if (mortPct >= (KPI_THRESHOLDS.mortalityRateCritical ?? 10)) {
+        list.push({
+          id: `mort_crit_${r.farmId}`,
+          type: 'critical',
+          title: `CRITICAL Mortality Alert (${mortPct}%)`,
+          desc: `${farmLabel} recorded ${mort} dead birds (${mortPct}% mortality rate, exceeding critical threshold).`,
+          farmId: r.farmId,
+        });
+      } else if (mortPct >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5)) {
+        list.push({
+          id: `mort_warn_${r.farmId}`,
+          type: 'warning',
+          title: `High Daily Mortality Alert (${mortPct}%)`,
+          desc: `${farmLabel} recorded ${mort} dead birds (${mortPct}% mortality rate).`,
           farmId: r.farmId,
         });
       }
@@ -412,56 +432,28 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
       const farmTodayRep = todayReports.find((r) => r.farmId === farm.farmId);
       const liveBirds = farmInventories.get(farm.farmId)?.currentBirdCount || farmTodayRep?.closingBirdCount || (farm as any).currentBirds || 0;
 
-      const pRate = farmReps.length > 0
-        ? calcAverage(farmReps.map((r) => { const b = r.openingBirdCount || r.birdCount; return b > 0 ? calcProductionRate(r.eggsProduced ?? 0, b) : null; }))
-        : 0;
-      const mRate = farmReps.length > 0
-        ? calcAverage(farmReps.map((r) => { const b = r.openingBirdCount || r.birdCount; return b > 0 ? calcMortalityRate(r.mortality ?? 0, b) : null; }))
-        : 0;
-      const fGrams = farmReps.length > 0
-        ? calcAverage(farmReps.map((r) => { const b = r.openingBirdCount || r.birdCount; return b > 0 ? (r.feedKg * 1000) / b : null; }))
-        : 0;
-      const sRate = farmReps.length > 0
-        ? calcAverage(farmReps.map((r) => calcSelectionRate(r.selectionEggs ?? 0, r.eggsProduced ?? 0)))
-        : 0;
-      const compliance = farmReps.length > 0 ? Math.min(100, Math.round((farmReps.length / days) * 100)) : 0;
-
-      const score = calcPerformanceScore({
-        productionRate: pRate,
-        mortalityRate: mRate,
-        feedPerBird: fGrams,
-        submissionCompliance: compliance,
+      const health = evaluateFarmHealth({
+        reports: farmReps,
+        days,
+        liveBirds,
       });
-
-      let statusLabel: 'EXCELLENT' | 'HEALTHY' | 'NEEDS ATTENTION' | 'CRITICAL' = 'HEALTHY';
-      let statusColor = '#15803d';
-
-      if (score.total >= 80) {
-        statusLabel = 'EXCELLENT';
-        statusColor = '#15803d';
-      } else if (score.total >= 65) {
-        statusLabel = 'HEALTHY';
-        statusColor = '#059669';
-      } else if (score.total >= 50) {
-        statusLabel = 'NEEDS ATTENTION';
-        statusColor = '#d97706';
-      } else {
-        statusLabel = 'CRITICAL';
-        statusColor = '#dc2626';
-      }
 
       return {
         farmId: farm.farmId,
         name: farm.name || `Farm ${farm.farmId}`,
         liveBirds,
-        pRate,
-        mRate,
-        fGrams,
-        sRate,
-        compliance,
-        score: score.total,
-        statusLabel,
-        statusColor,
+        pRate: health.productionRate,
+        mRate: health.mortalityRate,
+        fGrams: health.feedGramsPerBird,
+        sRate: health.selectionRate,
+        compliance: health.compliance,
+        score: health.score,
+        statusLabel: health.statusLabel,
+        statusColor: health.statusColor,
+        isCritical: health.isCritical,
+        isInvalid: health.isInvalid,
+        hasTotalFlockLoss: health.hasTotalFlockLoss,
+        reason: health.reason,
       };
     }).sort((a, b) => b.score - a.score);
   }, [activeFarms, reports, todayReports, farmInventories, days]);
@@ -717,12 +709,27 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
                       <td>{fr.name}</td>
                       <td>{fr.liveBirds.toLocaleString()}</td>
                       <td style={{ fontWeight: 600, color: fr.pRate >= 70 ? '#15803d' : '#d97706' }}>{fr.pRate}%</td>
-                      <td style={{ color: fr.mRate > 2.0 ? '#dc2626' : '#15803d' }}>{fr.mRate}%</td>
+                      <td style={{ color: fr.mRate >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5) ? '#dc2626' : '#15803d', fontWeight: fr.mRate >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5) ? 700 : 400 }}>
+                        {fr.mRate}% {fr.hasTotalFlockLoss ? '(100% LOSS)' : ''}
+                      </td>
                       <td>{fr.fGrams > 0 ? `${fr.fGrams.toFixed(0)} g` : '--'}</td>
                       <td>{fr.sRate > 0 ? `${fr.sRate}%` : '--'}</td>
                       <td>{fr.compliance}%</td>
                       <td>
-                        <span className="ent-status-tag" style={{ background: `${fr.statusColor}15`, color: fr.statusColor, border: `1px solid ${fr.statusColor}40` }}>
+                        <span
+                          className="ent-status-tag"
+                          style={{
+                            background: `${fr.statusColor}15`,
+                            color: fr.statusColor,
+                            border: `1px solid ${fr.statusColor}40`,
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                          title={fr.reason}
+                        >
+                          {fr.isCritical && <AlertTriangle size={12} />}
                           {fr.statusLabel}
                         </span>
                       </td>

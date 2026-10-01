@@ -22,7 +22,9 @@ import { subscribeToFarm, type FarmDoc } from '../services/farmDataService';
 import { LanguageSelector } from '../components/LanguageSelector';
 import { ReportStatusModal } from '../components/ReportStatusModal';
 import { OverwriteConfirmationModal } from '../components/OverwriteConfirmationModal';
-import { Calendar, Check, Home, Lock, LogOut } from 'lucide-react';
+import { TotalMortalityConfirmationModal } from '../components/TotalMortalityConfirmationModal';
+import { Calendar, Check, Home, Lock, LogOut, AlertTriangle } from 'lucide-react';
+import { KPI_THRESHOLDS } from '../config/kpiThresholds';
 import {
   FarmFormData,
   INITIAL_FARM_FORM_DATA,
@@ -125,12 +127,12 @@ function VerifyScreen({
       </VerifyCard>
 
       <VerifyCard title={t('farmer.mortality')} onEdit={() => onEdit(0)} t={t}>
-        <VerifyRow label={t('farmer.count')} value={data.mortality} />
+        <VerifyRow label={t('farmer.count')} value={data.mortality || '0'} />
         <VerifyRow label={t('farmer.rate')} value={`${mortalityPct}%`} />
       </VerifyCard>
 
       <VerifyCard title={t('farmer.culling')} onEdit={() => onEdit(0)} t={t}>
-        <VerifyRow label={t('farmer.count')} value={data.culling} />
+        <VerifyRow label={t('farmer.count')} value={data.culling || '0'} />
         <VerifyRow label={t('farmer.rate')} value={`${cullingPct}%`} />
       </VerifyCard>
 
@@ -262,14 +264,17 @@ function DateSelectionOverlay({
       <div className="date-popover-options">
         {allowedOptions.map((option) => {
           const isSelected = option.isoDate === selectedDate;
-          const labelText = t(option.labelKey, option.key === 'yesterday' ? 'Yesterday' : option.key === 'today' ? 'Today' : 'Tomorrow');
+          const labelText = t(option.labelKey, option.key === 'yesterday' ? 'Yesterday' : 'Today');
 
           return (
             <button
               key={option.isoDate}
               type="button"
               className={`date-option-card ${isSelected ? 'selected' : ''}`}
-              onClick={() => onSelectDate(option.isoDate)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSelectDate(option.isoDate);
+              }}
             >
               <div className="date-option-left">
                 <span className="date-option-label">{labelText}</span>
@@ -332,7 +337,7 @@ export function FarmerFormPage() {
   const [submitted, setSubmitted] = useState(false);
   const [submittedOffline, setSubmittedOffline] = useState(false);
   const [submitError, setSubmitError] = useState('');
-  
+
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
@@ -341,8 +346,27 @@ export function FarmerFormPage() {
   const [todayReport, setTodayReport] = useState<any | null>(null);
   const [showStatusModal, setShowStatusModal] = useState<boolean>(false);
   const [hasDismissedModal, setHasDismissedModal] = useState<boolean>(false);
+  const [showTotalMortalityModal, setShowTotalMortalityModal] = useState<boolean>(false);
+  const [totalMortalityConfirmed, setTotalMortalityConfirmed] = useState<boolean>(false);
   const [weeklyMetrics, setWeeklyMetrics] = useState<WeeklyMetricsDoc | null>(null);
   const [isEditingWeekly, setIsEditingWeekly] = useState<boolean>(false);
+
+  // When reportDate changes, reset form to empty defaults so newly opened reports never show stale/zero values
+  useEffect(() => {
+    setTodayReport(null);
+    setData((prev) => ({
+      ...INITIAL_FARM_FORM_DATA,
+      flockId: prev.flockId,
+      birdCount: prev.birdCount,
+    }));
+    setStep(0);
+    setErrors({});
+    setSubmitted(false);
+    setSubmittedOffline(false);
+    setSubmitError('');
+    setHasDismissedModal(false);
+    setIsEditingWeekly(false);
+  }, [reportDate]);
 
   useEffect(() => {
     if (todayReport && (todayReport.submissionVersion != null || todayReport.status) && !hasDismissedModal) {
@@ -350,9 +374,18 @@ export function FarmerFormPage() {
     }
   }, [todayReport?.submissionVersion, todayReport?.status, hasDismissedModal]);
 
-  const farmId = userProfile?.farmIds?.[0] ?? '';
+  const farmId = userProfile?.farmIds?.[0] ?? (userProfile as any)?.farmId ?? (userProfile as any)?.farmID ?? '';
   const userName = userProfile?.name || firebaseUser?.displayName || 'Farmer';
-  const birdCount = Number(data.birdCount) || 0;
+  const birdCount =
+    Number(data.birdCount) ||
+    todayReport?.openingBirdCount ||
+    todayReport?.birdCount ||
+    farmDoc?.currentBirdCount ||
+    farmDoc?.currentBirds ||
+    farmDoc?.initialBirdCount ||
+    flocks[0]?.currentBirds ||
+    flocks[0]?.initialBirds ||
+    0;
 
   // Authoritative Report-Week Calculation from authenticated farmer's users document createdat
   const isLoadingUser = authLoading || !userProfile;
@@ -391,24 +424,24 @@ export function FarmerFormPage() {
     const effectiveFlockId = data.flockId || flocks[0]?.flockId || `${farmId}_FL01`;
     const unsub = subscribeToTodayReport(userProfile.uid, effectiveFlockId, reportDate, (rep) => {
       setTodayReport(rep);
-      if (rep) {
+      if (rep && (rep.submissionVersion != null || rep.status === 'submitted' || rep.status === 'corrected')) {
         setData((prev) => ({
           ...prev,
           flockId: rep.flockId || prev.flockId,
           birdCount: String(rep.openingBirdCount ?? rep.birdCount ?? prev.birdCount),
-          feedQuantity: String(rep.feedKg ?? prev.feedQuantity),
-          mortality: String(rep.mortality ?? prev.mortality),
-          culling: String(rep.culling ?? prev.culling),
-          eggsProduced: String(rep.eggsProduced ?? prev.eggsProduced),
-          selectionEggs: String(rep.selectionEggs ?? prev.selectionEggs),
+          feedQuantity: rep.feedKg != null ? String(rep.feedKg) : prev.feedQuantity,
+          mortality: rep.mortality != null ? String(rep.mortality) : prev.mortality,
+          culling: rep.culling != null ? String(rep.culling) : prev.culling,
+          eggsProduced: rep.eggsProduced != null ? String(rep.eggsProduced) : prev.eggsProduced,
+          selectionEggs: rep.selectionEggs != null ? String(rep.selectionEggs) : prev.selectionEggs,
           damagedEggs: rep.damagedEggs != null ? String(rep.damagedEggs) : prev.damagedEggs,
           floorEggs: rep.floorEggs != null ? String(rep.floorEggs) : prev.floorEggs,
-          temperature: String(rep.temperature ?? prev.temperature),
-          tempMin: String(rep.tempMin ?? prev.tempMin ?? ''),
-          tempMax: String(rep.tempMax ?? prev.tempMax ?? ''),
-          eggWeightMin: String(rep.eggWeight?.min ?? prev.eggWeightMin),
-          eggWeightMax: String(rep.eggWeight?.max ?? prev.eggWeightMax),
-          eggWeightAvg: String(rep.eggWeight?.avg ?? prev.eggWeightAvg),
+          temperature: rep.temperature != null ? String(rep.temperature) : prev.temperature,
+          tempMin: rep.tempMin != null ? String(rep.tempMin) : prev.tempMin,
+          tempMax: rep.tempMax != null ? String(rep.tempMax) : prev.tempMax,
+          eggWeightMin: rep.eggWeight?.min != null ? String(rep.eggWeight.min) : prev.eggWeightMin,
+          eggWeightMax: rep.eggWeight?.max != null ? String(rep.eggWeight.max) : prev.eggWeightMax,
+          eggWeightAvg: rep.eggWeight?.avg != null ? String(rep.eggWeight.avg) : prev.eggWeightAvg,
           bodyWeightMin: rep.bodyWeight?.min != null ? String(rep.bodyWeight.min) : prev.bodyWeightMin,
           bodyWeightMax: rep.bodyWeight?.max != null ? String(rep.bodyWeight.max) : prev.bodyWeightMax,
           bodyWeightAvg: rep.bodyWeight?.avg != null ? String(rep.bodyWeight.avg) : prev.bodyWeightAvg,
@@ -513,18 +546,20 @@ export function FarmerFormPage() {
         setData((prev) => ({
           ...prev,
           flockId: prev.flockId || primaryFlock.flockId,
+          birdCount: prev.birdCount || String(primaryFlock.currentBirds ?? primaryFlock.initialBirds ?? ''),
         }));
       }
     });
     const unsubFarm = subscribeToFarm(farmId, (fetchedFarm) => {
       setFarmDoc(fetchedFarm);
-      if (fetchedFarm && fetchedFarm.currentBirdCount != null) {
-        setData((prev) => {
-          if (!prev.birdCount) {
-            return { ...prev, birdCount: String(fetchedFarm.currentBirdCount) };
-          }
-          return prev;
-        });
+      if (fetchedFarm) {
+        const count = fetchedFarm.currentBirdCount ?? fetchedFarm.currentBirds ?? fetchedFarm.initialBirdCount;
+        if (count != null) {
+          setData((prev) => ({
+            ...prev,
+            birdCount: prev.birdCount || String(count),
+          }));
+        }
       }
     });
     return () => {
@@ -573,6 +608,8 @@ export function FarmerFormPage() {
         const max = Number(maxStr);
         if (minStr !== '' && maxStr !== '' && !isNaN(min) && !isNaN(max) && min >= 0 && max >= 0 && min <= max) {
           updated.eggWeightAvg = String(Number(((min + max) / 2).toFixed(1)));
+        } else {
+          updated.eggWeightAvg = '';
         }
       }
 
@@ -583,6 +620,8 @@ export function FarmerFormPage() {
         const max = Number(maxStr);
         if (minStr !== '' && maxStr !== '' && !isNaN(min) && !isNaN(max) && min >= 0 && max >= 0 && min <= max) {
           updated.bodyWeightAvg = String(Number(((min + max) / 2).toFixed(1)));
+        } else {
+          updated.bodyWeightAvg = '';
         }
       }
 
@@ -594,8 +633,41 @@ export function FarmerFormPage() {
       delete next[field];
       delete next.eggWeightAvg;
       delete next.bodyWeightAvg;
+
+      if (field === 'eggsProduced' || field === 'selectionEggs' || field === 'damagedEggs') {
+        const epVal = field === 'eggsProduced' ? value : data.eggsProduced;
+        const seVal = field === 'selectionEggs' ? value : data.selectionEggs;
+        const deVal = field === 'damagedEggs' ? value : data.damagedEggs;
+
+        const ep = Number(epVal);
+        const se = seVal !== '' ? Number(seVal) : 0;
+        const de = deVal !== '' ? Number(deVal) : 0;
+
+        if (epVal !== '' && !isNaN(ep) && !isNaN(se) && !isNaN(de)) {
+          if (se > ep && ep >= 0) {
+            next.selectionEggs = t('validation.exceedsEggsProduced', 'Cannot exceed eggs produced');
+          } else if (se + de > ep) {
+            next.selectionEggs = t('validation.selectionDamagedExceeds', 'Selection + Damaged eggs cannot exceed Egg Production');
+            if (deVal !== '') {
+              next.damagedEggs = t('validation.selectionDamagedExceeds', 'Selection + Damaged eggs cannot exceed Egg Production');
+            }
+          } else {
+            if (next.selectionEggs && (next.selectionEggs.includes('cannot exceed Egg Production') || next.selectionEggs.includes('Cannot exceed eggs produced'))) {
+              delete next.selectionEggs;
+            }
+            if (next.damagedEggs && next.damagedEggs.includes('cannot exceed Egg Production')) {
+              delete next.damagedEggs;
+            }
+          }
+        }
+      }
+
       return next;
     });
+
+    if (field === 'mortality') {
+      setTotalMortalityConfirmed(false);
+    }
   };
 
   const handleNext = () => {
@@ -607,8 +679,6 @@ export function FarmerFormPage() {
       ...data,
       flockId: effectiveFlockId,
       birdCount: data.birdCount || String(effectiveBirdCount || ''),
-      mortality: data.mortality === '' ? '0' : data.mortality,
-      culling: data.culling === '' ? '0' : data.culling,
       temperature: String(avgTemp || data.temperature || ''),
     };
 
@@ -641,6 +711,13 @@ export function FarmerFormPage() {
   const handleSubmit = async () => {
     if (submitting || submitted) return;
 
+    // Phase 2: Serious Mortality Check (100% flock loss)
+    const enteredMortality = Number(data.mortality) || 0;
+    if (birdCount > 0 && enteredMortality === birdCount && !totalMortalityConfirmed) {
+      setShowTotalMortalityModal(true);
+      return;
+    }
+
     const hasExistingReport =
       todayReport &&
       (todayReport.submissionVersion >= 1 ||
@@ -655,6 +732,29 @@ export function FarmerFormPage() {
     await executeSubmission();
   };
 
+  const handleConfirmTotalMortality = async () => {
+    setShowTotalMortalityModal(false);
+    setTotalMortalityConfirmed(true);
+
+    const hasExistingReport =
+      todayReport &&
+      (todayReport.submissionVersion >= 1 ||
+        todayReport.status === 'submitted' ||
+        todayReport.status === 'corrected');
+
+    if (hasExistingReport) {
+      setShowOverwriteModal(true);
+      return;
+    }
+
+    await executeSubmission();
+  };
+
+  const handleCancelTotalMortality = () => {
+    setShowTotalMortalityModal(false);
+    setTotalMortalityConfirmed(false);
+  };
+
   const executeSubmission = async () => {
     setShowOverwriteModal(false);
     setSubmitting(true);
@@ -666,31 +766,37 @@ export function FarmerFormPage() {
         return;
       }
 
+      if (!allowedIsoDates.includes(reportDate)) {
+        setSubmitError(t('farmer.invalidDateError', 'Invalid report date. Only Today and Yesterday are allowed for daily reporting.'));
+        setSubmitting(false);
+        return;
+      }
+
       let feedKg = Number(data.feedQuantity) || 0;
       if (data.feedUnit === 'g') {
         feedKg = feedKg / 1000;
       }
-      
+
       const effectiveFlockId = data.flockId || flocks[0]?.flockId || `${farmId}_FL01`;
       const avgTemp = (Number(data.tempMin) + Number(data.tempMax)) / 2;
 
       const hasBw = data.bodyWeightMin !== '' && data.bodyWeightMax !== '';
       const bodyWeightPayload = hasBw
         ? {
-            min: Number(data.bodyWeightMin),
-            max: Number(data.bodyWeightMax),
-            avg:
-              Number(data.bodyWeightAvg) ||
-              Number(
-                (
-                  (Number(data.bodyWeightMin) + Number(data.bodyWeightMax)) /
-                  2
-                ).toFixed(1)
-              ),
-          }
+          min: Number(data.bodyWeightMin),
+          max: Number(data.bodyWeightMax),
+          avg:
+            Number(data.bodyWeightAvg) ||
+            Number(
+              (
+                (Number(data.bodyWeightMin) + Number(data.bodyWeightMax)) /
+                2
+              ).toFixed(1)
+            ),
+        }
         : weeklyMetrics && !isEditingWeekly
-        ? weeklyMetrics.bodyWeight
-        : null;
+          ? weeklyMetrics.bodyWeight
+          : null;
 
       const feedGramsPerBirdVal = calculateFeedGramsPerBird(feedKg, birdCount);
 
@@ -779,10 +885,25 @@ export function FarmerFormPage() {
     await logoutUser();
   };
 
-  const mortalityPct = birdCount > 0 ? ((Number(data.mortality) / birdCount) * 100).toFixed(1) : '0.0';
-  const cullingPct = birdCount > 0 ? ((Number(data.culling) / birdCount) * 100).toFixed(1) : '0.0';
-  const eggProdPct = birdCount > 0 ? ((Number(data.eggsProduced) / birdCount) * 100).toFixed(1) : '0.0';
-  const selectionPct = Number(data.eggsProduced) > 0 ? ((Number(data.selectionEggs) / Number(data.eggsProduced)) * 100).toFixed(1) : '0.0';
+  const mortalityPct =
+    birdCount > 0 && data.mortality !== '' && !isNaN(Number(data.mortality))
+      ? ((Number(data.mortality) / birdCount) * 100).toFixed(1)
+      : '0.0';
+  const cullingPct =
+    birdCount > 0 && data.culling !== '' && !isNaN(Number(data.culling))
+      ? ((Number(data.culling) / birdCount) * 100).toFixed(1)
+      : '0.0';
+  const eggProdPct =
+    birdCount > 0 && data.eggsProduced !== '' && !isNaN(Number(data.eggsProduced))
+      ? ((Number(data.eggsProduced) / birdCount) * 100).toFixed(1)
+      : '0.0';
+  const selectionPct =
+    Number(data.eggsProduced) > 0 &&
+      data.selectionEggs !== '' &&
+      !isNaN(Number(data.selectionEggs)) &&
+      Number(data.selectionEggs) >= 0
+      ? ((Number(data.selectionEggs) / Number(data.eggsProduced)) * 100).toFixed(1)
+      : '0.0';
   const feedKgDisplay = data.feedQuantity ? Number(data.feedQuantity) : 0;
   const feedPerBirdDisplay = calculateFeedGramsPerBird(feedKgDisplay, birdCount);
   const maxEggsAllowed = birdCount > 0 ? Math.floor(birdCount * 0.95) : 0;
@@ -879,8 +1000,22 @@ export function FarmerFormPage() {
     );
   }
 
-  const displayOpeningBirds = todayReport?.openingBirdCount ?? (birdCount > 0 ? birdCount : farmDoc?.currentBirdCount);
-  const displayTotalFeed = todayReport?.openingFeedKg ?? farmDoc?.currentFeedKg;
+  const displayOpeningBirds =
+    todayReport?.openingBirdCount ??
+    todayReport?.birdCount ??
+    (birdCount > 0 ? birdCount : null) ??
+    farmDoc?.currentBirdCount ??
+    farmDoc?.currentBirds ??
+    farmDoc?.initialBirdCount ??
+    flocks[0]?.currentBirds ??
+    flocks[0]?.initialBirds ??
+    null;
+
+  const displayTotalFeed =
+    todayReport?.openingFeedKg ??
+    farmDoc?.currentFeedKg ??
+    farmDoc?.initialFeedKg ??
+    null;
 
   return (
     <div className="dashboard-page">
@@ -929,21 +1064,29 @@ export function FarmerFormPage() {
             <div className="locked-card">
               <div className="locked-card-title">{t('farmer.reportInformation').toUpperCase()}</div>
               <div className="locked-grid">
-                <div className="locked-item" style={{ position: 'relative' }}>
-                  <span className="locked-label">{t('common.date').toUpperCase()}</span>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span className="locked-value">{formatDisplayDate(reportDate)}</span>
-                    <button
-                      type="button"
-                      className="btn-edit-date-compact"
-                      onClick={() => setIsDateOverlayOpen((prev) => !prev)}
-                      aria-expanded={isDateOverlayOpen}
-                      aria-label={t('farmer.changeDate', 'Change date')}
-                    >
-                      <Calendar size={13} />
-                      <span>{t('farmer.changeDate', 'Change date')}</span>
-                    </button>
+                <div
+                  className="locked-item locked-item--interactive"
+                  style={{ position: 'relative' }}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setIsDateOverlayOpen((prev) => !prev)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setIsDateOverlayOpen((prev) => !prev);
+                    }
+                  }}
+                  aria-haspopup="dialog"
+                  aria-expanded={isDateOverlayOpen}
+                  aria-label={t('farmer.selectReportDate', 'Select report date')}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <span className="locked-label">{t('common.date').toUpperCase()}</span>
+                    <span style={{ fontSize: '10px', color: '#059669', fontWeight: 700, lineHeight: 1 }}>
+                      ▼
+                    </span>
                   </div>
+                  <span className="locked-value">{formatDisplayDate(reportDate)}</span>
                   {isDateOverlayOpen && (
                     <DateSelectionOverlay
                       allowedOptions={allowedOptions}
@@ -988,7 +1131,7 @@ export function FarmerFormPage() {
               {step < 3 ? (
                 <>
                   <h3 className="form-section-title">{t(`farmer.step${step + 1}`)}</h3>
-                  
+
                   {step === 0 && (
                     <>
                       <div className="field-row">
@@ -1012,10 +1155,10 @@ export function FarmerFormPage() {
                               data.feedQuantity === ''
                                 ? '--'
                                 : birdCount <= 0 || !Number.isFinite(birdCount)
-                                ? '--'
-                                : Number(data.feedQuantity) < 0 || isNaN(Number(data.feedQuantity))
-                                ? '--'
-                                : `${calculateFeedGramsPerBird(data.feedQuantity, birdCount)} g/bird`
+                                  ? '--'
+                                  : Number(data.feedQuantity) < 0 || isNaN(Number(data.feedQuantity))
+                                    ? '--'
+                                    : `${calculateFeedGramsPerBird(data.feedQuantity, birdCount)} g/bird`
                             }
                             style={{
                               background: '#f1f5f9',
@@ -1027,6 +1170,13 @@ export function FarmerFormPage() {
                           />
                         </Field>
                       </div>
+                      {Number(data.feedQuantity) > 0 && (
+                        <div className="calc-inline">
+                          <span className="calc-inline-label">{t('farmer.equivalentWeight', 'EQUIVALENT WEIGHT')}:</span>
+                          <span className="calc-inline-value">{(Number(data.feedQuantity) * 1000).toLocaleString()} G</span>
+                          <span className="calc-inline-sub">{t('farmer.calculated', 'Calculated automatically')}</span>
+                        </div>
+                      )}
 
                       <Field label={t('farmer.mortality')} error={errors.mortality}>
                         <input
@@ -1040,11 +1190,72 @@ export function FarmerFormPage() {
                           placeholder="e.g. 12"
                         />
                       </Field>
-                      {birdCount > 0 && (
+                      {data.mortality !== '' && (
                         <div className="calc-inline">
-                          <span className="calc-inline-label">{t('farmer.rate')}:</span>
-                          <span className="calc-inline-value">{mortalityPct}%</span>
-                          <span className="calc-inline-sub">{t('farmer.calculated')}</span>
+                          <span className="calc-inline-label">{t('farmer.rate', 'RATE')}:</span>
+                          <span
+                            className="calc-inline-value"
+                            style={{
+                              color: birdCount > 0 && Number(data.mortality) >= birdCount ? '#dc2626' : undefined,
+                              fontWeight: birdCount > 0 && Number(data.mortality) >= birdCount ? 700 : undefined,
+                            }}
+                          >
+                            {birdCount > 0 ? `${mortalityPct}%` : '--'}
+                          </span>
+                          <span className="calc-inline-sub">{t('farmer.calculated', 'Calculated automatically')}</span>
+                        </div>
+                      )}
+
+                      {birdCount > 0 && Number(data.mortality) === birdCount && (
+                        <div
+                          className="alert alert--error"
+                          role="alert"
+                          style={{
+                            marginTop: '8px',
+                            background: '#fef2f2',
+                            color: '#991b1b',
+                            border: '1.5px solid #f87171',
+                            borderRadius: '8px',
+                            padding: '12px 14px',
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: '10px',
+                            fontSize: '13.5px',
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          <AlertTriangle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <div>
+                            <strong style={{ display: 'block', marginBottom: '2px', color: '#b91c1c' }}>
+                              CRITICAL ALERT: Total Flock Loss (100%)
+                            </strong>
+                            Entered mortality ({data.mortality}) equals the total eligible bird count ({birdCount.toLocaleString()}).
+                            This represents the loss of the entire flock. Please verify that this number is correct.
+                          </div>
+                        </div>
+                      )}
+
+                      {birdCount > 0 && Number(data.mortality) < birdCount && Number(mortalityPct) >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5) && (
+                        <div
+                          className="alert"
+                          role="alert"
+                          style={{
+                            marginTop: '8px',
+                            background: '#fffbeb',
+                            color: '#92400e',
+                            border: '1px solid #fcd34d',
+                            borderRadius: '8px',
+                            padding: '10px 12px',
+                            display: 'flex',
+                            alignItems: 'flex-start',
+                            gap: '8px',
+                            fontSize: '13px',
+                          }}
+                        >
+                          <AlertTriangle size={18} color="#d97706" style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <div>
+                            <strong>High Mortality Warning:</strong> Entered mortality represents {mortalityPct}% of the flock (Threshold: {KPI_THRESHOLDS.mortalityRateWarning ?? 5}%). Please verify before submitting.
+                          </div>
                         </div>
                       )}
 
@@ -1060,11 +1271,11 @@ export function FarmerFormPage() {
                           placeholder="e.g. 5"
                         />
                       </Field>
-                      {birdCount > 0 && (
+                      {data.culling !== '' && (
                         <div className="calc-inline">
-                          <span className="calc-inline-label">{t('farmer.rate')}:</span>
-                          <span className="calc-inline-value">{cullingPct}%</span>
-                          <span className="calc-inline-sub">{t('farmer.calculated')}</span>
+                          <span className="calc-inline-label">{t('farmer.rate', 'RATE')}:</span>
+                          <span className="calc-inline-value">{birdCount > 0 ? `${cullingPct}%` : '--'}</span>
+                          <span className="calc-inline-sub">{t('farmer.calculated', 'Calculated automatically')}</span>
                         </div>
                       )}
                     </>
@@ -1097,18 +1308,17 @@ export function FarmerFormPage() {
                           type="number"
                           inputMode="numeric"
                           min="0"
-                          max={Number(data.eggsProduced) || undefined}
                           value={data.selectionEggs}
                           onChange={(e) => handleChange('selectionEggs', e.target.value)}
                           onWheel={(e) => e.currentTarget.blur()}
                           placeholder="e.g. 3800"
                         />
                       </Field>
-                      {Number(data.eggsProduced) > 0 && (
+                      {(data.selectionEggs !== '' || Number(data.eggsProduced) > 0) && (
                         <div className="calc-inline">
-                          <span className="calc-inline-label">{t('farmer.rate')}:</span>
+                          <span className="calc-inline-label">{t('farmer.selectionRate', 'Selection Rate')}:</span>
                           <span className="calc-inline-value">{selectionPct}%</span>
-                          <span className="calc-inline-sub">{t('farmer.calculated')}</span>
+                          <span className="calc-inline-sub">{t('farmer.calculated', 'Calculated automatically')}</span>
                         </div>
                       )}
 
@@ -1169,7 +1379,16 @@ export function FarmerFormPage() {
                         <div className="calc-inline">
                           <span className="calc-inline-label">{t('farmer.avgTemp')}:</span>
                           <span className="calc-inline-value">
-                            {((Number(data.tempMin || 0) + Number(data.tempMax || 0)) / (data.tempMin && data.tempMax ? 2 : 1)).toFixed(1)} °C
+                            {(() => {
+                              const min = Number(data.tempMin);
+                              const max = Number(data.tempMax);
+                              const hasMin = data.tempMin !== '' && !isNaN(min);
+                              const hasMax = data.tempMax !== '' && !isNaN(max);
+                              if (hasMin && hasMax) return `${((min + max) / 2).toFixed(1)} °C`;
+                              if (hasMin) return `${min.toFixed(1)} °C`;
+                              if (hasMax) return `${max.toFixed(1)} °C`;
+                              return '--';
+                            })()}
                           </span>
                           <span className="calc-inline-sub">{t('farmer.calculated')}</span>
                         </div>
@@ -1423,6 +1642,16 @@ export function FarmerFormPage() {
         onConfirm={executeSubmission}
         reportDate={reportDate}
         farmId={farmId}
+        submitting={submitting}
+      />
+      <TotalMortalityConfirmationModal
+        isOpen={showTotalMortalityModal}
+        onClose={handleCancelTotalMortality}
+        onConfirm={handleConfirmTotalMortality}
+        mortality={Number(data.mortality) || 0}
+        birdCount={birdCount}
+        farmId={farmId}
+        reportDate={reportDate}
         submitting={submitting}
       />
     </div>

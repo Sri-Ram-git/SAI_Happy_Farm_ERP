@@ -87,6 +87,135 @@ describe('Farmer Login Form Validation & Business Rules Suite', () => {
       const errors = validateStep(1, data, birdCount);
       expect(errors.selectionEggs).toBeDefined();
     });
+
+    it('Case 1: should accept Production 1,000; Selection 500; Damaged 100 (600 <= 1000) and calculate 50.0% selection rate', () => {
+      const data: FarmFormData = {
+        ...baseData,
+        eggsProduced: '1000',
+        selectionEggs: '500',
+        damagedEggs: '100',
+      };
+      const errors = validateStep(1, data, 2000);
+      expect(errors.eggsProduced).toBeUndefined();
+      expect(errors.selectionEggs).toBeUndefined();
+      expect(errors.damagedEggs).toBeUndefined();
+
+      const rate = ((Number(data.selectionEggs) / Number(data.eggsProduced)) * 100).toFixed(1);
+      expect(rate).toBe('50.0');
+    });
+
+    it('Case 2: should accept Production 1,000; Selection 900; Damaged 100 (1000 <= 1000) and calculate 90.0% selection rate', () => {
+      const data: FarmFormData = {
+        ...baseData,
+        eggsProduced: '1000',
+        selectionEggs: '900',
+        damagedEggs: '100',
+      };
+      const errors = validateStep(1, data, 2000);
+      expect(errors.eggsProduced).toBeUndefined();
+      expect(errors.selectionEggs).toBeUndefined();
+      expect(errors.damagedEggs).toBeUndefined();
+
+      const rate = ((Number(data.selectionEggs) / Number(data.eggsProduced)) * 100).toFixed(1);
+      expect(rate).toBe('90.0');
+    });
+
+    it('Case 3: should reject Production 1,000; Selection 900; Damaged 150 (1050 > 1000)', () => {
+      const data: FarmFormData = {
+        ...baseData,
+        eggsProduced: '1000',
+        selectionEggs: '900',
+        damagedEggs: '150',
+      };
+      const errors = validateStep(1, data, 2000);
+      expect(errors.selectionEggs).toBeDefined();
+      expect(errors.damagedEggs).toBeDefined();
+      expect(errors.selectionEggs).toContain('validation.selectionDamagedExceeds');
+    });
+
+    it('Case 4: should reject Production 0; Selection 1', () => {
+      const data: FarmFormData = {
+        ...baseData,
+        eggsProduced: '0',
+        selectionEggs: '1',
+        damagedEggs: '0',
+      };
+      const errors = validateStep(1, data, 2000);
+      expect(errors.selectionEggs).toBeDefined();
+    });
+
+    it('Case 5: should accept Production 0; Selection 0; Damaged 0 without division error', () => {
+      const data: FarmFormData = {
+        ...baseData,
+        eggsProduced: '0',
+        selectionEggs: '0',
+        damagedEggs: '0',
+      };
+      const errors = validateStep(1, data, 2000);
+      expect(errors.eggsProduced).toBeUndefined();
+      expect(errors.selectionEggs).toBeUndefined();
+      expect(errors.damagedEggs).toBeUndefined();
+
+      const ep = Number(data.eggsProduced);
+      const se = Number(data.selectionEggs);
+      const rate = ep > 0 && !isNaN(se) && se >= 0 ? ((se / ep) * 100).toFixed(1) : '0.0';
+      expect(rate).toBe('0.0');
+    });
+
+    it('Case 6: should reject negative or fractional selection and damaged egg counts', () => {
+      const dataNegSel: FarmFormData = {
+        ...baseData,
+        eggsProduced: '1000',
+        selectionEggs: '-10',
+      };
+      expect(validateStep(1, dataNegSel, 2000).selectionEggs).toBeDefined();
+
+      const dataFractSel: FarmFormData = {
+        ...baseData,
+        eggsProduced: '1000',
+        selectionEggs: '500.5',
+      };
+      expect(validateStep(1, dataFractSel, 2000).selectionEggs).toBeDefined();
+
+      const dataNegDmg: FarmFormData = {
+        ...baseData,
+        eggsProduced: '1000',
+        selectionEggs: '500',
+        damagedEggs: '-5',
+      };
+      expect(validateStep(1, dataNegDmg, 2000).damagedEggs).toBeDefined();
+
+      const dataFractDmg: FarmFormData = {
+        ...baseData,
+        eggsProduced: '1000',
+        selectionEggs: '500',
+        damagedEggs: '12.4',
+      };
+      expect(validateStep(1, dataFractDmg, 2000).damagedEggs).toBeDefined();
+    });
+
+    it('Case 7: should reject when production is reduced below selection + damaged sum', () => {
+      // Initially 1000 prod, 800 sel, 150 dmg -> 950 <= 1000 (valid)
+      const validInitial: FarmFormData = {
+        ...baseData,
+        eggsProduced: '1000',
+        selectionEggs: '800',
+        damagedEggs: '150',
+      };
+      expect(validateStep(1, validInitial, 2000).selectionEggs).toBeUndefined();
+
+      // Farmer reduces production to 900 -> 800 + 150 = 950 > 900 (invalid)
+      const reducedProd: FarmFormData = {
+        ...baseData,
+        eggsProduced: '900',
+        selectionEggs: '800',
+        damagedEggs: '150',
+      };
+      const errors = validateStep(1, reducedProd, 2000);
+      expect(errors.selectionEggs).toBeDefined();
+      expect(errors.damagedEggs).toBeDefined();
+      expect(errors.selectionEggs).toContain('validation.selectionDamagedExceeds');
+    });
   });
 
   describe('2 & 3. Body Weight Weekly Entry & Range (500g to 3,000g)', () => {
@@ -707,12 +836,12 @@ describe('Farmer Login Form Validation & Business Rules Suite', () => {
     });
   });
 
-  describe('10. Restrict Report Dates to Yesterday, Today, Tomorrow (3-Day Window)', () => {
-    it('should dynamically return exactly three allowed report date options (Yesterday, Today, Tomorrow)', () => {
+  describe('10. Restrict Report Dates to Yesterday and Today (2-Day Window)', () => {
+    it('should dynamically return exactly two allowed report date options (Yesterday and Today)', () => {
       const options = getAllowedReportDates('2026-09-28'); // Monday
-      expect(options).toHaveLength(3);
+      expect(options).toHaveLength(2);
 
-      const [yesterday, today, tomorrow] = options;
+      const [yesterday, today] = options;
 
       expect(yesterday.key).toBe('yesterday');
       expect(yesterday.isoDate).toBe('2026-09-27');
@@ -722,43 +851,311 @@ describe('Farmer Login Form Validation & Business Rules Suite', () => {
       expect(today.isoDate).toBe('2026-09-28');
       expect(today.dayOfWeekName).toBe('Mon');
 
-      expect(tomorrow.key).toBe('tomorrow');
-      expect(tomorrow.isoDate).toBe('2026-09-29');
-      expect(tomorrow.dayOfWeekName).toBe('Tue');
+      // Verify tomorrow is not present
+      const hasTomorrow = options.some((o: any) => o.key === 'tomorrow' || o.isoDate === '2026-09-29');
+      expect(hasTomorrow).toBe(false);
     });
 
-    it('should handle month-end transitions properly (e.g. Sep 30 -> Oct 01)', () => {
-      const options = getAllowedReportDates('2026-09-30'); // Wednesday
-      expect(options[0].isoDate).toBe('2026-09-29'); // Yesterday
-      expect(options[1].isoDate).toBe('2026-09-30'); // Today
-      expect(options[2].isoDate).toBe('2026-10-01'); // Tomorrow
+    it('should handle month-end transitions properly (e.g. Oct 01 -> Sep 30 yesterday)', () => {
+      const options = getAllowedReportDates('2026-10-01'); // Thursday
+      expect(options[0].isoDate).toBe('2026-09-30'); // Yesterday
+      expect(options[1].isoDate).toBe('2026-10-01'); // Today
     });
 
-    it('should handle year-end transitions properly (e.g. Dec 31 -> Jan 01)', () => {
-      const options = getAllowedReportDates('2026-12-31'); // Thursday
-      expect(options[0].isoDate).toBe('2026-12-30'); // Yesterday
-      expect(options[1].isoDate).toBe('2026-12-31'); // Today
-      expect(options[2].isoDate).toBe('2027-01-01'); // Tomorrow
+    it('should handle year-end transitions properly (e.g. Jan 01 -> Dec 31 yesterday)', () => {
+      const options = getAllowedReportDates('2027-01-01'); // Friday
+      expect(options[0].isoDate).toBe('2026-12-31'); // Yesterday
+      expect(options[1].isoDate).toBe('2027-01-01'); // Today
     });
 
-    it('should handle leap year Feb 28 -> Feb 29 -> Mar 01 transition in 2028', () => {
-      const options = getAllowedReportDates('2028-02-29'); // Leap Day
-      expect(options[0].isoDate).toBe('2028-02-28'); // Yesterday
-      expect(options[1].isoDate).toBe('2028-02-29'); // Today
-      expect(options[2].isoDate).toBe('2028-03-01'); // Tomorrow
+    it('should handle leap year Mar 01 -> Feb 29 transition in 2028', () => {
+      const options = getAllowedReportDates('2028-03-01'); // Wednesday in leap year
+      expect(options[0].isoDate).toBe('2028-02-29'); // Yesterday (Leap Day)
+      expect(options[1].isoDate).toBe('2028-03-01'); // Today
     });
 
-    it('should synchronize reporting week calculation for Yesterday, Today, and Tomorrow', () => {
+    it('should synchronize reporting week calculation for Yesterday and Today', () => {
       const userCreatedAt = '2026-09-01';
       const options = getAllowedReportDates('2026-09-28');
 
       const yesterdayWeek = calculateReportingWeek(userCreatedAt, options[0].isoDate, 3);
       const todayWeek = calculateReportingWeek(userCreatedAt, options[1].isoDate, 3);
-      const tomorrowWeek = calculateReportingWeek(userCreatedAt, options[2].isoDate, 3);
 
       expect(yesterdayWeek.label).toBe('7'); // Sunday 27 Sep
       expect(todayWeek.label).toBe('7.1'); // Monday 28 Sep
-      expect(tomorrowWeek.label).toBe('7.2'); // Tuesday 29 Sep
+    });
+  });
+
+  describe('11. Step 1 Calculations & Live Bird Count Integrations', () => {
+    it('should calculate feed grams per bird accurately for given feed kg and bird count', () => {
+      // 55 kg feed for 973 birds = (55 * 1000) / 973 = 56.5 g/bird
+      const gPerBird = calculateFeedGramsPerBird(55, 973);
+      expect(gPerBird).toBe(56.5);
+
+      // 34 kg feed for 973 birds = (34 * 1000) / 973 = 34.9 g/bird
+      const gPerBird2 = calculateFeedGramsPerBird(34, 973);
+      expect(gPerBird2).toBe(34.9);
+    });
+
+    it('should safely return 0 when bird count is zero, negative, or not finite', () => {
+      expect(calculateFeedGramsPerBird(55, 0)).toBe(0);
+      expect(calculateFeedGramsPerBird(55, -10)).toBe(0);
+      expect(calculateFeedGramsPerBird(55, NaN)).toBe(0);
+      expect(calculateFeedGramsPerBird(0, 973)).toBe(0);
+      expect(calculateFeedGramsPerBird(-5, 973)).toBe(0);
+    });
+
+    it('should correctly calculate equivalent weight in grams from kg', () => {
+      const feedKg = 34;
+      const equivalentGrams = feedKg * 1000;
+      expect(equivalentGrams).toBe(34000);
+      expect(equivalentGrams.toLocaleString()).toBe('34,000');
+    });
+
+    it('should calculate mortality rate accurately based on applicable bird count', () => {
+      const birdCount = 973;
+      const mortality = 10;
+      const ratePct = ((mortality / birdCount) * 100).toFixed(1);
+      expect(ratePct).toBe('1.0');
+    });
+
+    it('should calculate culling rate accurately based on applicable bird count', () => {
+      const birdCount = 973;
+      const culling = 0;
+      const ratePct = ((culling / birdCount) * 100).toFixed(1);
+      expect(ratePct).toBe('0.0');
+
+      const culling5 = 5;
+      const ratePct5 = ((culling5 / birdCount) * 100).toFixed(1);
+      expect(ratePct5).toBe('0.5');
+    });
+  });
+
+  describe('12. Empty Input Defaults & Explicit Zero Value Handling', () => {
+    it('should initialize all form inputs as empty strings (""), NOT numeric 0 or "0"', () => {
+      expect(INITIAL_FARM_FORM_DATA.feedQuantity).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.mortality).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.culling).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.eggsProduced).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.selectionEggs).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.damagedEggs).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.floorEggs).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.tempMin).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.tempMax).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.eggWeightMin).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.eggWeightMax).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.bodyWeightMin).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.bodyWeightMax).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.ammoniaPpm).toBe('');
+      expect(INITIAL_FARM_FORM_DATA.remarks).toBe('');
+    });
+
+    it('should require feedQuantity when left empty and block step 0', () => {
+      const data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        feedQuantity: '',
+      };
+      const errors = validateStep(0, data, birdCount);
+      expect(errors.feedQuantity).toBeDefined();
+      expect(errors.feedQuantity).toBe('validation.required');
+    });
+
+    it('should require eggsProduced and selectionEggs when left empty and block step 1', () => {
+      const data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        eggsProduced: '',
+        selectionEggs: '',
+        tempMin: '25',
+        tempMax: '30',
+      };
+      const errors = validateStep(1, data, birdCount);
+      expect(errors.eggsProduced).toBe('validation.required');
+      expect(errors.selectionEggs).toBe('validation.required');
+    });
+
+    it('should require tempMin and tempMax when left empty and block step 1', () => {
+      const data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        eggsProduced: '4000',
+        selectionEggs: '3800',
+        tempMin: '',
+        tempMax: '',
+      };
+      const errors = validateStep(1, data, birdCount);
+      expect(errors.tempMin).toBe('validation.required');
+      expect(errors.tempMax).toBe('validation.required');
+    });
+
+    it('should require eggWeightMin and eggWeightMax when left empty and block step 2', () => {
+      const data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        eggWeightMin: '',
+        eggWeightMax: '',
+      };
+      const errors = validateStep(2, data, birdCount);
+      expect(errors.eggWeightMin).toBe('validation.required');
+      expect(errors.eggWeightMax).toBe('validation.required');
+    });
+
+    it('should accept explicitly entered 0 for valid zero fields', () => {
+      const step0Data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        feedQuantity: '250',
+        mortality: '0',
+        culling: '0',
+      };
+      const errors0 = validateStep(0, step0Data, birdCount);
+      expect(errors0.mortality).toBeUndefined();
+      expect(errors0.culling).toBeUndefined();
+
+      const step1Data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        eggsProduced: '0',
+        selectionEggs: '0',
+        damagedEggs: '0',
+        floorEggs: '0',
+        tempMin: '25',
+        tempMax: '30',
+      };
+      const errors1 = validateStep(1, step1Data, birdCount);
+      expect(errors1.eggsProduced).toBeUndefined();
+      expect(errors1.selectionEggs).toBeUndefined();
+      expect(errors1.damagedEggs).toBeUndefined();
+      expect(errors1.floorEggs).toBeUndefined();
+
+      const step2Data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        eggWeightMin: '50',
+        eggWeightMax: '65',
+        ammoniaPpm: '0',
+      };
+      const errors2 = validateStep(2, step2Data, birdCount);
+      expect(errors2.ammoniaPpm).toBeUndefined();
+    });
+
+    it('should allow optional fields (damagedEggs, floorEggs, ammoniaPpm) to remain untouched empty', () => {
+      const step1Data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        eggsProduced: '4000',
+        selectionEggs: '3800',
+        damagedEggs: '',
+        floorEggs: '',
+        tempMin: '25',
+        tempMax: '30',
+      };
+      const errors1 = validateStep(1, step1Data, birdCount);
+      expect(errors1.damagedEggs).toBeUndefined();
+      expect(errors1.floorEggs).toBeUndefined();
+
+      const step2Data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        eggWeightMin: '50',
+        eggWeightMax: '65',
+        bodyWeightMin: '',
+        bodyWeightMax: '',
+        ammoniaPpm: '',
+        remarks: '',
+      };
+      const errors2 = validateStep(2, step2Data, birdCount);
+      expect(errors2.bodyWeightMin).toBeUndefined();
+      expect(errors2.bodyWeightMax).toBeUndefined();
+      expect(errors2.ammoniaPpm).toBeUndefined();
+      expect(errors2.remarks).toBeUndefined();
+    });
+
+    it('should reject tempMin and tempMax when explicitly entered as 0 (outside biological 10C-50C range)', () => {
+      const step1Data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        eggsProduced: '4000',
+        selectionEggs: '3800',
+        tempMin: '0',
+        tempMax: '0',
+      };
+      const errors = validateStep(1, step1Data, birdCount);
+      expect(errors.tempMin).toBe('validation.tempRange');
+      expect(errors.tempMax).toBe('validation.tempRange');
+    });
+
+    it('should reject eggWeightMin and eggWeightMax when explicitly entered as 0 (outside 30g-80g range)', () => {
+      const step2Data: FarmFormData = {
+        ...INITIAL_FARM_FORM_DATA,
+        eggWeightMin: '0',
+        eggWeightMax: '0',
+      };
+      const errors = validateStep(2, step2Data, birdCount);
+      expect(errors.eggWeightMin).toBe('validation.eggWeightRange');
+      expect(errors.eggWeightMax).toBe('validation.eggWeightRange');
+    });
+
+    it('should never produce NaN or Infinity for rate calculations on empty inputs', () => {
+      const emptyData = INITIAL_FARM_FORM_DATA;
+      const bCount = 5000;
+
+      const mortPct = bCount > 0 && emptyData.mortality !== '' && !isNaN(Number(emptyData.mortality))
+        ? ((Number(emptyData.mortality) / bCount) * 100).toFixed(1)
+        : '0.0';
+      expect(mortPct).toBe('0.0');
+
+      const cullPct = bCount > 0 && emptyData.culling !== '' && !isNaN(Number(emptyData.culling))
+        ? ((Number(emptyData.culling) / bCount) * 100).toFixed(1)
+        : '0.0';
+      expect(cullPct).toBe('0.0');
+
+      const eggPct = bCount > 0 && emptyData.eggsProduced !== '' && !isNaN(Number(emptyData.eggsProduced))
+        ? ((Number(emptyData.eggsProduced) / bCount) * 100).toFixed(1)
+        : '0.0';
+      expect(eggPct).toBe('0.0');
+
+      const selPct = Number(emptyData.eggsProduced) > 0 && emptyData.selectionEggs !== '' && !isNaN(Number(emptyData.selectionEggs)) && Number(emptyData.selectionEggs) >= 0
+        ? ((Number(emptyData.selectionEggs) / Number(emptyData.eggsProduced)) * 100).toFixed(1)
+        : '0.0';
+      expect(selPct).toBe('0.0');
+    });
+
+    it('should distinguish between untouched empty fields and explicitly entered 0 in required fields', () => {
+      // Step 0: feedQuantity empty vs 0
+      const emptyFeed = validateStep(0, { ...INITIAL_FARM_FORM_DATA, feedQuantity: '' }, birdCount);
+      expect(emptyFeed.feedQuantity).toBe('validation.required');
+
+      const zeroFeed = validateStep(0, { ...INITIAL_FARM_FORM_DATA, feedQuantity: '0' }, birdCount);
+      expect(zeroFeed.feedQuantity).toBeUndefined();
+
+      // Step 1: eggsProduced empty vs 0
+      const emptyEggs = validateStep(1, { ...INITIAL_FARM_FORM_DATA, eggsProduced: '', selectionEggs: '0', tempMin: '25', tempMax: '30' }, birdCount);
+      expect(emptyEggs.eggsProduced).toBe('validation.required');
+
+      const zeroEggs = validateStep(1, { ...INITIAL_FARM_FORM_DATA, eggsProduced: '0', selectionEggs: '0', tempMin: '25', tempMax: '30' }, birdCount);
+      expect(zeroEggs.eggsProduced).toBeUndefined();
+
+      // Step 1: selectionEggs empty vs 0
+      const emptySel = validateStep(1, { ...INITIAL_FARM_FORM_DATA, eggsProduced: '100', selectionEggs: '', tempMin: '25', tempMax: '30' }, birdCount);
+      expect(emptySel.selectionEggs).toBe('validation.required');
+
+      const zeroSel = validateStep(1, { ...INITIAL_FARM_FORM_DATA, eggsProduced: '100', selectionEggs: '0', tempMin: '25', tempMax: '30' }, birdCount);
+      expect(zeroSel.selectionEggs).toBeUndefined();
+
+      // Step 1: tempMin empty vs 0
+      const emptyTemp = validateStep(1, { ...INITIAL_FARM_FORM_DATA, eggsProduced: '100', selectionEggs: '90', tempMin: '', tempMax: '30' }, birdCount);
+      expect(emptyTemp.tempMin).toBe('validation.required');
+
+      const zeroTemp = validateStep(1, { ...INITIAL_FARM_FORM_DATA, eggsProduced: '100', selectionEggs: '90', tempMin: '0', tempMax: '30' }, birdCount);
+      expect(zeroTemp.tempMin).toBe('validation.tempRange');
+
+      // Step 2: eggWeightMin empty vs 0
+      const emptyEggWt = validateStep(2, { ...INITIAL_FARM_FORM_DATA, eggWeightMin: '', eggWeightMax: '60' }, birdCount);
+      expect(emptyEggWt.eggWeightMin).toBe('validation.required');
+
+      const zeroEggWt = validateStep(2, { ...INITIAL_FARM_FORM_DATA, eggWeightMin: '0', eggWeightMax: '60' }, birdCount);
+      expect(zeroEggWt.eggWeightMin).toBe('validation.eggWeightRange');
+    });
+
+    it('should safely calculate feed per bird with empty or zero values without NaN or throwing', () => {
+      expect(calculateFeedGramsPerBird('', birdCount)).toBe(0);
+      expect(calculateFeedGramsPerBird('0', birdCount)).toBe(0);
+      expect(calculateFeedGramsPerBird('   ', birdCount)).toBe(0);
+      expect(calculateFeedGramsPerBird(250, 0)).toBe(0);
+      expect(calculateFeedGramsPerBird(250, -10)).toBe(0);
+      expect(calculateFeedGramsPerBird(250, birdCount)).toBe(50);
     });
   });
 });

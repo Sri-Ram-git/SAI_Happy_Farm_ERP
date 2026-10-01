@@ -27,7 +27,7 @@ export interface FarmDoc {
 export async function getFarmById(farmId: string): Promise<FarmDoc | null> {
   const doc = await db.collection('farms').doc(farmId).get();
   if (!doc.exists) return null;
-  return doc.data() as FarmDoc;
+  return { farmId: doc.id, ...(doc.data() || {}) } as FarmDoc;
 }
 
 export function subscribeToFarm(farmId: string, callback: (farm: FarmDoc | null) => void): () => void {
@@ -37,7 +37,7 @@ export function subscribeToFarm(farmId: string, callback: (farm: FarmDoc | null)
       if (!doc.exists) {
         callback(null);
       } else {
-        callback(doc.data() as FarmDoc);
+        callback({ farmId: doc.id, ...(doc.data() || {}) } as FarmDoc);
       }
     },
     (err: any) => {
@@ -54,7 +54,7 @@ export async function getFarmsByIds(farmIds: string[]): Promise<FarmDoc[]> {
     const batch = farmIds.slice(i, i + batchSize);
     const snap = await db.collection('farms').where('__name__', 'in', batch).get();
     for (const doc of snap.docs) {
-      results.push(doc.data() as FarmDoc);
+      results.push({ farmId: doc.id, ...(doc.data() || {}) } as FarmDoc);
     }
   }
   return results;
@@ -62,13 +62,13 @@ export async function getFarmsByIds(farmIds: string[]): Promise<FarmDoc[]> {
 
 export async function getAllFarms(): Promise<FarmDoc[]> {
   const snap = await db.collection('farms').get();
-  return snap.docs.map((doc: any) => doc.data() as FarmDoc);
+  return snap.docs.map((doc: any) => ({ farmId: doc.id, ...(doc.data() || {}) } as FarmDoc));
 }
 
 export function subscribeToAllFarms(callback: (farms: FarmDoc[]) => void): () => void {
   return db.collection('farms').onSnapshot(
     (snap: any) => {
-      const farms = snap.docs.map((doc: any) => doc.data() as FarmDoc);
+      const farms = snap.docs.map((doc: any) => ({ farmId: doc.id, ...(doc.data() || {}) } as FarmDoc));
       callback(farms);
     },
     (err: any) => {

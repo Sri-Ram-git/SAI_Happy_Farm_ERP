@@ -127,5 +127,23 @@ service cloud.firestore {
     match /importBatches/{batchId} {
       allow read, write: if isAdmin();
     }
+
+    // Logs Collection (Farm-level subcollections for feed and flock logs)
+    match /logs/{farmId} {
+      allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
+
+      // Subcollection: feedLogs
+      match /feedLogs/{logId} {
+        allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
+        allow create: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
+        allow update, delete: if isAdmin();
+      }
+
+      // Subcollection: flockLogs
+      match /flockLogs/{logId} {
+        allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
+        allow create, update, delete: if isAdmin();
+      }
+    }
   }
 }

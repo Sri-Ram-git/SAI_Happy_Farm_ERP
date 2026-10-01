@@ -15,7 +15,7 @@ export function getIstDate(): string {
 }
 
 export interface AllowedReportDateOption {
-  key: 'yesterday' | 'today' | 'tomorrow';
+  key: 'yesterday' | 'today';
   labelKey: string;
   isoDate: string;
   displayFormatted: string;
@@ -32,7 +32,6 @@ export function getAllowedReportDates(baseDateIso?: string): AllowedReportDateOp
 
   const todayUtc = new Date(Date.UTC(y, m - 1, d));
   const yesterdayUtc = new Date(todayUtc.getTime() - 24 * 3600 * 1000);
-  const tomorrowUtc = new Date(todayUtc.getTime() + 24 * 3600 * 1000);
 
   const formatIso = (dateObj: Date): string => {
     const yr = dateObj.getUTCFullYear();
@@ -43,13 +42,13 @@ export function getAllowedReportDates(baseDateIso?: string): AllowedReportDateOp
 
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-  const createOption = (key: 'yesterday' | 'today' | 'tomorrow', dateObj: Date): AllowedReportDateOption => {
+  const createOption = (key: 'yesterday' | 'today', dateObj: Date): AllowedReportDateOption => {
     const isoDate = formatIso(dateObj);
     const dayOfWeekName = daysOfWeek[dateObj.getUTCDay()];
     const displayFormatted = formatDisplayDate(isoDate);
     return {
       key,
-      labelKey: key === 'yesterday' ? 'farmer.yesterday' : key === 'today' ? 'farmer.today' : 'farmer.tomorrow',
+      labelKey: key === 'yesterday' ? 'farmer.yesterday' : 'farmer.today',
       isoDate,
       displayFormatted,
       dayOfWeekName,
@@ -59,7 +58,6 @@ export function getAllowedReportDates(baseDateIso?: string): AllowedReportDateOp
   return [
     createOption('yesterday', yesterdayUtc),
     createOption('today', todayUtc),
-    createOption('tomorrow', tomorrowUtc),
   ];
 }
 
@@ -428,6 +426,12 @@ export function subscribeToTodayReport(
 export async function submitReport(input: SubmitReportInput): Promise<{ reportId: string; version: number; isOffline?: boolean }> {
   const userId = input.submittedBy;
   const submissionDate = input.submissionDate || input.reportDate || getIstDate();
+
+  const allowedIsoDates = getAllowedReportDates().map((o) => o.isoDate);
+  if (!allowedIsoDates.includes(submissionDate)) {
+    throw new Error('Invalid report date. Only Today and Yesterday are allowed for daily reporting.');
+  }
+
   const now = new Date().toISOString();
 
   const submissionKey = input.submissionKey || `sub_${userId}_${input.farmId}_${submissionDate}`;
@@ -514,6 +518,20 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
           throw new Error('INSUFFICIENT_FEED');
         }
         
+        if (typeof input.mortality !== 'number' || !Number.isInteger(input.mortality) || input.mortality < 0) {
+          throw new Error('INVALID_MORTALITY');
+        }
+        if (typeof input.culling !== 'number' || !Number.isInteger(input.culling) || input.culling < 0) {
+          throw new Error('INVALID_CULLING');
+        }
+
+        if (currentBirdCount <= 0 && input.mortality > 0) {
+          throw new Error('MORTALITY_EXCEEDS_BIRD_COUNT');
+        }
+        if (input.mortality > currentBirdCount) {
+          throw new Error('MORTALITY_EXCEEDS_BIRD_COUNT');
+        }
+
         const totalBirdDeduction = input.mortality + input.culling;
         if (totalBirdDeduction > 0 && currentBirdCount < totalBirdDeduction) {
           throw new Error('INSUFFICIENT_BIRDS');
@@ -667,6 +685,18 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
           archivedAt: now,
           archivedReason: 'FARMER_CORRECTION_V2',
         });
+
+        if (typeof input.mortality !== 'number' || !Number.isInteger(input.mortality) || input.mortality < 0) {
+          throw new Error('INVALID_MORTALITY');
+        }
+        if (typeof input.culling !== 'number' || !Number.isInteger(input.culling) || input.culling < 0) {
+          throw new Error('INVALID_CULLING');
+        }
+
+        const openingEligibleBirds = Number(existingData.openingBirdCount ?? currentBirdCount);
+        if (input.mortality > openingEligibleBirds) {
+          throw new Error('MORTALITY_EXCEEDS_BIRD_COUNT');
+        }
 
         // 2. Calculate diffs
         const feedDiff = input.feedKg - Number(existingData.feedKg || 0);

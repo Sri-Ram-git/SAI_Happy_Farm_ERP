@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { LoadingState } from '../../components/dashboard/LoadingState';
 import { EmptyState } from '../../components/dashboard/EmptyState';
+import { FormLoadingOverlay } from '../../components/common/FormLoadingOverlay';
 import {
   getAllUsers,
   updateUserStatus,
@@ -270,14 +271,6 @@ export function AdminUsersPage() {
 
   const filtered = filter === 'all' ? users : users.filter((u) => u.role === filter);
 
-  if (loading) {
-    return (
-      <DashboardLayout role="admin" userName={userProfile?.name}>
-        <LoadingState />
-      </DashboardLayout>
-    );
-  }
-
   return (
     <DashboardLayout role="admin" userName={userProfile?.name}>
       <div className="mgmt-page">
@@ -360,63 +353,88 @@ export function AdminUsersPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((u) => {
-                const isMenuOpen = activeMenu?.user.uid === u.uid;
-
-                return (
-                  <tr key={u.uid}>
-                    <td className="td-bold">{u.name}</td>
-                    <td>{u.email}</td>
+              {loading ? (
+                [1, 2, 3, 4, 5].map((key) => (
+                  <tr key={key}>
                     <td>
-                      <span className={`role-badge role-badge--${u.role}`}>{u.role}</span>
+                      <div className="skeleton skeleton-text" style={{ width: '130px', height: '16px', margin: 0 }} />
                     </td>
-                    <td>{u.farmIds.join(', ') || '--'}</td>
                     <td>
-                      <span
-                        className={`status-badge ${u.active ? 'status-badge--ok' : 'status-badge--warn'}`}
-                      >
-                        {u.active ? 'Active' : 'Inactive'}
-                      </span>
+                      <div className="skeleton skeleton-text" style={{ width: '180px', height: '16px', margin: 0 }} />
+                    </td>
+                    <td>
+                      <div className="skeleton" style={{ width: '75px', height: '22px', borderRadius: '12px' }} />
+                    </td>
+                    <td>
+                      <div className="skeleton skeleton-text" style={{ width: '110px', height: '16px', margin: 0 }} />
+                    </td>
+                    <td>
+                      <div className="skeleton" style={{ width: '65px', height: '22px', borderRadius: '12px' }} />
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      <button
-                        type="button"
-                        aria-haspopup="menu"
-                        aria-expanded={isMenuOpen}
-                        aria-label={`Manage user actions for ${u.name || u.email}`}
-                        title={`Manage user actions for ${u.name || u.email}`}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          padding: '6px',
-                          backgroundColor: 'transparent',
-                          border: 'none',
-                          outline: 'none',
-                          color: isMenuOpen ? '#10b981' : '#1e293b',
-                          cursor: 'pointer',
-                          borderRadius: '4px',
-                          transition: 'color 0.15s ease, transform 0.15s ease',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.color = '#10b981';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.color = isMenuOpen ? '#10b981' : '#1e293b';
-                        }}
-                        onClick={(e) => handleToggleMenu(e, u)}
-                      >
-                        <Pencil size={21} strokeWidth={2.2} />
-                      </button>
+                      <div className="skeleton" style={{ width: '28px', height: '28px', borderRadius: '6px', margin: '0 auto' }} />
                     </td>
                   </tr>
-                );
-              })}
+                ))
+              ) : (
+                filtered.map((u) => {
+                  const isMenuOpen = activeMenu?.user.uid === u.uid;
+
+                  return (
+                    <tr key={u.uid}>
+                      <td className="td-bold">{u.name}</td>
+                      <td>{u.email}</td>
+                      <td>
+                        <span className={`role-badge role-badge--${u.role}`}>{u.role}</span>
+                      </td>
+                      <td>{u.farmIds.join(', ') || '--'}</td>
+                      <td>
+                        <span
+                          className={`status-badge ${u.active ? 'status-badge--ok' : 'status-badge--warn'}`}
+                        >
+                          {u.active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button
+                          type="button"
+                          aria-haspopup="menu"
+                          aria-expanded={isMenuOpen}
+                          aria-label={`Manage user actions for ${u.name || u.email}`}
+                          title={`Manage user actions for ${u.name || u.email}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: '6px',
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            outline: 'none',
+                            color: isMenuOpen ? '#10b981' : '#1e293b',
+                            cursor: 'pointer',
+                            borderRadius: '4px',
+                            transition: 'color 0.15s ease, transform 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.color = '#10b981';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.color = isMenuOpen ? '#10b981' : '#1e293b';
+                          }}
+                          onClick={(e) => handleToggleMenu(e, u)}
+                        >
+                          <Pencil size={21} strokeWidth={2.2} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
 
-        {filtered.length === 0 && <EmptyState message="No users found." />}
+        {!loading && filtered.length === 0 && <EmptyState message="No users found." />}
 
         {/* CLIPPING-SAFE ACTION POPOVER (PORTAL TO DOCUMENT BODY) */}
         {activeMenu &&
@@ -642,6 +660,7 @@ export function AdminUsersPage() {
           >
             <div
               style={{
+                position: 'relative',
                 backgroundColor: '#ffffff',
                 borderRadius: '12px',
                 maxWidth: '500px',
@@ -652,6 +671,13 @@ export function AdminUsersPage() {
               }}
               onClick={(e) => e.stopPropagation()}
             >
+              {deleteLoading && (
+                <FormLoadingOverlay
+                  title="Deleting user account..."
+                  subtitle="Please wait while account deletion is processed."
+                  role="admin"
+                />
+              )}
               {deleteStep === 1 ? (
                 /* STEP 1: Warning Modal */
                 <div style={{ padding: '24px' }}>
@@ -875,6 +901,7 @@ export function AdminUsersPage() {
           >
             <div
               style={{
+                position: 'relative',
                 backgroundColor: '#ffffff',
                 borderRadius: '12px',
                 maxWidth: '480px',
@@ -885,6 +912,13 @@ export function AdminUsersPage() {
               }}
               onClick={(e) => e.stopPropagation()}
             >
+              {deactivateLoading && (
+                <FormLoadingOverlay
+                  title="Updating account status..."
+                  subtitle="Please wait while user account status is updated."
+                  role="admin"
+                />
+              )}
               {deactivateStep === 1 ? (
                 /* STEP 1: Warning Modal */
                 <div style={{ padding: '24px' }}>
@@ -1098,6 +1132,7 @@ export function AdminUsersPage() {
           >
             <div
               style={{
+                position: 'relative',
                 backgroundColor: '#ffffff',
                 borderRadius: '12px',
                 maxWidth: '540px',
@@ -1111,6 +1146,13 @@ export function AdminUsersPage() {
               }}
               onClick={(e) => e.stopPropagation()}
             >
+              {reassignLoading && (
+                <FormLoadingOverlay
+                  title="Updating farm allocation..."
+                  subtitle={`Please wait while farm assignments for ${reassignModalUser.name || reassignModalUser.email} are saved.`}
+                  role="supervisor"
+                />
+              )}
               {/* Modal Header */}
               <div
                 style={{

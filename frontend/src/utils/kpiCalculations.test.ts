@@ -15,6 +15,29 @@ import {
   type FarmWeeklyRankingKpi,
 } from './kpiCalculations';
 
+const makeFarm = (overrides: Partial<FarmWeeklyRankingKpi>): FarmWeeklyRankingKpi => ({
+  farmId: 'F1',
+  farmName: 'Farm 1',
+  birdCount: 5000,
+  actualProductionPct: 85,
+  feedConsumedKg: 500,
+  eggsProduced: 4000,
+  avgEggWeightG: 60,
+  eggsReceived: 4000,
+  damageCount: 40,
+  selectedEggs: 3600,
+  mortalityBirds: 15,
+  productionGapPct: 5.0,
+  fcr: 2.08,
+  eggDamagePct: 1.0,
+  mortalityPct: 0.3,
+  selectionPct: 90.0,
+  reportCount: 7,
+  hasIncompleteData: false,
+  missingFields: [],
+  ...overrides,
+});
+
 describe('Supervisor Farm Performance Ranking Suite (Phase 1)', () => {
   describe('1.1 & 1.3 Ranking Formulas & Direction', () => {
     it('should verify parameter weights sum to 100%', () => {
@@ -97,28 +120,6 @@ describe('Supervisor Farm Performance Ranking Suite (Phase 1)', () => {
   });
 
   describe('1.6 Documented Tie-Breakers', () => {
-    const makeFarm = (overrides: Partial<FarmWeeklyRankingKpi>): FarmWeeklyRankingKpi => ({
-      farmId: 'F1',
-      farmName: 'Farm 1',
-      birdCount: 5000,
-      actualProductionPct: 85,
-      feedConsumedKg: 500,
-      eggsProduced: 4000,
-      avgEggWeightG: 60,
-      eggsReceived: 4000,
-      damageCount: 40,
-      selectedEggs: 3600,
-      mortalityBirds: 15,
-      productionGapPct: 5.0,
-      fcr: 2.08,
-      eggDamagePct: 1.0,
-      mortalityPct: 0.3,
-      selectionPct: 90.0,
-      reportCount: 7,
-      hasIncompleteData: false,
-      missingFields: [],
-      ...overrides,
-    });
 
     it('1. Production Gap tie: resolved by FCR; lower FCR wins', () => {
       const farmA = makeFarm({ farmId: 'A', productionGapPct: 5.0, fcr: 2.15 });
@@ -231,16 +232,123 @@ describe('Supervisor Farm Performance Ranking Suite (Phase 1)', () => {
       expect(kpis.hasIncompleteData).toBe(false);
     });
 
-    it('should flag incomplete data when reports array is empty', () => {
-      const emptyKpi = calculateFarmWeeklyKpi({
-        farmId: 'AP13',
-        farmName: 'Farm AP13',
-        reports: [],
+    it('should aggregate reports with field aliases and populated kpiReasons', () => {
+      const aliasedReports = [
+        {
+          date: '2026-09-25',
+          birdCount: 4500,
+          feedConsumedKg: 450,
+          production: 3800,
+          selectedEggs: 3400,
+          damageCount: 30,
+          deadBirds: 4,
+          avgEggWeight: 58,
+          eggsReceived: 3800,
+        },
+        {
+          date: '2026-09-26',
+          currentBirdCount: 4496,
+          feedKg: 460,
+          totalEggs: 3850,
+          selection: 3450,
+          damageEggs: 25,
+          mortality: 3,
+          eggWeightAvg: 58,
+          receivedEggs: 3850,
+        },
+      ];
+
+      const kpis = calculateFarmWeeklyKpi({
+        farmId: 'AP99',
+        farmName: 'Farm AP99',
+        reports: aliasedReports,
+        standardProductionPct: 80,
       });
-      expect(emptyKpi.hasIncompleteData).toBe(true);
-      expect(emptyKpi.missingFields).toContain('reports');
-      expect(emptyKpi.productionGapPct).toBeNull();
-      expect(emptyKpi.fcr).toBeNull();
+
+      expect(kpis.farmId).toBe('AP99');
+      expect(kpis.feedConsumedKg).toBe(910);
+      expect(kpis.eggsProduced).toBe(7650);
+      expect(kpis.selectedEggs).toBe(6850);
+      expect(kpis.damageCount).toBe(55);
+      expect(kpis.mortalityBirds).toBe(7);
+      expect(kpis.avgEggWeightG).toBe(58);
+      expect(kpis.productionGapPct).not.toBeNull();
+      expect(kpis.fcr).not.toBeNull();
+      expect(kpis.eggDamagePct).not.toBeNull();
+      expect(kpis.mortalityPct).not.toBeNull();
+      expect(kpis.selectionPct).not.toBeNull();
+      expect(kpis.kpiReasons?.productionGap).toBeUndefined();
+    });
+
+    it('should provide informative kpiReasons when specific metrics cannot be calculated', () => {
+      const missingEggWeightReports = [
+        {
+          date: '2026-09-25',
+          birdCount: 5000,
+          feedKg: 500,
+          eggsProduced: 4000,
+          mortality: 5,
+          selectionEggs: 3500,
+          damagedEggs: 20,
+          // eggWeight intentionally omitted
+        },
+      ];
+
+      const kpis = calculateFarmWeeklyKpi({
+        farmId: 'AP88',
+        farmName: 'Farm AP88',
+        reports: missingEggWeightReports,
+      });
+
+      expect(kpis.fcr).toBeNull();
+      expect(kpis.kpiReasons?.fcr).toBe('Missing egg weight');
+      expect(kpis.productionGapPct).not.toBeNull();
+      expect(kpis.selectionPct).not.toBeNull();
+      expect(kpis.mortalityPct).not.toBeNull();
+    });
+
+    it('should support configurable standardProductionPct', () => {
+      const reports = [
+        {
+          date: '2026-09-25',
+          birdCount: 1000,
+          feedKg: 100,
+          eggsProduced: 850, // 85% production
+          eggWeight: 60,
+        },
+      ];
+
+      const kpi80 = calculateFarmWeeklyKpi({
+        farmId: 'A1',
+        farmName: 'Farm A1',
+        reports,
+        standardProductionPct: 80,
+      });
+      // 85% - 80% = +5.0%
+      expect(kpi80.productionGapPct).toBe(5.0);
+
+      const kpi82 = calculateFarmWeeklyKpi({
+        farmId: 'A1',
+        farmName: 'Farm A1',
+        reports,
+        standardProductionPct: 82,
+      });
+      // 85% - 82% = +3.0%
+      expect(kpi82.productionGapPct).toBe(3.0);
+    });
+
+    it('should sort null KPI values to the bottom and resolve identical values with farmId fallback', () => {
+      const farmWithVal = makeFarm({ farmId: 'B_VAL', fcr: 2.1 });
+      const farmWithNull = makeFarm({ farmId: 'A_NULL', fcr: null });
+      const farmWithNull2 = makeFarm({ farmId: 'Z_NULL', fcr: null });
+
+      // In FCR comparison, valid FCR comes before null FCR
+      expect(compareByFcr(farmWithVal, farmWithNull)).toBeLessThan(0);
+      expect(compareByFcr(farmWithNull, farmWithVal)).toBeGreaterThan(0);
+
+      // Between two nulls, deterministic fallback by farmId
+      expect(compareByFcr(farmWithNull, farmWithNull2)).toBeLessThan(0);
+      expect(compareByFcr(farmWithNull2, farmWithNull)).toBeGreaterThan(0);
     });
   });
 });

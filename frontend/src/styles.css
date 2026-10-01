@@ -1090,6 +1090,27 @@ select.form-input option:checked,
   border: 1px solid #e6ece8;
 }
 
+.locked-item--interactive {
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 150ms ease, border-color 150ms ease, transform 100ms ease, box-shadow 150ms ease;
+}
+
+.locked-item--interactive:hover {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.locked-item--interactive:active {
+  background: #dcfce7;
+  transform: scale(0.985);
+}
+
+.locked-item--interactive:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 1px;
+}
+
 .locked-label {
   font-size: 10px;
   font-weight: 700;

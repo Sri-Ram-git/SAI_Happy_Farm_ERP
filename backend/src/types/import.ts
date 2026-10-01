@@ -3,6 +3,8 @@ export interface HistoricalImportRecord {
   farmId: string;
   submissionDate: string; // ISO YYYY-MM-DD
   birdCount?: number;
+  openingBirdCount?: number;
+  closingBirdCount?: number;
   feedKg?: number;
   feedGrams?: number;
   feedG?: number;
@@ -14,13 +16,14 @@ export interface HistoricalImportRecord {
   tempMin?: number | null;
   tempMax?: number | null;
   ammoniaPpm?: number | null;
-  eggWeight?: { min: number; max: number; avg: number };
-  bodyWeight?: { min: number; max: number; avg: number };
+  eggWeight?: { min: number; max: number; avg: number } | null;
+  bodyWeight?: { min: number; max: number; avg: number } | null;
   remarks?: string;
   flockId?: string;
   sourceFile: string;
   sourceRow: number;
   weekNumber?: number;
+  weekLabel?: string;
   damagedEggs?: number;
   floorEggs?: number;
   feedGramsPerBird?: number;
@@ -93,6 +96,7 @@ export interface ExecuteImportResponse {
   errors: ImportBatchError[];
   status: 'COMPLETED' | 'PARTIAL_FAILURE' | 'FAILED';
   isDryRun?: boolean;
+  worksheets?: WorksheetImportContribution[];
 }
 
 export type RevertBatchStatus =
@@ -104,6 +108,7 @@ export type RevertBatchStatus =
   | 'PARTIALLY_REVERTED'
   | 'REVERT_FAILED'
   | 'REVERT_REQUIRES_REVIEW'
+  | 'REVERT_CONFLICT'
   | 'NOT_REVERSIBLE';
 
 export interface ImportManifestTargetDoc {
@@ -116,13 +121,40 @@ export interface ImportManifestItem {
   action: 'CREATED' | 'UPDATED';
   farmId: string;
   submissionDate: string;
+  sourceFile?: string;
+  sheetName?: string | null;
   targetDocs: ImportManifestTargetDoc[];
-  beforeData?: Record<string, any>;
+  beforeData?: Record<string, any> | null;
   importedData?: Record<string, any>;
   importedAt: string;
   submissionVersion?: number;
   reversalStatus?: 'PENDING' | 'REVERTED' | 'CONFLICT' | 'SKIPPED';
   reversalError?: string;
+}
+
+export interface WorksheetImportContribution {
+  worksheetKey: string;
+  fileName: string;
+  sheetName?: string | null;
+  farmId?: string;
+  status: 'IMPORTED' | 'IMPORTED_WITH_ERRORS' | 'PARTIALLY_REVERTED' | 'REVERTED' | 'REVERT_FAILED' | 'REVERT_CONFLICT';
+  importedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  dateRange?: { minDate: string; maxDate: string } | null;
+  importTimestamp: string;
+  revertTimestamp?: string;
+  revertStatus?: 'NOT_REVERTED' | 'REVERTING' | 'REVERTED' | 'PARTIALLY_REVERTED' | 'REVERT_FAILED' | 'REVERT_CONFLICT';
+  canSafelyRevert: boolean;
+  notReversibleReason?: string;
+  revertAudit?: {
+    deletedCount: number;
+    restoredCount: number;
+    failedCount: number;
+    conflictsCount: number;
+  };
 }
 
 export interface RevertAuditRecord {
@@ -158,6 +190,7 @@ export interface ImportBatchRecord {
   errors: ImportBatchError[];
   overwrittenRecords?: OverwrittenRecord[];
   manifest?: ImportManifestItem[];
+  worksheets?: WorksheetImportContribution[];
   revertStatus?: RevertBatchStatus;
   revertAudit?: RevertAuditRecord;
   notReversibleReason?: string;
@@ -168,12 +201,15 @@ export interface RevertPreviewRecord {
   submissionDate: string;
   recordType: string;
   action: 'CREATED' | 'UPDATED';
+  sourceFile?: string;
   canSafelyRevert: boolean;
   reason?: string;
 }
 
 export interface RevertPreviewResponse {
   batchId: string;
+  worksheetKey?: string;
+  worksheetName?: string;
   importTimestamp: string;
   filenames: string[];
   affectedFarms: string[];
@@ -190,12 +226,15 @@ export interface RevertPreviewResponse {
 
 export interface RevertBatchRequest {
   confirmationBatchId: string;
+  worksheetKey?: string;
 }
 
 export interface RevertBatchResponse {
   revertOperationId: string;
   batchId: string;
+  worksheetKey?: string;
   status: RevertBatchStatus;
+  worksheetStatus?: string;
   deletedCount: number;
   restoredCount: number;
   skippedCount: number;

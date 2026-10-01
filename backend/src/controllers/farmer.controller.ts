@@ -19,6 +19,8 @@ export async function createFarmer(
       data: {
         uid: result.uid,
         email: result.email,
+        farmId: result.farmId,
+        flockId: result.flockId,
         message: 'Farmer created successfully',
       },
     });

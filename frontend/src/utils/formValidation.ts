@@ -66,9 +66,62 @@ export function calculateFeedGramsPerBird(feedKg: number | string, birdCount: nu
   return Number(((kg * 1000) / birdCount).toFixed(1));
 }
 
+import { KPI_THRESHOLDS } from '../config/kpiThresholds';
+
 export function isHighAmmonia(ammoniaPpm: number | string): boolean {
   const val = Number(ammoniaPpm);
   return Number.isFinite(val) && val > 10 && val <= 50;
+}
+
+export function isSeriousMortality(mortality: number | string, birdCount: number): {
+  isTotalFlockLoss: boolean;
+  isCriticalMortality: boolean;
+  isHighMortality: boolean;
+  mortalityPct: number;
+  isCritical: boolean;
+  isWarning: boolean;
+  requiresConfirmation: boolean;
+  ratePct: number;
+  message?: string;
+} {
+  const moVal = Number(mortality);
+  if (!Number.isFinite(moVal) || moVal <= 0 || !Number.isFinite(birdCount) || birdCount <= 0) {
+    return {
+      isTotalFlockLoss: false,
+      isCriticalMortality: false,
+      isHighMortality: false,
+      mortalityPct: 0,
+      isCritical: false,
+      isWarning: false,
+      requiresConfirmation: false,
+      ratePct: 0,
+    };
+  }
+  const pct = Number(((moVal / birdCount) * 100).toFixed(1));
+  const isTotalFlockLoss = moVal === birdCount;
+  const isCriticalMortality = isTotalFlockLoss || pct >= (KPI_THRESHOLDS.mortalityRateCritical ?? 10);
+  const isHighMortality = !isCriticalMortality && pct >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5);
+
+  let message: string | undefined;
+  if (isTotalFlockLoss) {
+    message = `CRITICAL ALERT: TOTAL FLOCK MORTALITY (${moVal} of ${birdCount} birds died, 100% loss).`;
+  } else if (isCriticalMortality) {
+    message = `CRITICAL ALERT: Mortality rate is ${pct}%, exceeding critical threshold (${KPI_THRESHOLDS.mortalityRateCritical}%).`;
+  } else if (isHighMortality) {
+    message = `WARNING: Mortality rate is ${pct}%, exceeding warning threshold (${KPI_THRESHOLDS.mortalityRateWarning}%).`;
+  }
+
+  return {
+    isTotalFlockLoss,
+    isCriticalMortality,
+    isHighMortality,
+    mortalityPct: pct,
+    isCritical: isCriticalMortality,
+    isWarning: isHighMortality,
+    requiresConfirmation: isTotalFlockLoss,
+    ratePct: pct,
+    message,
+  };
 }
 
 export function validateStep(
@@ -87,21 +140,37 @@ export function validateStep(
       else if (fq < 0 || isNaN(fq)) errors.feedQuantity = tr('validation.invalidNumber', 'Enter a valid non-negative number');
 
       const moVal = data.mortality === '' ? 0 : Number(data.mortality);
-      if (isNaN(moVal) || moVal < 0) errors.mortality = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
-      else if (birdCount > 0 && moVal > birdCount) errors.mortality = tr('validation.exceedsBirdCount', 'Cannot exceed bird count');
+      if (isNaN(moVal) || moVal < 0 || !Number.isInteger(moVal)) {
+        errors.mortality = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+      } else if (birdCount <= 0 && moVal > 0) {
+        errors.mortality = tr('validation.noEligibleBirds', 'Eligible bird count is 0. Mortality cannot exceed eligible bird count.');
+      } else if (birdCount > 0 && moVal > birdCount) {
+        errors.mortality = tr('validation.exceedsBirdCount', 'Cannot exceed eligible bird count');
+      }
 
       const cuVal = data.culling === '' ? 0 : Number(data.culling);
-      if (isNaN(cuVal) || cuVal < 0) errors.culling = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
-      else if (birdCount > 0 && cuVal > birdCount) errors.culling = tr('validation.exceedsBirdCount', 'Cannot exceed bird count');
-      else if (birdCount > 0 && moVal + cuVal > birdCount) errors.culling = tr('validation.mortalityCullingExceeds', 'Mortality + Culling exceeds bird count');
+      if (isNaN(cuVal) || cuVal < 0 || !Number.isInteger(cuVal)) {
+        errors.culling = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+      } else if (birdCount <= 0 && cuVal > 0) {
+        errors.culling = tr('validation.noEligibleBirds', 'Eligible bird count is 0. Culling cannot exceed eligible bird count.');
+      } else if (birdCount > 0 && cuVal > birdCount) {
+        errors.culling = tr('validation.exceedsBirdCount', 'Cannot exceed eligible bird count');
+      } else if (birdCount > 0 && moVal + cuVal > birdCount) {
+        errors.culling = tr('validation.mortalityCullingExceeds', 'Mortality + Culling exceeds eligible bird count');
+        if (!errors.mortality) {
+          errors.mortality = tr('validation.mortalityCullingExceeds', 'Mortality + Culling exceeds eligible bird count');
+        }
+      }
       break;
     }
     case 1: {
       const ep = Number(data.eggsProduced);
       const maxAllowedEggs = Math.floor(birdCount * 0.95);
-      if (data.eggsProduced === '') errors.eggsProduced = tr('validation.required', 'Required');
-      else if (!Number.isInteger(ep) || ep < 0) errors.eggsProduced = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
-      else if (birdCount > 0 && ep > maxAllowedEggs) {
+      if (data.eggsProduced === '') {
+        errors.eggsProduced = tr('validation.required', 'Required');
+      } else if (!Number.isInteger(ep) || ep < 0) {
+        errors.eggsProduced = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+      } else if (birdCount > 0 && ep > maxAllowedEggs) {
         errors.eggsProduced = tr(
           'validation.exceedsProductionRate',
           `Egg production cannot exceed 95% of bird count (max ${maxAllowedEggs})`,
@@ -110,14 +179,38 @@ export function validateStep(
       }
 
       const se = Number(data.selectionEggs);
-      if (data.selectionEggs === '') errors.selectionEggs = tr('validation.required', 'Required');
-      else if (!Number.isInteger(se) || se < 0) errors.selectionEggs = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
-      else if (ep > 0 && se > ep) errors.selectionEggs = tr('validation.exceedsEggsProduced', 'Cannot exceed eggs produced');
+      if (data.selectionEggs === '') {
+        errors.selectionEggs = tr('validation.required', 'Required');
+      } else if (!Number.isInteger(se) || se < 0) {
+        errors.selectionEggs = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+      } else if (!isNaN(ep) && ep >= 0 && se > ep) {
+        errors.selectionEggs = tr('validation.exceedsEggsProduced', 'Cannot exceed eggs produced');
+      }
 
+      let de = 0;
       if (data.damagedEggs !== '') {
-        const de = Number(data.damagedEggs);
-        if (isNaN(de) || !Number.isInteger(de) || de < 0) {
+        const parsedDe = Number(data.damagedEggs);
+        if (isNaN(parsedDe) || !Number.isInteger(parsedDe) || parsedDe < 0) {
           errors.damagedEggs = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+        } else {
+          de = parsedDe;
+        }
+      }
+
+      // Production, Selection, and Damaged Eggs Constraint:
+      // Selection Eggs + Damaged Eggs must never exceed Egg Production
+      if (!errors.eggsProduced && !errors.selectionEggs && !errors.damagedEggs) {
+        if (se + de > ep) {
+          errors.selectionEggs = tr(
+            'validation.selectionDamagedExceeds',
+            'Selection + Damaged eggs cannot exceed Egg Production'
+          );
+          if (data.damagedEggs !== '' && de > 0) {
+            errors.damagedEggs = tr(
+              'validation.selectionDamagedExceeds',
+              'Selection + Damaged eggs cannot exceed Egg Production'
+            );
+          }
         }
       }
 

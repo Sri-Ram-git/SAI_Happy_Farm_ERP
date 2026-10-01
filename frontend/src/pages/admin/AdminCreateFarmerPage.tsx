@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { createFarmer, type CreateFarmerPayload } from '../../services/userDataService';
+import { FormLoadingOverlay } from '../../components/common/FormLoadingOverlay';
 
 interface FarmerForm {
   name: string;
@@ -53,8 +54,21 @@ export function AdminCreateFarmerPage() {
 
     if (!form.farmName.trim()) errs.farmName = 'Farm name is required';
 
-    if (form.initialBirdCount && Number(form.initialBirdCount) < 0) errs.initialBirdCount = 'Cannot be negative';
-    if (form.initialFeedKg && Number(form.initialFeedKg) < 0) errs.initialFeedKg = 'Cannot be negative';
+    if (form.initialBirdCount !== '') {
+      const birds = Number(form.initialBirdCount);
+      if (isNaN(birds) || birds < 0) {
+        errs.initialBirdCount = 'Cannot be negative';
+      } else if (!Number.isInteger(birds)) {
+        errs.initialBirdCount = 'Initial bird count must be a whole number';
+      }
+    }
+
+    if (form.initialFeedKg !== '') {
+      const feed = Number(form.initialFeedKg);
+      if (isNaN(feed) || feed < 0) {
+        errs.initialFeedKg = 'Cannot be negative';
+      }
+    }
 
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -62,7 +76,7 @@ export function AdminCreateFarmerPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (submitting || !validate()) return;
 
     setSubmitting(true);
     setGeneralError(null);
@@ -80,20 +94,22 @@ export function AdminCreateFarmerPage() {
       };
 
       const result = await createFarmer(payload);
-      setSuccessMessage(`Farmer "${result.email}" created successfully.`);
+      const flockNotice = result.flockId ? ' with opening flock initialized' : '';
+      const farmNotice = result.farmId ? ` [Farm ID: ${result.farmId}]` : '';
+      setSuccessMessage(`Farmer "${result.email}" created successfully${farmNotice}${flockNotice}.`);
+      setSubmitting(false);
 
       setTimeout(() => {
         navigate('/admin/users');
-      }, 1500);
+      }, 1200);
     } catch (err: any) {
       console.error('[AdminCreateFarmer] Error:', err);
+      setSubmitting(false);
       if (err.fields && Object.keys(err.fields).length > 0) {
         setErrors(err.fields);
       } else {
         setGeneralError(err.message || 'Failed to create farmer account');
       }
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -105,12 +121,20 @@ export function AdminCreateFarmerPage() {
             <h2>Create Farmer Account</h2>
             <p style={{ color: '#6b7280', marginTop: 4 }}>Add a new farmer and assign farm details</p>
           </div>
-          <button className="btn btn--outline" onClick={() => navigate('/admin/users')}>
+          <button className="btn btn--outline" onClick={() => navigate('/admin/users')} disabled={submitting}>
             ← Back to Users
           </button>
         </div>
 
-        <div className="section-card" style={{ padding: 24, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb' }}>
+        <div className="section-card" style={{ position: 'relative', padding: 24, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', minHeight: 300 }}>
+          {submitting && (
+            <FormLoadingOverlay
+              title="Creating farmer account..."
+              subtitle="Please wait while we securely save the account details."
+              role="farmer"
+            />
+          )}
+
           {generalError && <div className="alert alert--error" style={{ marginBottom: 16 }}>{generalError}</div>}
           {successMessage && <div className="alert alert--success" style={{ marginBottom: 16 }}>{successMessage}</div>}
 

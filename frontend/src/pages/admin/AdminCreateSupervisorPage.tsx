@@ -6,6 +6,7 @@ import { LoadingState } from '../../components/dashboard/LoadingState';
 import { createSupervisor, type CreateSupervisorPayload } from '../../services/userDataService';
 import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { FarmMultiSelect } from '../../components/common/FarmMultiSelect';
+import { FormLoadingOverlay } from '../../components/common/FormLoadingOverlay';
 
 export function AdminCreateSupervisorPage() {
   const { userProfile } = useAuth();
@@ -69,7 +70,7 @@ export function AdminCreateSupervisorPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (submitting || !validate()) return;
 
     setSubmitting(true);
     setGeneralError(null);
@@ -86,19 +87,19 @@ export function AdminCreateSupervisorPage() {
 
       const result = await createSupervisor(payload);
       setSuccessMessage(`Supervisor "${result.email}" created successfully.`);
+      setSubmitting(false);
 
       setTimeout(() => {
         navigate('/admin/users');
-      }, 1500);
+      }, 1200);
     } catch (err: any) {
       console.error('[AdminCreateSupervisor] Error:', err);
+      setSubmitting(false);
       if (err.fields && Object.keys(err.fields).length > 0) {
         setErrors(err.fields);
       } else {
         setGeneralError(err.message || 'Failed to create supervisor account');
       }
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -118,12 +119,20 @@ export function AdminCreateSupervisorPage() {
             <h2>Create Supervisor Account</h2>
             <p style={{ color: '#6b7280', marginTop: 4 }}>Add a new supervisor and assign multiple farm responsibilities</p>
           </div>
-          <button className="btn btn--outline" onClick={() => navigate('/admin/users')}>
+          <button className="btn btn--outline" onClick={() => navigate('/admin/users')} disabled={submitting}>
             ← Back to Users
           </button>
         </div>
 
-        <div className="section-card" style={{ padding: 24, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb' }}>
+        <div className="section-card" style={{ position: 'relative', padding: 24, borderRadius: 8, backgroundColor: '#ffffff', border: '1px solid #e5e7eb', minHeight: 300 }}>
+          {submitting && (
+            <FormLoadingOverlay
+              title="Creating supervisor account..."
+              subtitle="Please wait while we securely save the account details."
+              role="supervisor"
+            />
+          )}
+
           {generalError && <div className="alert alert--error" style={{ marginBottom: 16 }}>{generalError}</div>}
           {successMessage && <div className="alert alert--success" style={{ marginBottom: 16 }}>{successMessage}</div>}
 

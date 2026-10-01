@@ -22,7 +22,7 @@ export const CreateFarmerSchema = z
       .string()
       .min(1, 'Farm Name is required')
       .max(100, 'Farm Name must be 100 characters or fewer'),
-    initialBirdCount: z.number().nonnegative('Must be 0 or positive').optional(),
+    initialBirdCount: z.number().int('Initial bird count must be a whole number').nonnegative('Must be 0 or positive').optional(),
     initialFeedKg: z.number().nonnegative('Must be 0 or positive').optional(),
   })
   .strict();

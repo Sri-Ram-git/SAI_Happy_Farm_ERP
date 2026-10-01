@@ -110,12 +110,54 @@ export interface FeedLogDoc {
   logId: string;
   farmId: string;
   quantityKg: number;
-  previousStockKg: number;
-  newStockKg: number;
+  previousStockKg?: number;
+  newStockKg?: number;
   loadedAt: string;
   recordedBy: string;
   notes?: string;
   type: 'FEED_LOAD';
+  isHistorical?: boolean;
+  importBatchId?: string;
+}
+
+export function normalizeFeedLogDoc(docId: string, data: any): FeedLogDoc {
+  let loadedAtStr = '';
+  const rawDate = data?.loadedAt || data?.createdAt || data?.reportDate || data?.date;
+  if (typeof rawDate === 'string') {
+    loadedAtStr = rawDate;
+  } else if (rawDate && typeof rawDate.toDate === 'function') {
+    try {
+      loadedAtStr = rawDate.toDate().toISOString();
+    } catch {
+      loadedAtStr = '';
+    }
+  } else if (rawDate && typeof rawDate._seconds === 'number') {
+    loadedAtStr = new Date(rawDate._seconds * 1000).toISOString();
+  } else if (rawDate && typeof rawDate.seconds === 'number') {
+    loadedAtStr = new Date(rawDate.seconds * 1000).toISOString();
+  }
+
+  const prevStock = typeof data?.previousStockKg === 'number'
+    ? data.previousStockKg
+    : (data?.previousStockKg !== undefined ? Number(data.previousStockKg) : undefined);
+
+  const newStock = typeof data?.newStockKg === 'number'
+    ? data.newStockKg
+    : (data?.newStockKg !== undefined ? Number(data.newStockKg) : undefined);
+
+  return {
+    logId: docId,
+    farmId: String(data?.farmId || ''),
+    quantityKg: Number(data?.quantityKg ?? data?.feedKg ?? 0),
+    previousStockKg: prevStock,
+    newStockKg: newStock,
+    loadedAt: loadedAtStr,
+    recordedBy: String(data?.recordedBy || data?.loadedBy || data?.userId || 'Admin'),
+    notes: data?.notes || data?.remarks || '',
+    type: 'FEED_LOAD',
+    isHistorical: Boolean(data?.isHistorical),
+    importBatchId: data?.importBatchId,
+  };
 }
 
 export async function addFeedLoad(
@@ -124,6 +166,13 @@ export async function addFeedLoad(
   loadedBy: string,
   notes: string = '',
 ): Promise<void> {
+  if (!farmId) {
+    throw new Error('FARM_ID_REQUIRED');
+  }
+  if (isNaN(feedLoadKg) || feedLoadKg <= 0) {
+    throw new Error('INVALID_FEED_QUANTITY');
+  }
+
   const now = new Date().toISOString();
   const reportDate = getIstDate();
 
@@ -137,8 +186,8 @@ export async function addFeedLoad(
       throw new Error('FARM_NOT_FOUND');
     }
     const farmData = farmSnap.data();
-    const currentStock = Number(farmData.currentFeedKg ?? 0);
-    const totalLoaded = Number(farmData.totalFeedLoadedKg ?? 0);
+    const currentStock = Number(farmData.currentFeedKg ?? farmData.initialFeedKg ?? 0);
+    const totalLoaded = Number(farmData.totalFeedLoadedKg ?? farmData.initialFeedKg ?? 0);
     const newStockKg = currentStock + feedLoadKg;
     const newTotalLoadedKg = totalLoaded + feedLoadKg;
 
@@ -181,13 +230,14 @@ export async function getFeedLogsByFarm(farmId: string): Promise<FeedLogDoc[]> {
   if (!farmId) return [];
   const snap = await db.collection('logs').doc(farmId).collection('feedLogs').get();
   return snap.docs
-    .map((doc: any) => ({ logId: doc.id, ...doc.data() } as FeedLogDoc))
+    .map((doc: any) => normalizeFeedLogDoc(doc.id, doc.data()))
     .sort((a: FeedLogDoc, b: FeedLogDoc) => (b.loadedAt || '').localeCompare(a.loadedAt || ''));
 }
 
 export function subscribeToFeedLogsByFarm(
   farmId: string,
   callback: (logs: FeedLogDoc[]) => void,
+  onError?: (error: Error) => void,
 ): () => void {
   if (!farmId) {
     callback([]);
@@ -196,13 +246,17 @@ export function subscribeToFeedLogsByFarm(
   return db.collection('logs').doc(farmId).collection('feedLogs').onSnapshot(
     (snap: any) => {
       const logs = snap.docs
-        .map((doc: any) => ({ logId: doc.id, ...doc.data() } as FeedLogDoc))
+        .map((doc: any) => normalizeFeedLogDoc(doc.id, doc.data()))
         .sort((a: FeedLogDoc, b: FeedLogDoc) => (b.loadedAt || '').localeCompare(a.loadedAt || ''));
       callback(logs);
     },
     (err: any) => {
       console.error('[inventoryService] subscribeToFeedLogsByFarm error:', err.message || err);
-      callback([]);
+      if (onError) {
+        onError(err);
+      } else {
+        callback([]);
+      }
     },
   );
 }

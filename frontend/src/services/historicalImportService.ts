@@ -12,6 +12,7 @@ export type StandardFieldKey =
   | 'birdCount'
   | 'feedKg'
   | 'feedGrams'
+  | 'feedGramsPerBird'
   | 'mortality'
   | 'culling'
   | 'eggsProduced'
@@ -101,12 +102,21 @@ export const STANDARD_FIELDS: FieldDefinition[] = [
   },
   {
     key: 'feedGrams',
-    label: 'Feed Consumed (Grams / Bird)',
+    label: 'Feed Consumed Total (Grams)',
     category: 'feed',
     type: 'number',
     synonyms: [
-      'feed (g)', 'feed g', 'feed grams', 'feed (grams)', 'feed/bird', 'feed per bird',
-      'feed gms/bird', 'feed gms per bird', 'feed g/bird', 'g/bird', 'grams'
+      'feed (g)', 'feed g', 'feed grams', 'feed (grams)', 'total feed grams', 'feed gm', 'feed gms'
+    ],
+  },
+  {
+    key: 'feedGramsPerBird',
+    label: 'Feed Consumed (Gms / Bird)',
+    category: 'feed',
+    type: 'number',
+    synonyms: [
+      'feed/bird', 'feed per bird', 'feed gms/bird', 'feed gms per bird',
+      'feed g/bird', 'g/bird', 'gms/bird', 'feed per hen', 'gm/bird'
     ],
   },
   {
@@ -260,7 +270,13 @@ export interface ParsedFile {
   status: 'PARSED' | 'ERROR';
   errorMessage?: string;
   formulaWarningsCount?: number;
+  totalFormulaCount?: number;
+  formulaErrorCount?: number;
   unusualLayoutWarning?: string;
+  ignoredNonDataRows?: Array<{ rowIdx: number; label: string; reason: string }>;
+  detectedFarmFromSheet?: string;
+  detectedFarmFromFilename?: string;
+  farmConflict?: { sheetFarm?: string; filenameFarm?: string; reason: string };
 }
 
 export interface ValidatedRow {
@@ -272,7 +288,10 @@ export interface ValidatedRow {
   submissionDate: string; // ISO YYYY-MM-DD
   rawDate: string;
   weekNumber?: string | number;
+  weekLabel?: string;
   birdCount?: number;
+  openingBirdCount?: number;
+  closingBirdCount?: number;
   feedKg?: number;
   feedGrams?: number;
   feedGramsPerBird?: number;
@@ -689,7 +708,89 @@ export interface XlsxWorksheetInfo {
   unusualLayoutWarning?: string;
   hasFormulas?: boolean;
   formulaWarningCount?: number;
+  totalFormulaCount?: number;
+  formulaErrorCount?: number;
+  ignoredNonDataRows?: Array<{ rowIdx: number; label: string; reason: string }>;
   totalRawRowsCount?: number;
+  detectedFarmFromSheet?: string;
+  detectedFarmFromFilename?: string;
+  farmConflict?: { sheetFarm?: string; filenameFarm?: string; reason: string };
+}
+
+/**
+ * Parses an Excel (.xlsx) workbook from ArrayBuffer or Uint8Array.
+ * Extracts all worksheets, detects horizontal/transposed farm sheets vs standard vertical sheets,
+ * detects hidden and standard curve sheets, inspects formulas and cached values,
+ * accurately handles Excel date cells and serial numbers without timezone shifts,
+ * ignores empty rows/columns, and identifies verified farm codes.
+ */
+/**
+ * Safely formats an Excel cell value for historical import.
+ * Handles Excel date serials, formula errors (#DIV/0!, etc.), text dates with format hints, and clean numbers.
+ */
+function formatExcelCellValue(
+  cell: any,
+  isDateCell: boolean,
+  preference: 'AUTO' | 'DD/MM/YYYY' | 'MM/DD/YYYY' | 'YYYY-MM-DD' = 'AUTO',
+): { formatted: string; hasFormula: boolean; isFormulaError: boolean } {
+  if (!cell) {
+    return { formatted: '', hasFormula: false, isFormulaError: false };
+  }
+
+  const hasFormula = Boolean(cell.f);
+  let isFormulaError = false;
+  let formatted = '';
+
+  // 1. Formula Error handling
+  if (cell.t === 'e' || (typeof cell.v === 'string' && cell.v.startsWith('#'))) {
+    isFormulaError = true;
+    formatted = cell.w || (typeof cell.v === 'string' ? cell.v : '#ERROR');
+    return { formatted, hasFormula, isFormulaError };
+  }
+
+  // 2. Date Cell handling
+  if (isDateCell) {
+    // A. Excel numeric serial date (e.g. 46175)
+    if (typeof cell.v === 'number' && cell.v >= 20000 && cell.v <= 60000) {
+      const iso = excelSerialToIsoDate(cell.v);
+      if (iso) {
+        return { formatted: iso, hasFormula, isFormulaError };
+      }
+    }
+    // B. Native JS Date (if cell.t === 'd' or cell.v is Date)
+    if (cell.t === 'd' || cell.v instanceof Date) {
+      const d = cell.v as Date;
+      const y = d.getUTCFullYear();
+      const m = d.getUTCMonth() + 1;
+      const day = d.getUTCDate();
+      if (isValidDateParts(y, m, day)) {
+        return { formatted: formatDateParts(y, m, day), hasFormula, isFormulaError };
+      }
+    }
+    // C. Formatted text date with cell.z format hint
+    const dateText = cell.w !== undefined ? String(cell.w).trim() : String(cell.v).trim();
+    if (dateText) {
+      const parsed = parseFlexibleDate(dateText, preference, cell.z);
+      if (parsed.isoDate) {
+        return { formatted: parsed.isoDate, hasFormula, isFormulaError };
+      }
+    }
+  }
+
+  // 3. General cell formatting
+  // Number with date format string in Excel
+  if (cell.t === 'n' && typeof cell.v === 'number' && cell.z && XLSX.SSF.is_date(cell.z)) {
+    const iso = excelSerialToIsoDate(cell.v);
+    if (iso) return { formatted: iso, hasFormula, isFormulaError };
+  }
+
+  if (cell.w !== undefined) {
+    formatted = String(cell.w).trim();
+  } else if (cell.v !== undefined && cell.v !== null) {
+    formatted = String(cell.v).trim();
+  }
+
+  return { formatted, hasFormula, isFormulaError };
 }
 
 /**
@@ -708,7 +809,7 @@ export function parseXlsxWorkbook(
   try {
     workbook = XLSX.read(data, {
       type: 'array',
-      cellDates: true,
+      cellDates: false,
       cellNF: true,
       cellFormula: true,
     });
@@ -720,6 +821,7 @@ export function parseXlsxWorkbook(
     throw new Error('Excel workbook contains no worksheets');
   }
 
+  const detectedFarmFromFilename = _filename ? detectFarmFromText(_filename, knownFarmIds) : undefined;
   const results: XlsxWorksheetInfo[] = [];
 
   for (const sheetName of workbook.SheetNames) {
@@ -744,13 +846,27 @@ export function parseXlsxWorkbook(
 
     const range = XLSX.utils.decode_range(ws['!ref']);
     let hasFormulas = false;
-    let formulaWarningCount = 0;
+    let totalFormulaCount = 0;
+    let formulaErrorCount = 0;
 
     // Detect farm ID from sheet name
-    let detectedFarmId = detectFarmFromText(sheetName, knownFarmIds);
+    const detectedFarmFromSheet = detectFarmFromText(sheetName, knownFarmIds);
 
-    // Check if worksheet is a reference standard curve (e.g. "CF STD", "FR STD", "Standard Curve")
-    const isReferenceSheet = /^(?:cf|fr)?\s*(?:std|standard|curve|template)\b/i.test(sheetName.trim());
+    // Identify farm mismatch / conflict between filename and sheet name
+    let farmConflict: { sheetFarm?: string; filenameFarm?: string; reason: string } | undefined;
+    if (detectedFarmFromFilename && detectedFarmFromSheet && detectedFarmFromFilename !== detectedFarmFromSheet) {
+      farmConflict = {
+        sheetFarm: detectedFarmFromSheet,
+        filenameFarm: detectedFarmFromFilename,
+        reason: `Filename indicates farm "${detectedFarmFromFilename}" but worksheet is named "${detectedFarmFromSheet}".`,
+      };
+    }
+
+    // Default detectedFarmId: sheet name is more specific than filename for multi-sheet workbooks
+    let detectedFarmId = detectedFarmFromSheet || detectedFarmFromFilename;
+
+    // Check if worksheet is a reference standard curve (e.g. "CF STD", "FR STD", "Cage Free STD", "Free Range STD")
+    const isReferenceSheet = /(?:cage\s*free|free\s*range|cf|fr)?\s*(?:std|standard|curve|template)/i.test(sheetName.trim());
 
     // -------------------------------------------------------------
     // TRANSPOSED (HORIZONTAL LAYOUT) DETECTION
@@ -786,7 +902,7 @@ export function parseXlsxWorkbook(
           if (!cell) continue;
           if (cell.t === 'd' || cell.v instanceof Date) {
             dateCount++;
-          } else if (cell.t === 'n' && typeof cell.v === 'number' && cell.z && XLSX.SSF.is_date(cell.z)) {
+          } else if (cell.t === 'n' && typeof cell.v === 'number' && (cell.v >= 20000 && cell.v <= 60000)) {
             dateCount++;
           } else if (typeof cell.v === 'string' && /^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}/.test(cell.v.trim())) {
             dateCount++;
@@ -803,9 +919,21 @@ export function parseXlsxWorkbook(
 
     const isTransposed = bestScore >= 3 && dateRowIdx !== null;
 
-    if (isTransposed) {
-      // 1. Collect metric rows
+    if (isTransposed && dateRowIdx !== null) {
+      // 1. Identify active date columns first to verify which metric rows contain real data
+      const dateColumns: number[] = [];
+      for (let c = bestLabelCol + 1; c <= range.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: dateRowIdx, c });
+        const cell = ws[addr];
+        if (cell && (cell.v !== undefined || cell.w !== undefined)) {
+          const { formatted } = formatExcelCellValue(cell, true, 'AUTO');
+          if (formatted) dateColumns.push(c);
+        }
+      }
+
+      // 2. Collect metric rows - filter out stray labels/notes that have no data in date columns
       const metricRows: Array<{ rowIdx: number; label: string }> = [];
+      const ignoredNonDataRows: Array<{ rowIdx: number; label: string; reason: string }> = [];
       const usedLabels = new Set<string>();
 
       for (let r = range.s.r; r <= range.e.r; r++) {
@@ -816,13 +944,32 @@ export function parseXlsxWorkbook(
           label = 'Date';
         }
         if (label) {
-          let uniqueLabel = label;
-          let counter = 1;
-          while (usedLabels.has(uniqueLabel.toLowerCase())) {
-            uniqueLabel = `${label}_${counter++}`;
+          // Check if this row has at least one cell with content across active date columns
+          let hasContentInDateCols = false;
+          for (const c of dateColumns) {
+            const valAddr = XLSX.utils.encode_cell({ r, c });
+            const valCell = ws[valAddr];
+            if (valCell && valCell.v !== undefined && valCell.v !== null && String(valCell.v).trim() !== '') {
+              hasContentInDateCols = true;
+              break;
+            }
           }
-          usedLabels.add(uniqueLabel.toLowerCase());
-          metricRows.push({ rowIdx: r, label: uniqueLabel });
+
+          if (r === dateRowIdx || hasContentInDateCols) {
+            let uniqueLabel = label;
+            let counter = 1;
+            while (usedLabels.has(uniqueLabel.toLowerCase())) {
+              uniqueLabel = `${label}_${counter++}`;
+            }
+            usedLabels.add(uniqueLabel.toLowerCase());
+            metricRows.push({ rowIdx: r, label: uniqueLabel });
+          } else {
+            ignoredNonDataRows.push({
+              rowIdx: r + 1,
+              label,
+              reason: 'Row has no data across any date columns (stray label or note)',
+            });
+          }
         }
       }
 
@@ -843,45 +990,30 @@ export function parseXlsxWorkbook(
             return;
           }
 
-          let formatted = '';
-          if (cell.f) {
+          const isDateCell = rowIdx === dateRowIdx;
+          const { formatted, hasFormula: cellHasFormula, isFormulaError } = formatExcelCellValue(cell, isDateCell, 'AUTO');
+
+          if (cellHasFormula) {
             hasFormulas = true;
-            if (cell.t === 'e' || (typeof cell.v === 'string' && cell.v.startsWith('#'))) {
-              formulaWarningCount++;
-              formatted = String(cell.v || '#ERROR');
-            }
+            totalFormulaCount++;
+          }
+          if (isFormulaError) {
+            formulaErrorCount++;
           }
 
-          if (!formatted) {
-            if (cell.w !== undefined && /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$|^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(cell.w.trim())) {
-              const parsed = parseFlexibleDate(cell.w.trim());
-              formatted = parsed.isoDate || cell.w.trim();
-            } else if (cell.t === 'd' || cell.v instanceof Date) {
-              if (cell.w && /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(cell.w.trim())) {
-                const parsed = parseFlexibleDate(cell.w.trim());
-                formatted = parsed.isoDate || cell.w.trim();
-              } else {
-                const d = cell.v as Date;
-                formatted = formatDateParts(d.getFullYear(), d.getMonth() + 1, d.getDate());
-              }
-            } else if (cell.t === 'n' && typeof cell.v === 'number' && cell.z && XLSX.SSF.is_date(cell.z)) {
-              formatted = excelSerialToIsoDate(cell.v) || (cell.w ? String(cell.w).trim() : String(cell.v));
-            } else if (typeof cell.v === 'number' && label.toLowerCase().includes('week')) {
-              formatted = String(Number(cell.v.toFixed(1)));
-            } else if (cell.w !== undefined) {
-              formatted = String(cell.w).trim();
-            } else {
-              formatted = String(cell.v).trim();
-            }
+          // Special clean formatting for week numbers (preserve decimals e.g. 44.1)
+          let finalVal = formatted;
+          if (typeof cell.v === 'number' && label.toLowerCase().includes('week') && !isFormulaError) {
+            finalVal = String(Number(cell.v.toFixed(1)));
           }
 
-          if (formatted) colHasData = true;
-          if (rowIdx === dateRowIdx && formatted && /^\d{4}-\d{2}-\d{2}$/.test(formatted)) {
-            if (!minDate || formatted < minDate) minDate = formatted;
-            if (!maxDate || formatted > maxDate) maxDate = formatted;
+          if (finalVal) colHasData = true;
+          if (rowIdx === dateRowIdx && finalVal && /^\d{4}-\d{2}-\d{2}$/.test(finalVal)) {
+            if (!minDate || finalVal < minDate) minDate = finalVal;
+            if (!maxDate || finalVal > maxDate) maxDate = finalVal;
           }
 
-          rowData[label] = formatted;
+          rowData[label] = finalVal;
         });
 
         if (colHasData) {
@@ -906,10 +1038,16 @@ export function parseXlsxWorkbook(
         detectedFarmId,
         detectedRecordType: detectedType,
         mappings,
-        unusualLayoutWarning: 'Transposed horizontal layout detected and normalized (metrics in rows, dates in columns)',
+        unusualLayoutWarning: 'Transposed horizontal matrix detected (metrics in rows, dates in columns)',
         hasFormulas,
-        formulaWarningCount,
+        formulaWarningCount: formulaErrorCount,
+        totalFormulaCount,
+        formulaErrorCount,
+        ignoredNonDataRows: ignoredNonDataRows.length > 0 ? ignoredNonDataRows : undefined,
         totalRawRowsCount: rows.length,
+        detectedFarmFromSheet,
+        detectedFarmFromFilename,
+        farmConflict,
       });
 
       continue;
@@ -933,48 +1071,21 @@ export function parseXlsxWorkbook(
           continue;
         }
 
-        let formatted = '';
-        const raw = cell.v;
-        let formula: string | undefined;
-        let isError = false;
+        const { formatted, hasFormula: cellHasFormula, isFormulaError } = formatExcelCellValue(cell, false, 'AUTO');
 
-        if (cell.f) {
+        if (cellHasFormula) {
           hasFormulas = true;
-          formula = cell.f;
-          if (cell.t === 'e' || (typeof cell.v === 'string' && cell.v.startsWith('#'))) {
-            formulaWarningCount++;
-            isError = true;
-            formatted = String(cell.v || '#ERROR');
-          }
+          totalFormulaCount++;
         }
-
-        if (!isError) {
-          if (cell.w !== undefined && /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$|^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(cell.w.trim())) {
-            const parsed = parseFlexibleDate(cell.w.trim());
-            formatted = parsed.isoDate || cell.w.trim();
-          } else if (cell.t === 'd' || cell.v instanceof Date) {
-            if (cell.w && /^\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}$/.test(cell.w.trim())) {
-              const parsed = parseFlexibleDate(cell.w.trim());
-              formatted = parsed.isoDate || cell.w.trim();
-            } else {
-              const d = cell.v as Date;
-              formatted = formatDateParts(d.getFullYear(), d.getMonth() + 1, d.getDate());
-            }
-          } else if (cell.t === 'n' && typeof cell.v === 'number' && cell.z && XLSX.SSF.is_date(cell.z)) {
-            const iso = excelSerialToIsoDate(cell.v);
-            formatted = iso || (cell.w ? String(cell.w).trim() : String(cell.v));
-          } else if (cell.w !== undefined) {
-            formatted = String(cell.w).trim();
-          } else if (cell.v !== undefined && cell.v !== null) {
-            formatted = String(cell.v).trim();
-          }
+        if (isFormulaError) {
+          formulaErrorCount++;
         }
 
         if (formatted.length > 0) {
           rowHasContent = true;
         }
 
-        rowCells.push({ formatted, raw, formula, isError });
+        rowCells.push({ formatted, raw: cell.v, formula: cell.f, isError: isFormulaError });
       }
 
       // Skip completely empty rows
@@ -1101,8 +1212,13 @@ export function parseXlsxWorkbook(
       mappings,
       unusualLayoutWarning,
       hasFormulas,
-      formulaWarningCount,
+      formulaWarningCount: formulaErrorCount,
+      totalFormulaCount,
+      formulaErrorCount,
       totalRawRowsCount: dataRows.length,
+      detectedFarmFromSheet,
+      detectedFarmFromFilename,
+      farmConflict,
     });
   }
 
@@ -1171,6 +1287,7 @@ export function detectColumnMappings(
 ): { mappings: ColumnMapping[]; detectedType: RecordType } {
   let isFeedLoadCandidate = false;
   let isFlockCandidate = false;
+  const assignedKeys = new Set<StandardFieldKey>();
 
   const mappings: ColumnMapping[] = headers.map((header) => {
     const normalized = normalizeHeaderStr(header);
@@ -1179,20 +1296,47 @@ export function detectColumnMappings(
       .map((r) => r.data[header] || '')
       .filter((v) => v.length > 0);
 
+    const isPercentage = normalized.includes('%') || normalized.includes('pct') || normalized.includes('percent');
+    const isGenericStat = /^(?:avg|average|min|max|total|sum|std|diff)$/i.test(normalized);
+
     let bestMatch: StandardFieldKey = 'ignore';
     let highestConfidence: 'HIGH' | 'MEDIUM' | 'AMBIGUOUS' | 'UNMAPPED' = 'UNMAPPED';
 
-    for (const field of STANDARD_FIELDS) {
-      // 1. Exact match with standard synonyms
-      if (field.synonyms.includes(normalized)) {
-        bestMatch = field.key;
-        highestConfidence = 'HIGH';
-        break;
+    if (isGenericStat) {
+      highestConfidence = 'AMBIGUOUS';
+    } else {
+      for (const field of STANDARD_FIELDS) {
+        // Prevent percentage columns from mapping to count/mass fields
+        const isFieldPercentage = field.key.toLowerCase().includes('pct');
+        if (isPercentage && !isFieldPercentage) {
+          continue;
+        }
+
+        // 1. Exact match with standard synonyms
+        if (field.synonyms.includes(normalized)) {
+          bestMatch = field.key;
+          highestConfidence = 'HIGH';
+          break;
+        }
+
+        // 2. Substring match (require substantial match length to avoid spurious collisions)
+        if (normalized.length >= 4 && field.synonyms.some((syn) => {
+          if (syn.length < 4) return false;
+          return normalized.includes(syn) || syn.includes(normalized);
+        })) {
+          bestMatch = field.key;
+          highestConfidence = 'MEDIUM';
+        }
       }
-      // 2. Substring match
-      if (field.synonyms.some((syn) => normalized.includes(syn) || syn.includes(normalized))) {
-        bestMatch = field.key;
-        highestConfidence = 'MEDIUM';
+    }
+
+    // Collision check: prevent multiple columns from mapping to the same target field automatically
+    if (bestMatch !== 'ignore') {
+      if (assignedKeys.has(bestMatch)) {
+        bestMatch = 'ignore';
+        highestConfidence = 'AMBIGUOUS';
+      } else {
+        assignedKeys.add(bestMatch);
       }
     }
 
@@ -1221,6 +1365,7 @@ export function detectColumnMappings(
 export function parseFlexibleDate(
   rawVal: string,
   preference: 'AUTO' | 'DD/MM/YYYY' | 'MM/DD/YYYY' | 'YYYY-MM-DD' = 'AUTO',
+  formatPattern?: string,
 ): { isoDate: string | null; error?: string } {
   if (!rawVal || !rawVal.trim()) {
     return { isoDate: null, error: 'Empty date' };
@@ -1274,6 +1419,11 @@ export function parseFlexibleDate(
       month = p2;
     } else {
       // AUTO detection:
+      // Check Excel number format pattern hint if provided (e.g. "m/d/yy" vs "d/m/yy")
+      const cleanPattern = formatPattern ? formatPattern.replace(/\[.*?\]/g, '').toLowerCase() : '';
+      const hasMonthBeforeDay = cleanPattern ? /[m]+.*[d]+/i.test(cleanPattern) : false;
+      const hasDayBeforeMonth = cleanPattern ? /[d]+.*[m]+/i.test(cleanPattern) : false;
+
       // If p1 > 12, it MUST be day -> DD/MM/YYYY
       if (p1 > 12) {
         day = p1;
@@ -1283,6 +1433,12 @@ export function parseFlexibleDate(
       else if (p2 > 12) {
         month = p1;
         day = p2;
+      } else if (hasMonthBeforeDay) {
+        month = p1;
+        day = p2;
+      } else if (hasDayBeforeMonth) {
+        day = p1;
+        month = p2;
       } else {
         // Standard Indian / British convention for Happy Farms is DD/MM/YYYY
         day = p1;
@@ -1408,7 +1564,11 @@ export function validateParsedFile(
         return undefined;
       }
       const strVal = String(rawVal).trim();
-      if (isFormulaErrorAllowed && strVal.startsWith('#')) {
+      if (strVal.startsWith('#')) {
+        rowWarnings.push({
+          field: fieldName,
+          message: `Formula error (${strVal}) encountered in workbook and safely treated as empty`,
+        });
         return undefined;
       }
       const parsed = parseNumberField(rawVal);
@@ -1447,14 +1607,19 @@ export function validateParsedFile(
     const actualProductionPct = checkNumericField('actualProductionPct', rowValues.actualProductionPct, false, true);
     const standardProductionPct = checkNumericField('standardProductionPct', rowValues.standardProductionPct, false, true);
 
-    // Preserve Week Number (clean float/decimal formatting)
+    const mappedFeedGmsPerBird = checkNumericField('feedGramsPerBird', rowValues.feedGramsPerBird, false);
+
+    // Preserve Week Number (clean float/decimal formatting) and Week Label
     let weekNumber: string | number | undefined = undefined;
+    let weekLabel: string | undefined = undefined;
     if (rowValues.weekNumber !== undefined && rowValues.weekNumber !== null && String(rowValues.weekNumber).trim() !== '') {
-      const wkNum = Number(rowValues.weekNumber);
+      const rawWk = String(rowValues.weekNumber).trim();
+      weekLabel = rawWk;
+      const wkNum = Number(rawWk);
       if (!isNaN(wkNum)) {
         weekNumber = Number(wkNum.toFixed(1));
       } else {
-        weekNumber = String(rowValues.weekNumber).trim();
+        weekNumber = rawWk;
       }
     }
 
@@ -1463,9 +1628,16 @@ export function validateParsedFile(
       feedKg = parseFloat((feedGrams / 1000).toFixed(2));
     }
     const feedGramsPerBird =
-      feedKg !== undefined && birdCount && birdCount > 0
+      mappedFeedGmsPerBird !== undefined
+        ? mappedFeedGmsPerBird
+        : feedKg !== undefined && birdCount && birdCount > 0
         ? Math.round((feedKg * 1000) / birdCount)
         : feedGrams;
+
+    const openingBirdCount = birdCount;
+    const totalDeductions = (mortality || 0) + (culling || 0);
+    const closingBirdCount =
+      openingBirdCount !== undefined ? Math.max(0, openingBirdCount - totalDeductions) : undefined;
 
     // Mortality & Culling checks
     if (birdCount !== undefined && mortality + culling > birdCount) {
@@ -1559,6 +1731,23 @@ export function validateParsedFile(
       }
     }
 
+    // Non-blocking warning for placeholder / future date records where no real production or feed has been entered
+    if (parsedFile.detectedRecordType === 'DAILY_REPORT') {
+      const hasInputs = Boolean(
+        (rowValues.eggsProduced && rowValues.eggsProduced !== '') ||
+        (rowValues.feedKg && rowValues.feedKg !== '') ||
+        (rowValues.selectionEggs && rowValues.selectionEggs !== '') ||
+        (rowValues.mortality && rowValues.mortality !== '') ||
+        (rowValues.culling && rowValues.culling !== '')
+      );
+      if (!hasInputs && eggsProduced === 0 && feedKg === undefined) {
+        rowWarnings.push({
+          field: 'eggsProduced',
+          message: 'No egg production or feed usage logged for this date (future/placeholder row)',
+        });
+      }
+    }
+
     validatedRows.push({
       fileId: parsedFile.id,
       fileName: parsedFile.name,
@@ -1568,7 +1757,10 @@ export function validateParsedFile(
       submissionDate,
       rawDate,
       weekNumber,
-      birdCount,
+      weekLabel,
+      birdCount: closingBirdCount ?? openingBirdCount,
+      openingBirdCount,
+      closingBirdCount,
       feedKg,
       feedGrams: feedGrams ?? (feedKg != null ? feedKg * 1000 : undefined),
       feedGramsPerBird,
@@ -1620,12 +1812,16 @@ export async function checkServerConflicts(
         farmId: r.farmId,
         submissionDate: r.submissionDate,
         birdCount: r.birdCount,
+        openingBirdCount: r.openingBirdCount,
+        closingBirdCount: r.closingBirdCount,
         feedKg: r.feedKg,
         mortality: r.mortality,
         culling: r.culling,
         eggsProduced: r.eggsProduced,
         selectionEggs: r.selectionEggs,
         temperature: r.temperature,
+        weekNumber: typeof r.weekNumber === 'number' ? Math.floor(r.weekNumber) : undefined,
+        weekLabel: r.weekLabel,
         sourceFile: r.fileName,
         sourceRow: r.rowNumber,
       }));
@@ -1721,6 +1917,37 @@ export async function checkServerConflicts(
 // BATCH EXECUTION & IMPORT
 // ==========================================
 
+/**
+ * Recursively sanitizes data before writing to Firestore.
+ * Converts any `undefined` properties to `null` to prevent Firebase JS SDK error:
+ * "Unsupported field value: undefined".
+ */
+export function sanitizeFirestoreData<T>(data: T): T {
+  if (data === undefined) {
+    return null as unknown as T;
+  }
+  if (data === null || typeof data !== 'object') {
+    return data;
+  }
+  if (data instanceof Date) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizeFirestoreData(item)) as unknown as T;
+  }
+  const cleanObj: Record<string, any> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value === undefined) {
+      cleanObj[key] = null;
+    } else if (value !== null && typeof value === 'object') {
+      cleanObj[key] = sanitizeFirestoreData(value);
+    } else {
+      cleanObj[key] = value;
+    }
+  }
+  return cleanObj as T;
+}
+
 export interface ImportExecutionOptions {
   dryRun?: boolean;
 }
@@ -1734,8 +1961,12 @@ export interface ExecuteImportClientResult {
   conflictCount: number;
   failedCount: number;
   errors: Array<{ file: string; row: number; reason: string }>;
+  worksheets?: WorksheetImportContribution[];
   status: 'COMPLETED' | 'PARTIAL_FAILURE' | 'FAILED' | 'SIMULATED';
   isDryRun?: boolean;
+  historyWriteFailed?: boolean;
+  historyWriteError?: string;
+  rawBatchRecord?: any;
 }
 
 export async function executeHistoricalImport(
@@ -1763,11 +1994,14 @@ export async function executeHistoricalImport(
         farmId: r.farmId,
         submissionDate: r.submissionDate,
         birdCount: r.birdCount,
+        openingBirdCount: r.openingBirdCount,
+        closingBirdCount: r.closingBirdCount,
         feedKg: r.feedKg,
         feedGrams: r.feedGrams,
         feedG: r.feedGrams,
         feedGramsPerBird: r.feedGramsPerBird,
-        weekNumber: r.weekNumber,
+        weekNumber: typeof r.weekNumber === 'number' ? Math.floor(r.weekNumber) : undefined,
+        weekLabel: r.weekLabel,
         mortality: r.mortality,
         culling: r.culling,
         eggsProduced: r.eggsProduced,
@@ -1868,6 +2102,23 @@ export async function executeHistoricalImport(
         const lockRef = db?.collection ? db.collection('dailyReportLocks').doc(identityKey) : null;
         const topLevelReportRef = db?.collection ? db.collection('dailyReports').doc(identityKey) : null;
 
+        const openingBirdCount = row.openingBirdCount ?? row.birdCount ?? null;
+        const mortality = row.mortality ?? 0;
+        const culling = row.culling ?? 0;
+        const closingBirdCount =
+          row.closingBirdCount ??
+          (openingBirdCount != null ? Math.max(0, openingBirdCount - (mortality + culling)) : null);
+
+        let intWeekNumber: number | null = null;
+        if (row.weekNumber != null) {
+          intWeekNumber =
+            typeof row.weekNumber === 'number'
+              ? Math.floor(row.weekNumber)
+              : parseInt(String(row.weekNumber), 10);
+          if (isNaN(intWeekNumber)) intWeekNumber = null;
+        }
+        const weekLabel = row.weekLabel || (row.weekNumber != null ? String(row.weekNumber) : null);
+
         const reportData = {
           userId: assignedUserId,
           submittedBy: adminUid,
@@ -1877,16 +2128,21 @@ export async function executeHistoricalImport(
           submissionMethod: 'HISTORICAL_IMPORT',
           submissionVersion: row.conflictStatus === 'CONFLICT' ? 2 : 1,
           status: 'submitted',
-          birdCount: row.birdCount ?? null,
-          openingBirdCount: row.birdCount ?? null,
-          closingBirdCount: row.birdCount ?? null,
+          openingBirdCount,
+          closingBirdCount,
+          birdCount: closingBirdCount ?? openingBirdCount ?? null,
           feedKg: row.feedKg ?? null,
           feedGrams: row.feedGrams ?? (row.feedKg != null ? row.feedKg * 1000 : null),
           feedG: row.feedGrams ?? (row.feedKg != null ? row.feedKg * 1000 : null),
-          feedGramsPerBird: row.feedGramsPerBird ?? null,
-          weekNumber: row.weekNumber ?? null,
-          mortality: row.mortality ?? 0,
-          culling: row.culling ?? 0,
+          feedGramsPerBird:
+            row.feedGramsPerBird ??
+            (openingBirdCount && row.feedKg
+              ? Number(((row.feedKg * 1000) / openingBirdCount).toFixed(1))
+              : null),
+          weekNumber: intWeekNumber,
+          weekLabel,
+          mortality,
+          culling,
           eggsProduced: row.eggsProduced ?? 0,
           selectionEggs: row.selectionEggs ?? 0,
           damagedEggs: row.damagedEggs ?? 0,
@@ -1897,8 +2153,8 @@ export async function executeHistoricalImport(
           tempMin: row.temperature ?? null,
           tempMax: row.temperature ?? null,
           ammoniaPpm: row.ammoniaPpm ?? null,
-          eggWeight: row.eggWeight ?? { min: 0, max: 0, avg: 0 },
-          bodyWeight: row.bodyWeight ?? { min: 0, max: 0, avg: 0 },
+          eggWeight: row.eggWeight ?? null,
+          bodyWeight: row.bodyWeight ?? null,
           remarks: row.remarks || '',
           isHistorical: true,
           importBatchId: batchId,
@@ -1913,6 +2169,24 @@ export async function executeHistoricalImport(
           batch.set(dailyLogRef, reportData, { merge: true });
           batch.set(lockRef, { farmId: row.farmId, submissionDate: row.submissionDate, reportId: docId, importBatchId: batchId, createdAt: now });
           batch.set(topLevelReportRef, reportData, { merge: true });
+
+          if (row.bodyWeight && (row.bodyWeight.avg > 0 || row.bodyWeight.min > 0) && intWeekNumber) {
+            const weeklyLockRef = db?.collection ? db.collection('dailyReportLocks').doc(`weekly_${row.farmId}_W${intWeekNumber}`) : null;
+            if (weeklyLockRef) {
+              batch.set(weeklyLockRef, {
+                farmId: row.farmId,
+                weekNumber: intWeekNumber,
+                reportDate: row.submissionDate,
+                bodyWeight: row.bodyWeight,
+                ammoniaPpm: row.ammoniaPpm ?? null,
+                submittedBy: assignedUserId,
+                submittedAt: now,
+                updatedAt: now,
+                importBatchId: batchId,
+                isHistorical: true,
+              }, { merge: true });
+            }
+          }
         }
         importedCount++;
 
@@ -1921,12 +2195,13 @@ export async function executeHistoricalImport(
           action: row.conflictStatus === 'CONFLICT' ? 'UPDATED' : 'CREATED',
           farmId: row.farmId,
           submissionDate: row.submissionDate,
+          sourceFile: row.fileName,
           targetDocs: [
             { collectionPath: `dailyReports/${assignedUserId}/dailyLogs`, docId },
             { collectionPath: 'dailyReportLocks', docId: identityKey },
             { collectionPath: 'dailyReports', docId: identityKey },
           ],
-          beforeData: row.diff,
+          beforeData: row.diff || null,
           importedAt: now,
         });
 
@@ -1967,6 +2242,7 @@ export async function executeHistoricalImport(
           action: 'CREATED',
           farmId: row.farmId,
           submissionDate: row.submissionDate,
+          sourceFile: row.fileName,
           targetDocs: [
             { collectionPath: `logs/${row.farmId}/feedLogs`, docId: feedLogRef?.id || '' },
             { collectionPath: `farms/${row.farmId}/feedTransactions`, docId: txRef?.id || '' },
@@ -1983,6 +2259,46 @@ export async function executeHistoricalImport(
     onProgress?.({ currentBatch: b + 1, totalBatches, percentage });
   }
 
+  // Build worksheet contributions
+  const worksheetKeys = Array.from(new Set(rowsToImport.map((r) => r.fileName)));
+  const worksheets: WorksheetImportContribution[] = worksheetKeys.map((wsKey) => {
+    const wsRows = rowsToImport.filter((r) => r.fileName === wsKey);
+    const wsManifest = manifest.filter((m) => m.sourceFile === wsKey);
+    const wsErrors = errors.filter((e) => e.file === wsKey);
+
+    const sheetMatch = wsKey.match(/^(.*?)\s*\[(.*?)\]$/);
+    const fileName = sheetMatch ? sheetMatch[1]!.trim() : wsKey;
+    const sheetName = sheetMatch ? sheetMatch[2]!.trim() : null;
+
+    const dates = wsRows.map((r) => r.submissionDate).filter(Boolean).sort();
+    const minDate = dates[0] || '';
+    const maxDate = dates[dates.length - 1] || '';
+
+    const createdCount = wsManifest.filter((m) => m.action === 'CREATED').length;
+    const updatedCount = wsManifest.filter((m) => m.action === 'UPDATED').length;
+    const countImported = wsManifest.length;
+    const countFailed = wsErrors.length;
+    const countSkipped = wsRows.length - countImported - countFailed;
+    const farmId = wsRows[0]?.farmId || '';
+
+    return {
+      worksheetKey: wsKey,
+      fileName,
+      sheetName,
+      farmId,
+      status: (countFailed > 0 ? 'IMPORTED_WITH_ERRORS' : 'IMPORTED') as any,
+      importedCount: countImported,
+      createdCount,
+      updatedCount,
+      skippedCount: Math.max(0, countSkipped),
+      failedCount: countFailed,
+      dateRange: minDate && maxDate ? { minDate, maxDate } : null,
+      importTimestamp: now,
+      revertStatus: 'NOT_REVERTED',
+      canSafelyRevert: countImported > 0,
+    };
+  });
+
   if (options?.dryRun) {
     return {
       batchId: `dry_run_${batchId}`,
@@ -1993,6 +2309,7 @@ export async function executeHistoricalImport(
       conflictCount,
       failedCount: errors.length,
       errors,
+      worksheets,
       status: 'SIMULATED',
       isDryRun: true,
     };
@@ -2000,7 +2317,7 @@ export async function executeHistoricalImport(
 
   // Save batch audit record
   const status = errors.length === 0 ? 'COMPLETED' : importedCount > 0 ? 'PARTIAL_FAILURE' : 'FAILED';
-  const batchRecord = {
+  const rawBatchRecord = {
     batchId,
     adminUid,
     adminEmail: user?.email || null,
@@ -2018,13 +2335,26 @@ export async function executeHistoricalImport(
     status,
     errors,
     manifest,
+    worksheets,
     revertStatus: 'NOT_REVERTED',
   };
 
-  try {
-    await db.collection('importBatches').doc(batchId).set(batchRecord);
-  } catch (e) {
-    console.warn('[historicalImportService] Failed writing importBatches document:', e);
+  const batchRecord = sanitizeFirestoreData(rawBatchRecord);
+
+  let historyWriteFailed = false;
+  let historyWriteError: string | undefined = undefined;
+
+  if (db?.collection) {
+    try {
+      await db.collection('importBatches').doc(batchId).set(batchRecord);
+    } catch (e: any) {
+      historyWriteFailed = true;
+      historyWriteError = e instanceof Error ? e.message : String(e);
+      console.error('[historicalImportService] CRITICAL: Failed writing importBatches document:', e);
+    }
+  } else {
+    historyWriteFailed = true;
+    historyWriteError = 'Firestore database client unavailable';
   }
 
   return {
@@ -2036,8 +2366,26 @@ export async function executeHistoricalImport(
     conflictCount,
     failedCount: errors.length,
     errors,
+    worksheets,
     status,
+    historyWriteFailed,
+    historyWriteError,
+    rawBatchRecord: batchRecord,
   };
+}
+
+/**
+ * Saves or retries saving an import batch audit record directly to Firestore.
+ */
+export async function saveImportBatchRecord(batchRecord: any): Promise<void> {
+  const clean = sanitizeFirestoreData(batchRecord);
+  if (!clean || !clean.batchId) {
+    throw new Error('Invalid batch record: missing batchId');
+  }
+  if (!db?.collection) {
+    throw new Error('Firestore database client unavailable');
+  }
+  await db.collection('importBatches').doc(clean.batchId).set(clean);
 }
 
 // ==========================================
@@ -2065,9 +2413,9 @@ export async function fetchImportBatches(): Promise<any[]> {
   try {
     const snap = await db.collection('importBatches').orderBy('importTimestamp', 'desc').limit(50).get();
     return snap.docs.map((d: any) => d.data());
-  } catch (err) {
+  } catch (err: any) {
     console.error('[fetchImportBatches] Failed:', err);
-    return [];
+    throw new Error(`Failed to load import batches from database: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -2101,19 +2449,49 @@ export type RevertBatchStatus =
   | 'PARTIALLY_REVERTED'
   | 'REVERT_FAILED'
   | 'REVERT_REQUIRES_REVIEW'
+  | 'REVERT_CONFLICT'
   | 'NOT_REVERSIBLE';
+
+export interface WorksheetImportContribution {
+  worksheetKey: string;
+  fileName: string;
+  sourceFile?: string;
+  sheetName?: string | null;
+  farmId?: string;
+  status: 'IMPORTED' | 'IMPORTED_WITH_ERRORS' | 'PARTIALLY_REVERTED' | 'REVERTED' | 'REVERT_FAILED' | 'REVERT_CONFLICT';
+  importedCount: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  dateRange?: { minDate: string; maxDate: string } | null;
+  importTimestamp: string;
+  revertTimestamp?: string;
+  revertStatus?: 'NOT_REVERTED' | 'REVERTING' | 'REVERTED' | 'PARTIALLY_REVERTED' | 'REVERT_FAILED' | 'REVERT_CONFLICT';
+  canSafelyRevert: boolean;
+  notReversibleReason?: string;
+  revertAudit?: {
+    deletedCount: number;
+    restoredCount: number;
+    failedCount: number;
+    conflictsCount: number;
+  };
+}
 
 export interface RevertPreviewRecord {
   farmId: string;
   submissionDate: string;
   recordType: string;
   action: 'CREATED' | 'UPDATED';
+  sourceFile?: string;
   canSafelyRevert: boolean;
   reason?: string;
 }
 
 export interface RevertPreviewResponse {
   batchId: string;
+  worksheetKey?: string;
+  worksheetName?: string;
   importTimestamp: string;
   filenames: string[];
   affectedFarms: string[];
@@ -2131,23 +2509,28 @@ export interface RevertPreviewResponse {
 export interface RevertBatchResponse {
   revertOperationId: string;
   batchId: string;
+  worksheetKey?: string;
   status: RevertBatchStatus;
+  worksheetStatus?: string;
   deletedCount: number;
   restoredCount: number;
   skippedCount: number;
   conflictCount: number;
   failedCount: number;
   errors: Array<{ docId?: string; reason: string }>;
+  worksheets?: WorksheetImportContribution[];
+  updatedBatch?: any;
 }
 
-export async function fetchRevertPreview(batchId: string): Promise<RevertPreviewResponse> {
+export async function fetchRevertPreview(batchId: string, worksheetKey?: string): Promise<RevertPreviewResponse> {
   const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
   const user = auth.currentUser;
 
   if (user) {
     try {
       const idToken = await user.getIdToken();
-      const res = await fetch(`${backendUrl}/api/v1/admin/import/batches/${batchId}/revert-preview`, {
+      const url = `${backendUrl}/api/v1/admin/import/batches/${batchId}/revert-preview${worksheetKey ? `?worksheetKey=${encodeURIComponent(worksheetKey)}` : ''}`;
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${idToken}` },
       });
       if (res.ok) {
@@ -2164,48 +2547,149 @@ export async function fetchRevertPreview(batchId: string): Promise<RevertPreview
   if (!batchDoc.exists) throw new Error(`Import batch '${batchId}' not found`);
   const batch = batchDoc.data();
 
-  const manifest = batch.manifest || [];
+  const ws = worksheetKey
+    ? (batch.worksheets as WorksheetImportContribution[] | undefined)?.find(
+        (w) =>
+          w.worksheetKey === worksheetKey ||
+          w.fileName === worksheetKey ||
+          (w.sheetName && w.sheetName === worksheetKey),
+      )
+    : undefined;
+
+  const isWsAlreadyReverted = ws ? ws.revertStatus === 'REVERTED' : batch.revertStatus === 'REVERTED';
+  const isBatchReverting = batch.revertStatus === 'REVERTING';
+
+  if (isWsAlreadyReverted) {
+    return {
+      batchId,
+      worksheetKey,
+      worksheetName: ws?.sheetName || ws?.fileName || worksheetKey,
+      importTimestamp: batch.importTimestamp,
+      filenames: ws ? [ws.fileName] : (batch.filenames || []),
+      affectedFarms: ws?.farmId ? [ws.farmId] : (batch.affectedFarms || []),
+      totalImported: ws ? ws.importedCount : (batch.importedCount || 0),
+      canSafelyRevert: 0,
+      requiresReview: 0,
+      willDelete: 0,
+      willRestore: 0,
+      isReversible: false,
+      revertStatus: 'REVERTED',
+      notReversibleReason: worksheetKey
+        ? `Worksheet '${ws?.sheetName || worksheetKey}' has already been reverted.`
+        : 'This batch has already been reverted.',
+      sampleRecords: [],
+    };
+  }
+
+  if (isBatchReverting) {
+    return {
+      batchId,
+      worksheetKey,
+      worksheetName: ws?.sheetName || ws?.fileName || worksheetKey,
+      importTimestamp: batch.importTimestamp,
+      filenames: ws ? [ws.fileName] : (batch.filenames || []),
+      affectedFarms: ws?.farmId ? [ws.farmId] : (batch.affectedFarms || []),
+      totalImported: ws ? ws.importedCount : (batch.importedCount || 0),
+      canSafelyRevert: 0,
+      requiresReview: 0,
+      willDelete: 0,
+      willRestore: 0,
+      isReversible: false,
+      revertStatus: 'REVERTING',
+      notReversibleReason: 'This batch is currently being reverted.',
+      sampleRecords: [],
+    };
+  }
+
+  const allManifest = batch.manifest || [];
+  const manifest = worksheetKey
+    ? allManifest.filter(
+        (m: any) =>
+          m.sourceFile === worksheetKey ||
+          (ws && m.sourceFile === ws.worksheetKey) ||
+          (ws && ws.sheetName && m.sourceFile && m.sourceFile.includes(ws.sheetName)) ||
+          (ws && ws.farmId && m.farmId === ws.farmId),
+      )
+    : allManifest.filter((m: any) => m.reversalStatus !== 'REVERTED');
+
   let canSafelyRevert = 0;
+  let requiresReview = 0;
   let willDelete = 0;
   let willRestore = 0;
   const sampleRecords: RevertPreviewRecord[] = [];
 
-  for (const item of manifest.slice(0, 50)) {
-    sampleRecords.push({
-      farmId: item.farmId,
-      submissionDate: item.submissionDate,
-      recordType: item.recordType || 'DAILY_REPORT',
-      action: item.action || 'CREATED',
-      canSafelyRevert: true,
-    });
+  for (const item of manifest) {
+    let isSafe = true;
+    let reason: string | undefined;
+
+    // Concurrency check against Firestore
+    try {
+      for (const tDoc of item.targetDocs || []) {
+        const docSnap = await db.collection(tDoc.collectionPath).doc(tDoc.docId).get();
+        if (!docSnap.exists) continue;
+        const data = docSnap.data() || {};
+
+        if (data.importBatchId && data.importBatchId !== batchId) {
+          isSafe = false;
+          reason = `Record touched by later import '${data.importBatchId}'`;
+          break;
+        }
+
+        if (item.action === 'CREATED' && item.submissionVersion && data.submissionVersion && data.submissionVersion > item.submissionVersion) {
+          isSafe = false;
+          reason = `Record has subsequent manual edits (v${data.submissionVersion})`;
+          break;
+        }
+      }
+    } catch {}
+
+    if (item.action === 'UPDATED' && !item.beforeData) {
+      isSafe = false;
+      reason = 'Pre-import state snapshot missing';
+    }
+
+    if (isSafe) {
+      canSafelyRevert++;
+      if (item.action === 'CREATED') willDelete++;
+      if (item.action === 'UPDATED') willRestore++;
+    } else {
+      requiresReview++;
+    }
+
+    if (sampleRecords.length < 50) {
+      sampleRecords.push({
+        farmId: item.farmId,
+        submissionDate: item.submissionDate,
+        recordType: item.recordType || 'DAILY_REPORT',
+        action: item.action || 'CREATED',
+        sourceFile: item.sourceFile,
+        canSafelyRevert: isSafe,
+        reason,
+      });
+    }
   }
 
-  manifest.forEach((m: any) => {
-    canSafelyRevert++;
-    if (m.action === 'CREATED') willDelete++;
-    if (m.action === 'UPDATED') willRestore++;
-  });
-
-  const isAlreadyReverted = batch.revertStatus === 'REVERTED';
-  const isReverting = batch.revertStatus === 'REVERTING';
+  const affectedFarms = ws?.farmId
+    ? [ws.farmId]
+    : batch.affectedFarms && batch.affectedFarms.length > 0
+      ? batch.affectedFarms
+      : Array.from(new Set(manifest.map((m: any) => m.farmId)));
 
   return {
     batchId,
+    worksheetKey,
+    worksheetName: ws?.sheetName || ws?.fileName || worksheetKey,
     importTimestamp: batch.importTimestamp,
-    filenames: batch.filenames || [],
-    affectedFarms: batch.affectedFarms || [],
-    totalImported: batch.importedCount || manifest.length || 0,
-    canSafelyRevert: isAlreadyReverted || isReverting ? 0 : (canSafelyRevert || batch.importedCount || 0),
-    requiresReview: 0,
-    willDelete: isAlreadyReverted ? 0 : (willDelete || batch.importedCount || 0),
-    willRestore: isAlreadyReverted ? 0 : willRestore,
-    isReversible: !isAlreadyReverted && !isReverting && (canSafelyRevert > 0 || batch.importedCount > 0),
-    revertStatus: batch.revertStatus || 'NOT_REVERTED',
-    notReversibleReason: isAlreadyReverted
-      ? 'This batch has already been reverted.'
-      : isReverting
-      ? 'This batch is currently being reverted.'
-      : undefined,
+    filenames: ws ? [ws.fileName] : (batch.filenames || []),
+    affectedFarms,
+    totalImported: ws ? ws.importedCount : (batch.importedCount || manifest.length || 0),
+    canSafelyRevert,
+    requiresReview,
+    willDelete,
+    willRestore,
+    isReversible: canSafelyRevert > 0,
+    revertStatus: ws?.revertStatus || batch.revertStatus || 'NOT_REVERTED',
+    notReversibleReason: canSafelyRevert === 0 ? 'No reversible records found' : undefined,
     sampleRecords,
   };
 }
@@ -2213,6 +2697,7 @@ export async function fetchRevertPreview(batchId: string): Promise<RevertPreview
 export async function executeRevertImportBatch(
   batchId: string,
   confirmationBatchId: string,
+  worksheetKey?: string,
 ): Promise<RevertBatchResponse> {
   const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
   const user = auth.currentUser;
@@ -2226,7 +2711,7 @@ export async function executeRevertImportBatch(
           'Content-Type': 'application/json',
           Authorization: `Bearer ${idToken}`,
         },
-        body: JSON.stringify({ confirmationBatchId }),
+        body: JSON.stringify({ confirmationBatchId, worksheetKey }),
       });
       if (res.ok) {
         const json = await res.json();
@@ -2253,61 +2738,248 @@ export async function executeRevertImportBatch(
   if (!batchDoc.exists) throw new Error(`Import batch '${batchId}' not found`);
   const batch = batchDoc.data();
 
-  if (batch.revertStatus === 'REVERTED') {
+  const ws = worksheetKey
+    ? (batch.worksheets as WorksheetImportContribution[] | undefined)?.find(
+        (w) =>
+          w.worksheetKey === worksheetKey ||
+          w.fileName === worksheetKey ||
+          (w.sheetName && w.sheetName === worksheetKey),
+      )
+    : undefined;
+
+  if (worksheetKey && ws && ws.revertStatus === 'REVERTED') {
+    throw new Error(`Worksheet '${ws.sheetName || worksheetKey}' has already been reverted`);
+  }
+  if (!worksheetKey && batch.revertStatus === 'REVERTED') {
     throw new Error('This batch has already been reverted');
   }
 
   await batchRef.update({ revertStatus: 'REVERTING' });
 
-  const manifest = batch.manifest || [];
+  const allManifest = batch.manifest || [];
+  const manifestToRevert = worksheetKey
+    ? allManifest.filter(
+        (m: any) =>
+          m.sourceFile === worksheetKey ||
+          (ws && m.sourceFile === ws.worksheetKey) ||
+          (ws && ws.sheetName && m.sourceFile && m.sourceFile.includes(ws.sheetName)) ||
+          (ws && ws.farmId && m.farmId === ws.farmId),
+      )
+    : allManifest.filter((m: any) => m.reversalStatus !== 'REVERTED');
+
   let deletedCount = 0;
   let restoredCount = 0;
+  let conflictCount = 0;
+  let failedCount = 0;
+  const errors: Array<{ docId?: string; reason: string }> = [];
 
-  for (let i = 0; i < manifest.length; i += 75) {
-    const chunk = manifest.slice(i, i + 75);
+  for (let i = 0; i < manifestToRevert.length; i += 75) {
+    const chunk = manifestToRevert.slice(i, i + 75);
     const writeBatch = db.batch();
 
     for (const item of chunk) {
-      if (item.action === 'CREATED') {
-        for (const tDoc of item.targetDocs || []) {
-          writeBatch.delete(db.doc(`${tDoc.collectionPath}/${tDoc.docId}`));
+      try {
+        if (item.action === 'CREATED') {
+          let canDelete = true;
+          const refsToDelete: any[] = [];
+
+          for (const tDoc of item.targetDocs || []) {
+            const docRef = db.collection(tDoc.collectionPath).doc(tDoc.docId);
+            const snap = await docRef.get();
+            if (!snap.exists) continue;
+            const data = snap.data() || {};
+
+            if (data.importBatchId && data.importBatchId !== batchId) {
+              canDelete = false;
+              errors.push({ docId: tDoc.docId, reason: `Modified by another batch '${data.importBatchId}'` });
+              break;
+            }
+            if (item.submissionVersion && data.submissionVersion && data.submissionVersion > item.submissionVersion) {
+              canDelete = false;
+              errors.push({ docId: tDoc.docId, reason: `Subsequent edits detected (v${data.submissionVersion})` });
+              break;
+            }
+            refsToDelete.push(docRef);
+          }
+
+          if (!canDelete) {
+            conflictCount++;
+            item.reversalStatus = 'CONFLICT';
+            continue;
+          }
+
+          for (const ref of refsToDelete) {
+            writeBatch.delete(ref);
+          }
+          item.reversalStatus = 'REVERTED';
+          deletedCount++;
+        } else if (item.action === 'UPDATED') {
+          if (!item.beforeData) {
+            conflictCount++;
+            item.reversalStatus = 'CONFLICT';
+            errors.push({ docId: `${item.farmId}_${item.submissionDate}`, reason: 'Pre-import state missing' });
+            continue;
+          }
+
+          for (const tDoc of item.targetDocs || []) {
+            const docRef = db.collection(tDoc.collectionPath).doc(tDoc.docId);
+            const snap = await docRef.get();
+            if (snap.exists) {
+              const data = snap.data() || {};
+              if (data.importBatchId && data.importBatchId !== batchId) {
+                conflictCount++;
+                item.reversalStatus = 'CONFLICT';
+                errors.push({ docId: tDoc.docId, reason: `Modified by another batch '${data.importBatchId}'` });
+                continue;
+              }
+            }
+
+            const restoreData = { ...item.beforeData };
+            delete restoreData.importBatchId;
+            writeBatch.set(docRef, restoreData);
+          }
+          item.reversalStatus = 'REVERTED';
+          restoredCount++;
         }
-        deletedCount++;
-      } else if (item.action === 'UPDATED' && item.beforeData) {
-        for (const tDoc of item.targetDocs || []) {
-          const restoreData = { ...item.beforeData };
-          delete restoreData.importBatchId;
-          writeBatch.set(db.doc(`${tDoc.collectionPath}/${tDoc.docId}`), restoreData);
-        }
-        restoredCount++;
+      } catch (err: any) {
+        failedCount++;
+        errors.push({ reason: err.message || 'Item revert failed' });
       }
     }
     await writeBatch.commit();
   }
 
+  const revertTimestamp = new Date().toISOString();
+  const wsFinalStatus = failedCount > 0 ? 'REVERT_FAILED' : conflictCount > 0 ? 'REVERT_CONFLICT' : 'REVERTED';
+
+  let updatedWorksheets = (batch.worksheets as WorksheetImportContribution[] | undefined) || [];
+  if (worksheetKey) {
+    updatedWorksheets = updatedWorksheets.map((w) => {
+      if (
+        w.worksheetKey === worksheetKey ||
+        w.fileName === worksheetKey ||
+        (w.sheetName && w.sheetName === worksheetKey) ||
+        (ws && w.worksheetKey === ws.worksheetKey)
+      ) {
+        return {
+          ...w,
+          status: wsFinalStatus as any,
+          revertStatus: wsFinalStatus as any,
+          revertTimestamp,
+          revertAudit: {
+            deletedCount,
+            restoredCount,
+            failedCount,
+            conflictsCount: conflictCount,
+          },
+        };
+      }
+      return w;
+    });
+  } else {
+    updatedWorksheets = updatedWorksheets.map((w) => ({
+      ...w,
+      status: wsFinalStatus as any,
+      revertStatus: wsFinalStatus as any,
+      revertTimestamp,
+      revertAudit: {
+        deletedCount,
+        restoredCount,
+        failedCount,
+        conflictsCount: conflictCount,
+      },
+    }));
+  }
+
+  let overallBatchStatus: RevertBatchStatus;
+  if (worksheetKey) {
+    const allReverted = updatedWorksheets.length > 0 && updatedWorksheets.every((w) => w.revertStatus === 'REVERTED');
+    const anyReverted = updatedWorksheets.some((w) => w.revertStatus === 'REVERTED' || w.revertStatus === 'PARTIALLY_REVERTED');
+    overallBatchStatus = allReverted
+      ? 'REVERTED'
+      : anyReverted
+        ? 'PARTIALLY_REVERTED'
+        : conflictCount > 0
+          ? 'REVERT_REQUIRES_REVIEW'
+          : 'PARTIALLY_REVERTED';
+  } else {
+    overallBatchStatus = failedCount > 0 ? 'PARTIALLY_REVERTED' : conflictCount > 0 ? 'REVERT_REQUIRES_REVIEW' : 'REVERTED';
+  }
+
   await batchRef.update({
-    revertStatus: 'REVERTED',
+    revertStatus: overallBatchStatus,
+    worksheets: updatedWorksheets,
+    manifest: allManifest,
     revertAudit: {
       revertOperationId: `client_revert_${Date.now()}`,
       revertedByUid: user?.uid || 'admin',
       revertedByEmail: user?.email || null,
-      revertTimestamp: new Date().toISOString(),
-      deletedRecordsCount: deletedCount,
-      restoredRecordsCount: restoredCount,
-      conflictsCount: 0,
-      failedCount: 0,
+      revertTimestamp,
+      deletedRecordsCount: (batch.revertAudit?.deletedRecordsCount || 0) + deletedCount,
+      restoredRecordsCount: (batch.revertAudit?.restoredRecordsCount || 0) + restoredCount,
+      conflictsCount: (batch.revertAudit?.conflictsCount || 0) + conflictCount,
+      failedCount: (batch.revertAudit?.failedCount || 0) + failedCount,
     },
   });
 
   return {
     revertOperationId: `client_revert_${Date.now()}`,
     batchId,
-    status: 'REVERTED',
+    worksheetKey,
+    status: overallBatchStatus,
+    worksheetStatus: worksheetKey ? wsFinalStatus : undefined,
     deletedCount,
     restoredCount,
     skippedCount: 0,
-    conflictCount: 0,
-    failedCount: 0,
-    errors: [],
+    conflictCount,
+    failedCount,
+    errors,
   };
+}
+
+/**
+ * Extracts or synthesizes worksheet contributions from an import batch document.
+ */
+export function getBatchWorksheets(batch: any): WorksheetImportContribution[] {
+  if (batch.worksheets && Array.isArray(batch.worksheets) && batch.worksheets.length > 0) {
+    return batch.worksheets;
+  }
+  const filenames: string[] = batch.filenames || [];
+  if (filenames.length === 0) return [];
+
+  return filenames.map((fName: string, idx: number) => {
+    const sheetMatch = fName.match(/^(.*?)\s*\[(.*?)\]$/);
+    const fileName = sheetMatch ? sheetMatch[1]!.trim() : fName;
+    const sheetName = sheetMatch ? sheetMatch[2]!.trim() : undefined;
+
+    const manifestItems = (batch.manifest || []).filter(
+      (m: any) => m.sourceFile === fName || (sheetName && m.sourceFile && m.sourceFile.includes(sheetName)),
+    );
+    const importedCount = manifestItems.length > 0 ? manifestItems.length : Math.round((batch.importedCount || 0) / filenames.length);
+    const isReverted = batch.revertStatus === 'REVERTED';
+
+    let farmId = manifestItems[0]?.farmId;
+    if (!farmId && sheetName && (batch.affectedFarms || []).includes(sheetName)) {
+      farmId = sheetName;
+    }
+    if (!farmId) {
+      farmId = batch.affectedFarms?.[idx] || batch.affectedFarms?.[0] || '';
+    }
+
+    return {
+      worksheetKey: fName,
+      fileName,
+      sheetName,
+      farmId,
+      status: (isReverted ? 'REVERTED' : batch.revertStatus === 'PARTIALLY_REVERTED' ? 'PARTIALLY_REVERTED' : 'IMPORTED') as any,
+      importedCount,
+      createdCount: manifestItems.filter((m: any) => m.action === 'CREATED').length,
+      updatedCount: manifestItems.filter((m: any) => m.action === 'UPDATED').length,
+      skippedCount: 0,
+      failedCount: 0,
+      importTimestamp: batch.importTimestamp || '',
+      revertStatus: isReverted ? 'REVERTED' : 'NOT_REVERTED',
+      canSafelyRevert: !isReverted && importedCount > 0,
+    };
+  });
 }
