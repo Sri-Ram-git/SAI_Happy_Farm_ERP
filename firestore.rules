@@ -109,11 +109,33 @@ service cloud.firestore {
           hasFarmAccess(request.resource.data.farmId)
         );
         allow delete: if isAdmin();
+
+        // Subcollection: revisions (Version History / Audit Archive for Version 2 Corrections)
+        match /revisions/{revId} {
+          allow read: if isAuthenticated() && isUserActive() && (
+            isOwner(reportOrUserId) ||
+            isAdmin() ||
+            (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+          );
+          allow create, update: if isAuthenticated() && isUserActive() && (
+            isAdmin() ||
+            hasFarmAccess(request.resource.data.farmId)
+          );
+          allow delete: if isAdmin();
+        }
       }
     }
 
     // Collection Group Queries for dailyLogs
     match /{path=**}/dailyLogs/{logDoc} {
+      allow read: if isAuthenticated() && isUserActive() && (
+        isAdmin() ||
+        (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+      );
+    }
+
+    // Collection Group Queries for revisions
+    match /{path=**}/revisions/{revDoc} {
       allow read: if isAuthenticated() && isUserActive() && (
         isAdmin() ||
         (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))

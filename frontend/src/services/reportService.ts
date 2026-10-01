@@ -682,6 +682,9 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
         const revRef = dailyLogRef.collection('revisions').doc('v1');
         transaction.set(revRef, {
           ...existingData,
+          farmId: input.farmId,
+          flockId: input.flockId,
+          userId,
           archivedAt: now,
           archivedReason: 'FARMER_CORRECTION_V2',
         });
@@ -752,6 +755,9 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
 
         // 5. Update canonical daily report with Version 2 values
         transaction.set(dailyLogRef, {
+          farmId: input.farmId,
+          flockId: input.flockId,
+          userId,
           submissionVersion: 2,
           status: 'corrected',
           updatedAt: now,

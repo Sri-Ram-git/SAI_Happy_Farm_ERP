@@ -81,4 +81,26 @@ describe('Firestore Security Rules Contract Verification', () => {
       }
     });
   });
+
+  describe('CORRECTION-V2: Daily report revisions subcollection rule verification', () => {
+    it('should have security rules for revisions subcollection under dailyLogs', () => {
+      const revisionsBlockMatch = rulesContent.match(/match\s+\/revisions\/\{revId\}[\s\S]*?\{([\s\S]*?)\}/);
+      expect(revisionsBlockMatch).not.toBeNull();
+      const revisionsBlock = revisionsBlockMatch![1];
+
+      // Must allow create/update for authorized users with farm access
+      expect(revisionsBlock).toMatch(/allow\s+create,\s*update:\s*if[\s\S]*?hasFarmAccess\(request\.resource\.data\.farmId\)/);
+
+      // Must restrict deletion to Admin
+      expect(revisionsBlock).toMatch(/allow\s+delete:\s*if\s*isAdmin\(\)/);
+
+      // Must require authentication and active user
+      expect(revisionsBlock).toMatch(/isAuthenticated\(\)\s*&&\s*isUserActive\(\)/);
+    });
+
+    it('should have collection group query rule for revisions', () => {
+      const cgRevisionsMatch = rulesContent.match(/match\s+\/\{path=\*\*\}\/revisions\/\{revDoc\}[\s\S]*?\{([\s\S]*?)\}/);
+      expect(cgRevisionsMatch).not.toBeNull();
+    });
+  });
 });
