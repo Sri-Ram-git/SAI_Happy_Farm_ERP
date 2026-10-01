@@ -158,6 +158,7 @@ export interface CreateFarmerPayload {
   phone_no: string;
   password: string;
   farmName: string;
+  farmId: string;
   initialBirdCount?: number;
   initialFeedKg?: number;
 }

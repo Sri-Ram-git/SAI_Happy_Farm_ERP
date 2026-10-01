@@ -29,6 +29,14 @@ export class FarmerService {
     createdByUid: string,
     requestId: string,
   ): Promise<CreatedFarmer> {
+    const cleanFarmId = input.farmId.trim();
+    if (!cleanFarmId) {
+      throw new ValidationError('Farm ID is required');
+    }
+
+    // 0. Check for duplicate farm ID in existing farms
+    await this.checkDuplicateFarmId(cleanFarmId, requestId);
+
     // 1. Check for duplicate farm name in existing farms
     await this.checkDuplicateFarmName(input.farmName, requestId);
 
@@ -67,48 +75,24 @@ export class FarmerService {
     }
 
     // 4. Create Firestore user, farm, opening flock and initial feed stock inside an atomic Transaction
-    let newFarmId = '';
+    const newFarmId = cleanFarmId;
     let openingFlockId: string | undefined = undefined;
     try {
       await this.db.runTransaction(async (t) => {
-        // Read all farms to find max suffix and generate next sequential Farm ID
-        const farmsSnapshot = await t.get(this.db.collection('farms'));
-        
-        let targetPrefix = 'AP';
-        let detectedPadding = 0;
-        let maxNumber = 0;
-
-        for (const doc of farmsSnapshot.docs) {
-          const farmData = doc.data();
-          if (farmData['name'] && farmData['name'].toLowerCase() === input.farmName.toLowerCase()) {
-            throw new DuplicateError('A farm with this name already exists.');
-          }
-          
-          const id = doc.id;
-          const match = id.match(/^([A-Za-z_]+)(\d+)$/);
-          if (match) {
-            const prefix = match[1] || 'AP';
-            const numStr = match[2] || '0';
-            const num = parseInt(numStr, 10);
-            
-            if (num > maxNumber) {
-              maxNumber = num;
-              targetPrefix = prefix;
-              if (numStr.startsWith('0')) {
-                detectedPadding = Math.max(detectedPadding, numStr.length);
-              }
-            }
-          }
+        const farmRef = this.db.collection('farms').doc(newFarmId);
+        const farmSnap = await t.get(farmRef);
+        if (farmSnap.exists) {
+          throw new DuplicateError(`A farm with ID "${newFarmId}" already exists.`, {
+            farmId: `A farm with ID "${newFarmId}" already exists.`,
+          });
         }
 
-        const nextNumber = maxNumber > 0 ? maxNumber + 1 : 1;
-        let nextNumberStr = nextNumber.toString();
-        
-        if (detectedPadding > 0) {
-          nextNumberStr = nextNumberStr.padStart(detectedPadding, '0');
+        const duplicateNameSnap = await t.get(
+          this.db.collection('farms').where('name', '==', input.farmName).limit(1)
+        );
+        if (!duplicateNameSnap.empty) {
+          throw new DuplicateError('A farm with this name already exists.');
         }
-
-        newFarmId = `${targetPrefix}${nextNumberStr}`;
 
         // Idempotency checks before writes:
         const existingFlocksSnap = await t.get(
@@ -123,7 +107,6 @@ export class FarmerService {
         const nowIso = new Date().toISOString();
         const istDate = getIstDate();
 
-        const farmRef = this.db.collection('farms').doc(newFarmId);
         const userRef = this.db.collection('users').doc(authUser.uid);
 
         const farmDoc = {
@@ -298,6 +281,16 @@ export class FarmerService {
       farmId: newFarmId,
       flockId: openingFlockId,
     };
+  }
+
+  private async checkDuplicateFarmId(farmId: string, requestId: string): Promise<void> {
+    const doc = await this.db.collection('farms').doc(farmId).get();
+    if (doc.exists) {
+      logger.warn('Farm ID duplicate check failed', { requestId, farmId });
+      throw new DuplicateError(`A farm with ID "${farmId}" already exists.`, {
+        farmId: `A farm with ID "${farmId}" already exists.`,
+      });
+    }
   }
 
   private async checkDuplicateFarmName(farmName: string, requestId: string): Promise<void> {

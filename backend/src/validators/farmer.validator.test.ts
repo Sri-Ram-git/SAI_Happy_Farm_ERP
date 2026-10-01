@@ -3,6 +3,7 @@ import { CreateFarmerSchema } from './farmer.validator';
 
 describe('CreateFarmerSchema Validation Suite', () => {
   const validPayload = {
+    farmId: 'AP17',
     name: 'Ramesh Patel',
     email: 'ramesh@saihappyfarms.com',
     phone_no: '9876543210',
@@ -15,6 +16,20 @@ describe('CreateFarmerSchema Validation Suite', () => {
   it('should accept valid farmer creation data with nonzero birds and feed', () => {
     const result = CreateFarmerSchema.safeParse(validPayload);
     expect(result.success).toBe(true);
+  });
+
+  it('should reject missing farmId', () => {
+    const { farmId, ...withoutFarmId } = validPayload;
+    const result = CreateFarmerSchema.safeParse(withoutFarmId);
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject empty or whitespace farmId', () => {
+    const result = CreateFarmerSchema.safeParse({
+      ...validPayload,
+      farmId: '   ',
+    });
+    expect(result.success).toBe(false);
   });
 
   it('should accept valid farmer creation with 0 birds and 0 feed', () => {

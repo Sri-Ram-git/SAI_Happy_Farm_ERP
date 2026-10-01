@@ -12,6 +12,7 @@ interface FarmerForm {
   password: string;
   confirmPassword: string;
   farmName: string;
+  farmId: string;
   initialBirdCount: string;
   initialFeedKg: string;
 }
@@ -23,6 +24,7 @@ const emptyForm: FarmerForm = {
   password: '',
   confirmPassword: '',
   farmName: '',
+  farmId: '',
   initialBirdCount: '0',
   initialFeedKg: '0',
 };
@@ -53,6 +55,8 @@ export function AdminCreateFarmerPage() {
     else if (form.password !== form.confirmPassword) errs.confirmPassword = 'Passwords do not match';
 
     if (!form.farmName.trim()) errs.farmName = 'Farm name is required';
+
+    if (!form.farmId.trim()) errs.farmId = 'Farm ID is required';
 
     if (form.initialBirdCount !== '') {
       const birds = Number(form.initialBirdCount);
@@ -89,6 +93,7 @@ export function AdminCreateFarmerPage() {
         phone_no: form.phone_no.trim(),
         password: form.password,
         farmName: form.farmName.trim(),
+        farmId: form.farmId.trim(),
         initialBirdCount: Number(form.initialBirdCount || 0),
         initialFeedKg: Number(form.initialFeedKg || 0),
       };
@@ -255,15 +260,17 @@ export function AdminCreateFarmerPage() {
             </div>
 
             <div className="field" style={{ marginBottom: 24 }}>
-              <label htmlFor="farmer-farm-id" style={{ display: 'block', fontWeight: 500, marginBottom: 6 }}>Farm ID</label>
+              <label htmlFor="farmer-farm-id" style={{ display: 'block', fontWeight: 500, marginBottom: 6 }}>Farm ID *</label>
               <input
                 id="farmer-farm-id"
                 type="text"
+                placeholder="Enter Farm ID (e.g. AP17)"
                 className="form-input"
-                placeholder="Automatically assigned based on the latest Farm ID."
-                disabled={true}
-                style={{ backgroundColor: '#f9fafb', color: '#6b7280', cursor: 'not-allowed' }}
+                value={form.farmId}
+                onChange={(e) => setForm((p) => ({ ...p, farmId: e.target.value }))}
+                disabled={submitting}
               />
+              {errors.farmId && <div className="field-error" style={{ color: '#dc2626', fontSize: 13, marginTop: 4 }}>{errors.farmId}</div>}
             </div>
 
             <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>

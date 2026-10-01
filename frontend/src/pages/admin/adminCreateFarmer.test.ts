@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 export interface FarmerFormState {
+  farmId: string;
   name: string;
   email: string;
   phone_no: string;
@@ -14,6 +15,7 @@ export interface FarmerFormState {
 export function validateFarmerForm(form: FarmerFormState): Record<string, string> {
   const errs: Record<string, string> = {};
 
+  if (!form.farmId.trim()) errs.farmId = 'Farm ID is required';
   if (!form.name.trim()) errs.name = 'Full name is required';
   if (!form.email.trim()) errs.email = 'Email address is required';
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errs.email = 'Invalid email format';
@@ -49,6 +51,7 @@ export function validateFarmerForm(form: FarmerFormState): Record<string, string
 
 describe('Admin Create Farmer Form Validation Suite', () => {
   const validForm: FarmerFormState = {
+    farmId: 'AP17',
     name: 'Suresh Kumar',
     email: 'suresh@saihappyfarms.com',
     phone_no: '9848099999',
@@ -62,6 +65,14 @@ describe('Admin Create Farmer Form Validation Suite', () => {
   it('should pass validation for complete valid form', () => {
     const errors = validateFarmerForm(validForm);
     expect(Object.keys(errors).length).toBe(0);
+  });
+
+  it('should reject missing or empty farmId', () => {
+    const errors = validateFarmerForm({
+      ...validForm,
+      farmId: '   ',
+    });
+    expect(errors.farmId).toBe('Farm ID is required');
   });
 
   it('should pass validation with zero initial birds and zero initial feed', () => {

@@ -59,8 +59,8 @@ export class NotFoundError extends AppError {
 }
 
 export class DuplicateError extends AppError {
-  constructor(message: string) {
-    super(409, ErrorCode.DUPLICATE_ENTRY, message);
+  constructor(message: string, fields?: Record<string, string>) {
+    super(409, ErrorCode.DUPLICATE_ENTRY, message, fields);
     this.name = 'DuplicateError';
   }
 }

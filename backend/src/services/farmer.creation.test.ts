@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FarmerService } from './farmer.service';
+import { DuplicateError, ValidationError } from '../utils/errors';
 
 // Mock dependencies
 vi.mock('../config/firebase', () => ({
@@ -72,6 +73,14 @@ describe('Farmer Creation — Opening Flock and Feed Stock Initialization Suite'
       }),
       doc: vi.fn().mockImplementation((farmId: string) => ({
         id: farmId,
+        get: vi.fn().mockImplementation(async () => {
+          const found = params.existingFarms.find((f) => f.id === farmId || f.farmId === farmId);
+          return {
+            exists: !!found,
+            id: farmId,
+            data: () => found,
+          };
+        }),
         collection: vi.fn().mockImplementation((subColl: string) => {
           if (subColl === 'birdTransactions') {
             return { doc: vi.fn().mockReturnValue(birdTxDocRef) };
@@ -157,7 +166,12 @@ describe('Farmer Creation — Opening Flock and Feed Stock Initialization Suite'
             if (typeof queryOrRef.get === 'function') {
               return queryOrRef.get();
             }
-            return { empty: true, docs: [] };
+            const found = params.existingFarms.find((f) => f.id === queryOrRef?.id || f.farmId === queryOrRef?.id);
+            return {
+              exists: !!found,
+              id: queryOrRef?.id,
+              data: () => found,
+            };
           }),
           set: vi.fn().mockImplementation((ref: any, data: any) => {
             writtenDocs.set(ref.id, data);
@@ -178,6 +192,7 @@ describe('Farmer Creation — Opening Flock and Feed Stock Initialization Suite'
 
     const result = await farmerService.createFarmer(
       {
+        farmId: 'AP12',
         name: 'Gopal Reddy',
         email: 'gopal@saihappyfarms.com',
         phone_no: '9848012345',
@@ -254,6 +269,7 @@ describe('Farmer Creation — Opening Flock and Feed Stock Initialization Suite'
 
     const result = await farmerService.createFarmer(
       {
+        farmId: 'AP1',
         name: 'Zero Bird Farmer',
         email: 'zerobirds@saihappyfarms.com',
         phone_no: '9848011111',
@@ -290,6 +306,7 @@ describe('Farmer Creation — Opening Flock and Feed Stock Initialization Suite'
 
     const result = await farmerService.createFarmer(
       {
+        farmId: 'AP1',
         name: 'Zero Feed Farmer',
         email: 'zerofeed@saihappyfarms.com',
         phone_no: '9848022222',
@@ -329,6 +346,7 @@ describe('Farmer Creation — Opening Flock and Feed Stock Initialization Suite'
 
     const result = await farmerService.createFarmer(
       {
+        farmId: 'AP2',
         name: 'Retry Farmer',
         email: 'retry@saihappyfarms.com',
         phone_no: '9848033333',
@@ -356,6 +374,7 @@ describe('Farmer Creation — Opening Flock and Feed Stock Initialization Suite'
     await expect(
       farmerService.createFarmer(
         {
+          farmId: 'AP1',
           name: 'Failing Farmer',
           email: 'fail@saihappyfarms.com',
           phone_no: '9848044444',
@@ -380,6 +399,7 @@ describe('Farmer Creation — Opening Flock and Feed Stock Initialization Suite'
 
     const result = await farmerService.createFarmer(
       {
+        farmId: 'AP2',
         name: 'Five Thousand Birds Farmer',
         email: '5000birds@saihappyfarms.com',
         phone_no: '9848055555',
@@ -434,5 +454,54 @@ describe('Farmer Creation — Opening Flock and Feed Stock Initialization Suite'
 
     // Prevent double-counting: farm's total bird count is 5,000, NOT farm.currentBirdCount + flock.currentBirds (10,000)
     expect(displayedCurrentBirds).not.toBe(10000);
+  });
+
+  it('Test G — Duplicate Farm ID: should reject creation with DuplicateError and not overwrite farm', async () => {
+    const { writtenDocs } = setupMockDb({
+      existingFarms: [{ id: 'AP15', name: 'Existing Farm AP15', farmId: 'AP15' }],
+    });
+
+    await expect(
+      farmerService.createFarmer(
+        {
+          farmId: 'AP15',
+          name: 'Duplicate Farm Farmer',
+          email: 'dup@saihappyfarms.com',
+          phone_no: '9848066666',
+          password: 'password123',
+          farmName: 'Duplicate Farm',
+          initialBirdCount: 1000,
+          initialFeedKg: 200,
+        },
+        'admin-uid-1',
+        'req-duplicate-farm',
+      ),
+    ).rejects.toThrow(DuplicateError);
+
+    // Existing farm was not overwritten in writtenDocs
+    expect(writtenDocs.has('AP15')).toBe(false);
+  });
+
+  it('Test H — Empty or whitespace Farm ID: should reject creation with ValidationError', async () => {
+    setupMockDb({
+      existingFarms: [],
+    });
+
+    await expect(
+      farmerService.createFarmer(
+        {
+          farmId: '   ',
+          name: 'Invalid Farm Farmer',
+          email: 'invalidfarm@saihappyfarms.com',
+          phone_no: '9848077777',
+          password: 'password123',
+          farmName: 'Invalid Farm',
+          initialBirdCount: 1000,
+          initialFeedKg: 200,
+        },
+        'admin-uid-1',
+        'req-invalid-farm',
+      ),
+    ).rejects.toThrow(ValidationError);
   });
 });
