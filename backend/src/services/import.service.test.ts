@@ -316,16 +316,29 @@ describe('ImportService', () => {
             }),
           };
         }
-        if (name === 'dailyReportLocks' || name === 'dailyReports') {
+        if (name === 'dailyReports') {
           return {
             where: vi.fn().mockReturnValue({
               get: vi.fn().mockResolvedValue({ docs: [] }),
             }),
-            doc: vi.fn().mockReturnValue({
-              collection: vi.fn().mockReturnValue({
-                doc: vi.fn().mockReturnValue({}),
-              }),
+            doc: vi.fn().mockImplementation((docId: string) => ({
+              path: `dailyReports/${docId}`,
+              collection: vi.fn().mockImplementation((subCol: string) => ({
+                doc: vi.fn().mockImplementation((subDocId: string) => ({
+                  path: `dailyReports/${docId}/${subCol}/${subDocId}`,
+                })),
+              })),
+            })),
+          };
+        }
+        if (name === 'dailyReportLocks') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({ docs: [] }),
             }),
+            doc: vi.fn().mockImplementation((docId: string) => ({
+              path: `dailyReportLocks/${docId}`,
+            })),
           };
         }
         if (name === 'importBatches') {
@@ -385,6 +398,36 @@ describe('ImportService', () => {
         call[0]?.path?.startsWith?.('farms/AP12') && !call[0]?.path?.includes?.('Transactions'),
       );
       expect(farmDocCalls).toHaveLength(0);
+
+      // Verify canonical dailyLog path write
+      const dailyLogCalls = mockBatch.set.mock.calls.filter((call: any) =>
+        call[0]?.path === 'dailyReports/farmer-12/dailyLogs/2025-10-01',
+      );
+      expect(dailyLogCalls).toHaveLength(1);
+      expect(dailyLogCalls[0][1]).toMatchObject({
+        userId: 'farmer-12',
+        farmId: 'AP12',
+        submissionDate: '2025-10-01',
+      });
+
+      // Verify parent document update with merge
+      const parentCalls = mockBatch.set.mock.calls.filter((call: any) =>
+        call[0]?.path === 'dailyReports/farmer-12',
+      );
+      expect(parentCalls).toHaveLength(1);
+      expect(parentCalls[0][2]).toEqual({ merge: true });
+
+      // Verify lock write
+      const lockCalls = mockBatch.set.mock.calls.filter((call: any) =>
+        call[0]?.path === 'dailyReportLocks/AP12_2025-10-01',
+      );
+      expect(lockCalls).toHaveLength(1);
+
+      // Verify top-level mirror document is NEVER written
+      const topLevelCalls = mockBatch.set.mock.calls.filter((call: any) =>
+        call[0]?.path === 'dailyReports/AP12_2025-10-01',
+      );
+      expect(topLevelCalls).toHaveLength(0);
     });
 
     it('should skip duplicate records and respect conflictAction=skip', async () => {
@@ -402,7 +445,11 @@ describe('ImportService', () => {
         if (name === 'users') {
           return {
             where: vi.fn().mockReturnValue({
-              get: vi.fn().mockResolvedValue({ docs: [] }),
+              get: vi.fn().mockResolvedValue({
+                docs: [
+                  { id: 'farmer-12', data: () => ({ role: 'farmer', farmIds: ['AP12'] }) },
+                ],
+              }),
             }),
           };
         }
@@ -496,6 +543,226 @@ describe('ImportService', () => {
       expect(res.importedCount).toBe(0);
       expect(res.duplicateCount).toBe(1);
       expect(res.skippedCount).toBe(1);
+    });
+
+    it('should reject row when no farmer is assigned to the farm without fallback to admin', async () => {
+      mockDb.collection.mockImplementation((name: string) => {
+        if (name === 'farms') {
+          return {
+            doc: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                exists: true,
+                data: () => ({ farmId: 'AP99', name: 'Orphan Farm' }),
+              }),
+            }),
+          };
+        }
+        if (name === 'users') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({ docs: [] }), // No farmers assigned to AP99
+            }),
+          };
+        }
+        if (name === 'dailyReports' || name === 'dailyReportLocks') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({ docs: [] }),
+            }),
+          };
+        }
+        if (name === 'importBatches') {
+          return { doc: vi.fn().mockReturnValue({ set: vi.fn().mockResolvedValue(undefined) }) };
+        }
+        if (name === 'auditLogs') {
+          return { add: vi.fn().mockResolvedValue({ id: 'audit-1' }) };
+        }
+        return {
+          doc: vi.fn().mockReturnValue({}),
+        };
+      });
+
+      const res = await importService.executeImport(
+        {
+          batchId: 'unmapped-batch',
+          records: [
+            {
+              recordType: 'DAILY_REPORT',
+              farmId: 'AP99',
+              submissionDate: '2026-03-01',
+              birdCount: 1000,
+              sourceFile: 'orphan.csv',
+              sourceRow: 1,
+            },
+          ],
+          conflictAction: 'skip',
+          sourceFiles: ['orphan.csv'],
+        },
+        adminUser,
+        'req-unmapped',
+      );
+
+      expect(res.importedCount).toBe(0);
+      expect(res.failedCount).toBe(1);
+      expect(res.status).toBe('FAILED');
+      expect(res.errors[0]?.reason).toContain("No registered farmer assigned to farm 'AP99'");
+      expect(mockBatch.set).not.toHaveBeenCalled();
+    });
+
+    it('should reject row when multiple farmers are assigned to the same farm (ambiguous)', async () => {
+      mockDb.collection.mockImplementation((name: string) => {
+        if (name === 'farms') {
+          return {
+            doc: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                exists: true,
+                data: () => ({ farmId: 'AP12', name: 'Contested Farm' }),
+              }),
+            }),
+          };
+        }
+        if (name === 'users') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                docs: [
+                  { id: 'farmer-A', data: () => ({ role: 'farmer', farmIds: ['AP12'] }) },
+                  { id: 'farmer-B', data: () => ({ role: 'farmer', farmIds: ['AP12'] }) },
+                ],
+              }),
+            }),
+          };
+        }
+        if (name === 'dailyReports' || name === 'dailyReportLocks') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({ docs: [] }),
+            }),
+          };
+        }
+        if (name === 'importBatches') {
+          return { doc: vi.fn().mockReturnValue({ set: vi.fn().mockResolvedValue(undefined) }) };
+        }
+        if (name === 'auditLogs') {
+          return { add: vi.fn().mockResolvedValue({ id: 'audit-1' }) };
+        }
+        return {
+          doc: vi.fn().mockReturnValue({}),
+        };
+      });
+
+      const res = await importService.executeImport(
+        {
+          batchId: 'ambiguous-batch',
+          records: [
+            {
+              recordType: 'DAILY_REPORT',
+              farmId: 'AP12',
+              submissionDate: '2026-03-01',
+              birdCount: 1000,
+              sourceFile: 'ambig.csv',
+              sourceRow: 1,
+            },
+          ],
+          conflictAction: 'skip',
+          sourceFiles: ['ambig.csv'],
+        },
+        adminUser,
+        'req-ambig',
+      );
+
+      expect(res.importedCount).toBe(0);
+      expect(res.failedCount).toBe(1);
+      expect(res.status).toBe('FAILED');
+      expect(res.errors[0]?.reason).toContain("Ambiguous farmer mapping for farm 'AP12'");
+      expect(mockBatch.set).not.toHaveBeenCalled();
+    });
+
+    it('should correctly resolve farmer with legacy singular farmId string', async () => {
+      mockDb.collection.mockImplementation((name: string) => {
+        if (name === 'farms') {
+          return {
+            doc: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                exists: true,
+                data: () => ({ farmId: 'AP15', name: 'Legacy Farm' }),
+              }),
+            }),
+          };
+        }
+        if (name === 'users') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                docs: [
+                  { id: 'farmer-legacy', data: () => ({ role: 'farmer', farmId: 'AP15' }) },
+                ],
+              }),
+            }),
+          };
+        }
+        if (name === 'dailyReports') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({ docs: [] }),
+            }),
+            doc: vi.fn().mockImplementation((docId: string) => ({
+              path: `dailyReports/${docId}`,
+              collection: vi.fn().mockImplementation((subCol: string) => ({
+                doc: vi.fn().mockImplementation((subDocId: string) => ({
+                  path: `dailyReports/${docId}/${subCol}/${subDocId}`,
+                })),
+              })),
+            })),
+          };
+        }
+        if (name === 'dailyReportLocks') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({ docs: [] }),
+            }),
+            doc: vi.fn().mockImplementation((docId: string) => ({
+              path: `dailyReportLocks/${docId}`,
+            })),
+          };
+        }
+        if (name === 'importBatches') {
+          return { doc: vi.fn().mockReturnValue({ set: vi.fn().mockResolvedValue(undefined) }) };
+        }
+        if (name === 'auditLogs') {
+          return { add: vi.fn().mockResolvedValue({ id: 'audit-1' }) };
+        }
+        return { doc: vi.fn().mockReturnValue({}) };
+      });
+
+      const res = await importService.executeImport(
+        {
+          batchId: 'legacy-batch',
+          records: [
+            {
+              recordType: 'DAILY_REPORT',
+              farmId: 'AP15',
+              submissionDate: '2026-03-01',
+              birdCount: 1500,
+              feedKg: 150,
+              sourceFile: 'legacy.csv',
+              sourceRow: 1,
+            },
+          ],
+          conflictAction: 'skip',
+          sourceFiles: ['legacy.csv'],
+        },
+        adminUser,
+        'req-legacy',
+      );
+
+      expect(res.importedCount).toBe(1);
+      expect(res.failedCount).toBe(0);
+      expect(res.status).toBe('COMPLETED');
+      const dailyLogCalls = mockBatch.set.mock.calls.filter((call: any) =>
+        call[0]?.path === 'dailyReports/farmer-legacy/dailyLogs/2026-03-01',
+      );
+      expect(dailyLogCalls).toHaveLength(1);
     });
   });
 
@@ -706,6 +973,73 @@ describe('ImportService', () => {
           revertStatus: 'REVERTED',
         }),
       );
+    });
+
+    it('should delete top-level report docs when reverting older batches whose manifest includes them', async () => {
+      const updateFn = vi.fn().mockResolvedValue(undefined);
+      const batchDocRef = {
+        get: vi.fn().mockResolvedValue({
+          exists: true,
+          data: () => ({
+            batchId: 'batch-legacy-revert',
+            revertStatus: 'NOT_REVERTED',
+            importTimestamp: '2026-01-10T12:00:00.000Z',
+            manifest: [
+              {
+                recordType: 'DAILY_REPORT',
+                action: 'CREATED',
+                farmId: 'AP12',
+                submissionDate: '2026-01-10',
+                targetDocs: [
+                  { collectionPath: 'dailyReports/farmer-12/dailyLogs', docId: '2026-01-10' },
+                  { collectionPath: 'dailyReportLocks', docId: 'AP12_2026-01-10' },
+                  { collectionPath: 'dailyReports', docId: 'AP12_2026-01-10' }, // Legacy top-level doc
+                ],
+                importedAt: '2026-01-10T12:00:00.000Z',
+                submissionVersion: 1,
+              },
+            ],
+          }),
+        }),
+        update: updateFn,
+      };
+
+      mockDb.collection.mockImplementation((col: string) => {
+        if (col === 'importBatches') return { doc: vi.fn().mockReturnValue(batchDocRef) };
+        if (col === 'auditLogs') return { add: vi.fn().mockResolvedValue({ id: 'audit-1' }) };
+        return { doc: vi.fn().mockReturnValue({}) };
+      });
+
+      const deletedPaths: string[] = [];
+      mockBatch.delete.mockImplementation((ref: any) => {
+        deletedPaths.push(ref.path);
+      });
+
+      mockDb.doc = vi.fn().mockImplementation((path: string) => ({
+        path,
+        get: vi.fn().mockResolvedValue({
+          exists: true,
+          data: () => ({
+            importBatchId: 'batch-legacy-revert',
+            submissionVersion: 1,
+          }),
+        }),
+      }));
+
+      const res = await importService.revertImportBatch(
+        'batch-legacy-revert',
+        { confirmationBatchId: 'batch-legacy-revert' },
+        adminUser,
+        'req-legacy-revert-1',
+      );
+
+      expect(res.status).toBe('REVERTED');
+      expect(res.deletedCount).toBe(1);
+      // All 3 targetDocs including the legacy top-level doc were deleted
+      expect(deletedPaths).toContain('dailyReports/AP12_2026-01-10');
+      expect(deletedPaths).toContain('dailyReports/farmer-12/dailyLogs/2026-01-10');
+      expect(deletedPaths).toContain('dailyReportLocks/AP12_2026-01-10');
+      expect(mockBatch.commit).toHaveBeenCalled();
     });
   });
 });

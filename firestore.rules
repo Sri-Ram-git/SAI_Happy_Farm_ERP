@@ -73,7 +73,7 @@ service cloud.firestore {
 
     // Flocks Collection
     match /flocks/{flockId} {
-      allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId);
+      allow read: if isAuthenticated() && isUserActive() && (resource == null || hasFarmAccess(resource.data.farmId));
       allow create, delete: if isAdmin();
       allow update: if isAdmin() || (
         isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId) &&

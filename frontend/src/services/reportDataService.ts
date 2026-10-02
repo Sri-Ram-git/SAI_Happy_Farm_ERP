@@ -24,8 +24,20 @@ function dedupeAndSort(reports: NormalizedReport[]): NormalizedReport[] {
   return Array.from(seen.values()).sort((a, b) => a.submissionDate.localeCompare(b.submissionDate));
 }
 
-function isParentDoc(data: Record<string, unknown>): boolean {
-  return !!(data.userId && data.lastSubmissionDate && !data.submissionDate);
+export function isParentDoc(data: Record<string, unknown>): boolean {
+  if (!data || typeof data !== 'object') return false;
+  if (data.userId && data.lastSubmissionDate && !data.submissionDate) return true;
+  if (
+    data.lastSubmissionDate != null &&
+    data.birdCount === undefined &&
+    data.closingBirdCount === undefined &&
+    data.openingBirdCount === undefined &&
+    data.eggsProduced === undefined &&
+    data.feedKg === undefined
+  ) {
+    return true;
+  }
+  return false;
 }
 
 async function fetchNewFormatReports(
@@ -37,6 +49,8 @@ async function fetchNewFormatReports(
     const snap = await db.collectionGroup('dailyLogs').get();
     let reports: NormalizedReport[] = [];
     snap.docs.forEach((d: any) => {
+      const data = d.data();
+      if (isParentDoc(data)) return;
       const pathStr = d.ref.path || '';
       const parts = pathStr.split('/');
       let userIdOverride: string | undefined;
@@ -44,7 +58,7 @@ async function fetchNewFormatReports(
         userIdOverride = parts[parts.length - 2];
       }
       
-      const r = normalizeReport(d.id, d.data(), userIdOverride, pathStr);
+      const r = normalizeReport(d.id, data, userIdOverride, pathStr);
       if (r.submissionDate && r.submissionDate >= startDate && r.submissionDate <= endDate) {
         console.log(`[Daily Report Loaded] Path: ${pathStr}`);
         reports.push(r);

@@ -12,7 +12,11 @@ export function getFriendlyError(code: string): string {
       return 'This account is disabled.';
     case 'auth/invalid-email':
       return 'Invalid email address.';
+    case 'auth/popup-closed-by-user':
+      return 'Sign in was cancelled.';
+    case 'auth/requires-recent-login':
+      return 'Please log in again to continue.';
     default:
-      return `Error: ${code}`;
+      return 'An unexpected error occurred. Please try again.';
   }
 }

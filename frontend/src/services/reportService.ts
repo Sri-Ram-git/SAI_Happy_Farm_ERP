@@ -1,4 +1,5 @@
 import { db } from '../config/firebase';
+import { isParentDoc } from './reportDataService';
 
 export function getIstDate(): string {
   const now = new Date();
@@ -403,7 +404,7 @@ function hasDataChanged(input: SubmitReportInput, existing: any): boolean {
 
 export function subscribeToTodayReport(
   userId: string,
-  flockId: string,
+  farmId: string,
   submissionDate: string,
   callback: (report: any | null) => void,
 ): () => void {
@@ -411,7 +412,24 @@ export function subscribeToTodayReport(
   return dailyLogRef.onSnapshot(
     (doc: any) => {
       if (doc && doc.exists) {
-        callback(doc.data());
+        const data = doc.data();
+        if (!data) {
+          callback(null);
+          return;
+        }
+        if (isParentDoc(data)) {
+          callback(null);
+          return;
+        }
+        if (farmId && data.farmId && data.farmId !== farmId && data.flockId !== farmId) {
+          callback(null);
+          return;
+        }
+        if (data.submissionDate && data.submissionDate !== submissionDate) {
+          callback(null);
+          return;
+        }
+        callback(data);
       } else {
         callback(null);
       }
@@ -452,7 +470,10 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
 
   const parentRef = db.collection('dailyReports').doc(userId);
   const dailyLogRef = db.collection('dailyReports').doc(userId).collection('dailyLogs').doc(submissionDate);
-  const flockRef = db.collection('flocks').doc(input.flockId);
+  const isSyntheticFlock = Boolean(input.flockId && (input.flockId.endsWith('_FL01') || input.flockId.trim() === ''));
+  const flockRef = (input.flockId && input.flockId.trim() && !isSyntheticFlock)
+    ? db.collection('flocks').doc(input.flockId.trim())
+    : null;
   const farmRef = db.collection('farms').doc(input.farmId);
   const userRef = db.collection('users').doc(userId);
 
@@ -493,8 +514,8 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
       const authoritativeWeekLabel = authReportingInfo.label;
 
       const existingLog = await transaction.get(dailyLogRef);
-      const flockDoc = await transaction.get(flockRef);
-      const flockData = flockDoc.exists ? flockDoc.data() : null;
+      const flockDoc = flockRef ? await transaction.get(flockRef) : null;
+      const flockData = flockDoc && flockDoc.exists ? flockDoc.data() : null;
 
       const farmDoc = await transaction.get(farmRef);
       if (!farmDoc.exists) {
@@ -507,8 +528,8 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
         throw new Error('INVENTORY_NOT_INITIALIZED');
       }
 
-      const currentFeedStock = Number(farmData.currentFeedKg ?? 0);
-      const currentBirdCount = Number(farmData.currentBirdCount ?? 0);
+      const currentFeedStock = Number(farmData.currentFeedKg ?? farmData.currentFeedStock ?? farmData.initialFeedKg ?? 0);
+      const currentBirdCount = Number(farmData.currentBirdCount ?? farmData.currentBirds ?? farmData.initialBirdCount ?? 0);
 
       if (!existingLog.exists) {
         // INITIAL SUBMISSION (VERSION 1)
@@ -541,7 +562,7 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
         const closingBirdCount = openingBirdCount - totalBirdDeduction;
 
         // Update Legacy Flock as requested (only if it exists)
-        if (flockData) {
+        if (flockRef && flockData) {
           transaction.set(flockRef, {
             currentBirds: closingBirdCount,
             totalMortality: (flockData.totalMortality || 0) + input.mortality,
@@ -664,161 +685,347 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
         }
 
       } else {
-        // EXISTING REPORT: CORRECTION / REVISION (VERSION 2)
+        // EXISTING REPORT: CORRECTION / REVISION (VERSION 2) OR HISTORICAL IMPORT REPLACEMENT
         const existingData = existingLog.data();
+        const isFromHistoricalImport =
+          existingData.submissionMethod === 'HISTORICAL_IMPORT' ||
+          (existingData.submittedBy && existingData.submittedBy !== userId);
         const currentVersion = Number(existingData.submissionVersion || 1);
 
-        if (currentVersion >= 2 || existingData.status === 'corrected' || existingData.status === 'finalized') {
-          throw new Error('CORRECTION_LIMIT_REACHED');
-        }
+        if (isFromHistoricalImport) {
+          // Farmer is submitting their initial digital report over an administrative imported draft/record
+          finalVersion = 1;
 
-        if (!hasDataChanged(input, existingData)) {
-          throw new Error('NO_CHANGES_DETECTED');
-        }
-
-        finalVersion = 2;
-
-        // 1. Archive Version 1 into subcollection
-        const revRef = dailyLogRef.collection('revisions').doc('v1');
-        transaction.set(revRef, {
-          ...existingData,
-          farmId: input.farmId,
-          flockId: input.flockId,
-          userId,
-          archivedAt: now,
-          archivedReason: 'FARMER_CORRECTION_V2',
-        });
-
-        if (typeof input.mortality !== 'number' || !Number.isInteger(input.mortality) || input.mortality < 0) {
-          throw new Error('INVALID_MORTALITY');
-        }
-        if (typeof input.culling !== 'number' || !Number.isInteger(input.culling) || input.culling < 0) {
-          throw new Error('INVALID_CULLING');
-        }
-
-        const openingEligibleBirds = Number(existingData.openingBirdCount ?? currentBirdCount);
-        if (input.mortality > openingEligibleBirds) {
-          throw new Error('MORTALITY_EXCEEDS_BIRD_COUNT');
-        }
-
-        // 2. Calculate diffs
-        const feedDiff = input.feedKg - Number(existingData.feedKg || 0);
-        const mortalityDiff = input.mortality - Number(existingData.mortality || 0);
-        const cullingDiff = input.culling - Number(existingData.culling || 0);
-        const eggsDiff = input.eggsProduced - Number(existingData.eggsProduced || 0);
-
-        if (feedDiff > 0 && currentFeedStock < feedDiff) {
-          throw new Error('INSUFFICIENT_FEED');
-        }
-
-        const totalBirdDeductionDiff = mortalityDiff + cullingDiff;
-        if (totalBirdDeductionDiff > 0 && currentBirdCount < totalBirdDeductionDiff) {
-          throw new Error('INSUFFICIENT_BIRDS');
-        }
-
-        // 3. Update Legacy flock totals (if exists)
-        if (flockData) {
-          transaction.set(flockRef, {
-            currentBirds: (flockData.currentBirds || 0) - totalBirdDeductionDiff,
-            totalMortality: (flockData.totalMortality || 0) + mortalityDiff,
-            totalCulling: (flockData.totalCulling || 0) + cullingDiff,
-            totalEggs: (flockData.totalEggs || 0) + eggsDiff,
-            updatedAt: now,
-          }, { merge: true });
-        }
-
-        // 4. Update master farm inventory (Atomic Delta)
-        const newFarmBirdCount = currentBirdCount - totalBirdDeductionDiff;
-        transaction.set(farmRef, {
-          currentBirdCount: newFarmBirdCount,
-          currentFeedKg: currentFeedStock - feedDiff,
-          totalFeedConsumedKg: (farmData.totalFeedConsumedKg || 0) + feedDiff,
-          inventoryUpdatedAt: now,
-          updatedAt: now,
-        }, { merge: true });
-
-        const openingBirdCount = existingData.openingBirdCount ?? currentBirdCount;
-        const closingBirdCount = openingBirdCount - input.mortality - input.culling;
-
-        if (feedDiff !== 0) {
-          const feedTxRef = db.collection('farms').doc(input.farmId).collection('feedTransactions').doc();
-          transaction.set(feedTxRef, {
+          // 1. Archive the imported record
+          const revRef = dailyLogRef.collection('revisions').doc('imported_v1');
+          transaction.set(revRef, {
+            ...existingData,
             farmId: input.farmId,
             flockId: input.flockId,
-            type: 'FEED_USAGE_CORRECTION',
-            feedKg: feedDiff,
-            reportDate: submissionDate,
-            createdAt: now,
             userId,
+            archivedAt: now,
+            archivedReason: 'FARMER_INITIAL_DIGITAL_SUBMISSION_OVER_IMPORT',
           });
-        }
 
-        // 5. Update canonical daily report with Version 2 values
-        transaction.set(dailyLogRef, {
-          farmId: input.farmId,
-          flockId: input.flockId,
-          userId,
-          submissionVersion: 2,
-          status: 'corrected',
-          updatedAt: now,
-          correctedAt: now,
-          openingBirdCount,
-          closingBirdCount,
-          birdCount: closingBirdCount,
-          openingFeedKg: existingData.openingFeedKg ?? currentFeedStock,
-          feedKg: input.feedKg,
-          closingFeedKg: (existingData.openingFeedKg ?? currentFeedStock) - input.feedKg,
-          feedGrams: input.feedGrams ?? input.feedKg * 1000,
-          feedG: input.feedG ?? input.feedKg * 1000,
-          feedGramsPerBird:
-            input.feedGramsPerBird ??
-            (openingBirdCount > 0 && input.feedKg > 0
-              ? Number(((input.feedKg * 1000) / openingBirdCount).toFixed(1))
-              : null),
-          mortality: input.mortality,
-          culling: input.culling,
-          eggsProduced: input.eggsProduced,
-          selectionEggs: input.selectionEggs,
-          damagedEggs: input.damagedEggs ?? 0,
-          floorEggs: input.floorEggs ?? 0,
-          temperature: input.temperature,
-          tempMin: input.tempMin ?? input.temperature,
-          tempMax: input.tempMax ?? input.temperature,
-          eggWeight: input.eggWeight,
-          bodyWeight: input.bodyWeight ?? null,
-          remarks: input.remarks,
-          ammoniaPpm: input.ammoniaPpm ?? null,
-          weekNumber: authoritativeWeekNumber,
-          weekLabel: authoritativeWeekLabel,
-          previousVersionData: {
-            feedKg: existingData.feedKg,
-            mortality: existingData.mortality,
-            culling: existingData.culling,
-            eggsProduced: existingData.eggsProduced,
-            selectionEggs: existingData.selectionEggs,
-            damagedEggs: existingData.damagedEggs,
-            floorEggs: existingData.floorEggs,
-            submittedAt: existingData.submittedAt || existingData.createdAt,
-          },
-        }, { merge: true });
+          if (typeof input.mortality !== 'number' || !Number.isInteger(input.mortality) || input.mortality < 0) {
+            throw new Error('INVALID_MORTALITY');
+          }
+          if (typeof input.culling !== 'number' || !Number.isInteger(input.culling) || input.culling < 0) {
+            throw new Error('INVALID_CULLING');
+          }
 
-        if (input.bodyWeight) {
-          const weeklyLockRef = db.collection('dailyReportLocks').doc(getWeeklyLockId(input.farmId, authoritativeWeekNumber));
-          transaction.set(weeklyLockRef, {
+          if (input.feedKg > 0 && currentFeedStock < input.feedKg) {
+            throw new Error('INSUFFICIENT_FEED');
+          }
+
+          const openingBirdCount = Number(
+            (existingData.openingBirdCount && existingData.openingBirdCount > 0 ? existingData.openingBirdCount : null) ??
+            (currentBirdCount > 0 ? currentBirdCount : null) ??
+            0
+          );
+          const totalBirdDeduction = input.mortality + input.culling;
+          if (openingBirdCount <= 0 && input.mortality > 0) {
+            throw new Error('MORTALITY_EXCEEDS_BIRD_COUNT');
+          }
+          if (input.mortality > openingBirdCount) {
+            throw new Error('MORTALITY_EXCEEDS_BIRD_COUNT');
+          }
+          if (totalBirdDeduction > 0 && openingBirdCount < totalBirdDeduction) {
+            throw new Error('INSUFFICIENT_BIRDS');
+          }
+          const closingBirdCount = openingBirdCount - totalBirdDeduction;
+
+          if (flockRef && flockData) {
+            transaction.set(flockRef, {
+              currentBirds: closingBirdCount,
+              totalMortality: (flockData.totalMortality || 0) + input.mortality,
+              totalCulling: (flockData.totalCulling || 0) + input.culling,
+              totalEggs: (flockData.totalEggs || 0) + input.eggsProduced,
+              updatedAt: now,
+            }, { merge: true });
+          }
+
+          transaction.set(parentRef, {
+            userId,
             farmId: input.farmId,
-            weekNumber: authoritativeWeekNumber,
-            reportDate: submissionDate,
-            bodyWeight: input.bodyWeight,
-            ammoniaPpm: input.ammoniaPpm ?? null,
-            submittedBy: userId,
+            flockId: input.flockId,
+            lastSubmissionDate: submissionDate,
             updatedAt: now,
           }, { merge: true });
+
+          transaction.set(dailyLogRef, {
+            userId,
+            submittedBy: userId,
+            farmId: input.farmId,
+            flockId: input.flockId,
+            submissionDate,
+            submissionMethod: 'DIGITAL_FORM',
+            submissionVersion: 1,
+            status: 'submitted',
+            submittedAt: now,
+            createdAt: now,
+            updatedAt: now,
+            openingBirdCount,
+            closingBirdCount,
+            birdCount: closingBirdCount,
+            openingFeedKg: currentFeedStock,
+            feedKg: input.feedKg,
+            closingFeedKg: currentFeedStock - input.feedKg,
+            feedGrams: input.feedGrams ?? input.feedKg * 1000,
+            feedG: input.feedG ?? input.feedKg * 1000,
+            feedGramsPerBird:
+              input.feedGramsPerBird ??
+              (openingBirdCount > 0 && input.feedKg > 0
+                ? Number(((input.feedKg * 1000) / openingBirdCount).toFixed(1))
+                : null),
+            mortality: input.mortality,
+            culling: input.culling,
+            eggsProduced: input.eggsProduced,
+            selectionEggs: input.selectionEggs,
+            damagedEggs: input.damagedEggs ?? 0,
+            floorEggs: input.floorEggs ?? 0,
+            temperature: input.temperature,
+            tempMin: input.tempMin ?? input.temperature,
+            tempMax: input.tempMax ?? input.temperature,
+            eggWeight: input.eggWeight,
+            bodyWeight: input.bodyWeight ?? null,
+            remarks: input.remarks,
+            ammoniaPpm: input.ammoniaPpm ?? null,
+            weekNumber: authoritativeWeekNumber,
+            weekLabel: authoritativeWeekLabel,
+          }, { merge: true });
+
+          transaction.set(farmRef, {
+            currentBirdCount: closingBirdCount,
+            currentFeedKg: currentFeedStock - input.feedKg,
+            totalFeedConsumedKg: (farmData.totalFeedConsumedKg || 0) + input.feedKg,
+            inventoryUpdatedAt: now,
+            updatedAt: now,
+          }, { merge: true });
+
+          if (input.bodyWeight) {
+            const weeklyLockRef = db.collection('dailyReportLocks').doc(getWeeklyLockId(input.farmId, authoritativeWeekNumber));
+            transaction.set(weeklyLockRef, {
+              farmId: input.farmId,
+              weekNumber: authoritativeWeekNumber,
+              reportDate: submissionDate,
+              bodyWeight: input.bodyWeight,
+              ammoniaPpm: input.ammoniaPpm ?? null,
+              submittedBy: userId,
+              submittedAt: now,
+              updatedAt: now,
+            }, { merge: true });
+          }
+
+          if (input.mortality > 0) {
+            const birdTxRef = db.collection('farms').doc(input.farmId).collection('birdTransactions').doc();
+            transaction.set(birdTxRef, {
+              farmId: input.farmId,
+              flockId: input.flockId,
+              type: 'MORTALITY',
+              count: input.mortality,
+              reportDate: submissionDate,
+              createdAt: now,
+              userId,
+            });
+          }
+
+          if (input.culling > 0) {
+            const birdTxRef = db.collection('farms').doc(input.farmId).collection('birdTransactions').doc();
+            transaction.set(birdTxRef, {
+              farmId: input.farmId,
+              flockId: input.flockId,
+              type: 'CULLING',
+              count: input.culling,
+              reportDate: submissionDate,
+              createdAt: now,
+              userId,
+            });
+          }
+
+          if (input.feedKg > 0) {
+            const feedTxRef = db.collection('farms').doc(input.farmId).collection('feedTransactions').doc();
+            transaction.set(feedTxRef, {
+              farmId: input.farmId,
+              flockId: input.flockId,
+              type: 'FEED_USAGE',
+              feedKg: input.feedKg,
+              reportDate: submissionDate,
+              createdAt: now,
+              userId,
+            });
+          }
+
+        } else {
+          // EXISTING REPORT: CORRECTION / REVISION (VERSION 2)
+          if (!hasDataChanged(input, existingData)) {
+            finalVersion = currentVersion;
+            return;
+          }
+
+          if (currentVersion >= 2 || existingData.status === 'corrected' || existingData.status === 'finalized') {
+            throw new Error('CORRECTION_LIMIT_REACHED');
+          }
+
+          finalVersion = 2;
+
+          // 1. Archive Version 1 into subcollection
+          const revRef = dailyLogRef.collection('revisions').doc('v1');
+          transaction.set(revRef, {
+            ...existingData,
+            farmId: input.farmId,
+            flockId: input.flockId,
+            userId,
+            archivedAt: now,
+            archivedReason: 'FARMER_CORRECTION_V2',
+          });
+
+          if (typeof input.mortality !== 'number' || !Number.isInteger(input.mortality) || input.mortality < 0) {
+            throw new Error('INVALID_MORTALITY');
+          }
+          if (typeof input.culling !== 'number' || !Number.isInteger(input.culling) || input.culling < 0) {
+            throw new Error('INVALID_CULLING');
+          }
+
+          const openingEligibleBirds = Number(existingData.openingBirdCount ?? currentBirdCount);
+          if (input.mortality > openingEligibleBirds) {
+            throw new Error('MORTALITY_EXCEEDS_BIRD_COUNT');
+          }
+
+          // 2. Calculate diffs
+          const feedDiff = input.feedKg - Number(existingData.feedKg || 0);
+          const mortalityDiff = input.mortality - Number(existingData.mortality || 0);
+          const cullingDiff = input.culling - Number(existingData.culling || 0);
+          const eggsDiff = input.eggsProduced - Number(existingData.eggsProduced || 0);
+
+          if (feedDiff > 0 && currentFeedStock < feedDiff) {
+            throw new Error('INSUFFICIENT_FEED');
+          }
+
+          const totalBirdDeductionDiff = mortalityDiff + cullingDiff;
+          if (totalBirdDeductionDiff > 0 && currentBirdCount < totalBirdDeductionDiff) {
+            throw new Error('INSUFFICIENT_BIRDS');
+          }
+
+          // 3. Update Legacy flock totals (if exists)
+          if (flockRef && flockData) {
+            transaction.set(flockRef, {
+              currentBirds: (flockData.currentBirds || 0) - totalBirdDeductionDiff,
+              totalMortality: (flockData.totalMortality || 0) + mortalityDiff,
+              totalCulling: (flockData.totalCulling || 0) + cullingDiff,
+              totalEggs: (flockData.totalEggs || 0) + eggsDiff,
+              updatedAt: now,
+            }, { merge: true });
+          }
+
+          // 4. Update master farm inventory (Atomic Delta)
+          const newFarmBirdCount = currentBirdCount - totalBirdDeductionDiff;
+          transaction.set(farmRef, {
+            currentBirdCount: newFarmBirdCount,
+            currentFeedKg: currentFeedStock - feedDiff,
+            totalFeedConsumedKg: (farmData.totalFeedConsumedKg || 0) + feedDiff,
+            inventoryUpdatedAt: now,
+            updatedAt: now,
+          }, { merge: true });
+
+          const openingBirdCount = existingData.openingBirdCount ?? currentBirdCount;
+          const closingBirdCount = openingBirdCount - input.mortality - input.culling;
+
+          if (feedDiff !== 0) {
+            const feedTxRef = db.collection('farms').doc(input.farmId).collection('feedTransactions').doc();
+            transaction.set(feedTxRef, {
+              farmId: input.farmId,
+              flockId: input.flockId,
+              type: 'FEED_USAGE_CORRECTION',
+              feedKg: feedDiff,
+              reportDate: submissionDate,
+              createdAt: now,
+              userId,
+            });
+          }
+
+          transaction.set(parentRef, {
+            userId,
+            farmId: input.farmId,
+            flockId: input.flockId,
+            lastSubmissionDate: submissionDate,
+            updatedAt: now,
+          }, { merge: true });
+
+          // 5. Update canonical daily report with Version 2 values
+          transaction.set(dailyLogRef, {
+            farmId: input.farmId,
+            flockId: input.flockId,
+            userId,
+            submittedBy: userId,
+            submissionDate,
+            submissionMethod: 'DIGITAL_FORM',
+            submissionVersion: 2,
+            status: 'corrected',
+            updatedAt: now,
+            correctedAt: now,
+            openingBirdCount,
+            closingBirdCount,
+            birdCount: closingBirdCount,
+            openingFeedKg: existingData.openingFeedKg ?? currentFeedStock,
+            feedKg: input.feedKg,
+            closingFeedKg: (existingData.openingFeedKg ?? currentFeedStock) - input.feedKg,
+            feedGrams: input.feedGrams ?? input.feedKg * 1000,
+            feedG: input.feedG ?? input.feedKg * 1000,
+            feedGramsPerBird:
+              input.feedGramsPerBird ??
+              (openingBirdCount > 0 && input.feedKg > 0
+                ? Number(((input.feedKg * 1000) / openingBirdCount).toFixed(1))
+                : null),
+            mortality: input.mortality,
+            culling: input.culling,
+            eggsProduced: input.eggsProduced,
+            selectionEggs: input.selectionEggs,
+            damagedEggs: input.damagedEggs ?? 0,
+            floorEggs: input.floorEggs ?? 0,
+            temperature: input.temperature,
+            tempMin: input.tempMin ?? input.temperature,
+            tempMax: input.tempMax ?? input.temperature,
+            eggWeight: input.eggWeight,
+            bodyWeight: input.bodyWeight ?? null,
+            remarks: input.remarks,
+            ammoniaPpm: input.ammoniaPpm ?? null,
+            weekNumber: authoritativeWeekNumber,
+            weekLabel: authoritativeWeekLabel,
+            previousVersionData: {
+              feedKg: existingData.feedKg,
+              mortality: existingData.mortality,
+              culling: existingData.culling,
+              eggsProduced: existingData.eggsProduced,
+              selectionEggs: existingData.selectionEggs,
+              damagedEggs: existingData.damagedEggs,
+              floorEggs: existingData.floorEggs,
+              submittedAt: existingData.submittedAt || existingData.createdAt,
+            },
+          }, { merge: true });
+
+          if (input.bodyWeight) {
+            const weeklyLockRef = db.collection('dailyReportLocks').doc(getWeeklyLockId(input.farmId, authoritativeWeekNumber));
+            transaction.set(weeklyLockRef, {
+              farmId: input.farmId,
+              weekNumber: authoritativeWeekNumber,
+              reportDate: submissionDate,
+              bodyWeight: input.bodyWeight,
+              ammoniaPpm: input.ammoniaPpm ?? null,
+              submittedBy: userId,
+              updatedAt: now,
+            }, { merge: true });
+          }
         }
       }
     });
 
     // Clean up any pending queue item if online submission succeeded
-    await removePendingSubmission(submissionKey);
+    try {
+      await removePendingSubmission(submissionKey);
+    } catch (cleanErr) {
+      console.warn('[reportService] Could not remove pending submission:', cleanErr);
+    }
 
     return { reportId: `${userId}_${submissionDate}_${input.flockId}`, version: finalVersion };
   } catch (err: any) {

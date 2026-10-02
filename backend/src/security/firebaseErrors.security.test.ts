@@ -20,5 +20,29 @@ describe('SEC-06: Authentication Error Enumeration Security Tests', () => {
     expect(getFriendlyError('auth/too-many-requests')).toBe('Too many failed attempts. Try again later.');
     expect(getFriendlyError('auth/network-request-failed')).toBe('No internet connection.');
     expect(getFriendlyError('auth/invalid-email')).toBe('Invalid email address.');
+    expect(getFriendlyError('auth/user-disabled')).toBe('This account is disabled.');
+    expect(getFriendlyError('auth/popup-closed-by-user')).toBe('Sign in was cancelled.');
+    expect(getFriendlyError('auth/requires-recent-login')).toBe('Please log in again to continue.');
+  });
+
+  it('SEC-20: should return a safe generic fallback for unmapped or unexpected error codes without leaking internal details', () => {
+    const unmappedCodes = [
+      'auth/internal-error',
+      'auth/operation-not-allowed',
+      'auth/project-not-found',
+      'firestore/permission-denied',
+      'unknown-error-code-123',
+      '',
+    ];
+
+    for (const code of unmappedCodes) {
+      const result = getFriendlyError(code);
+      expect(result).toBe('An unexpected error occurred. Please try again.');
+      // Must not leak the code name or structure
+      if (code) {
+        expect(result).not.toContain(code);
+      }
+      expect(result).not.toContain('Error:');
+    }
   });
 });

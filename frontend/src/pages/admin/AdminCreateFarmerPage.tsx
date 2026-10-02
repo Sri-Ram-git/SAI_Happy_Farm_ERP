@@ -49,7 +49,7 @@ export function AdminCreateFarmerPage() {
     if (!form.phone_no.trim()) errs.phone_no = 'Phone number is required';
 
     if (!form.password) errs.password = 'Password is required';
-    else if (form.password.length < 6) errs.password = 'Password must be at least 6 characters';
+    else if (form.password.length < 8) errs.password = 'Password must be at least 8 characters';
 
     if (!form.confirmPassword) errs.confirmPassword = 'Please confirm password';
     else if (form.password !== form.confirmPassword) errs.confirmPassword = 'Passwords do not match';
@@ -191,7 +191,7 @@ export function AdminCreateFarmerPage() {
               <input
                 id="farmer-password"
                 type="password"
-                placeholder="Minimum 6 characters"
+                placeholder="Minimum 8 characters"
                 className="form-input"
                 value={form.password}
                 onChange={(e) => setForm((p) => ({ ...p, password: e.target.value }))}

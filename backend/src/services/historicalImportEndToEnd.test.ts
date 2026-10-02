@@ -204,16 +204,29 @@ describe('End-to-End Historical Data Importer Suite', () => {
             }),
           };
         }
-        if (name === 'dailyReportLocks' || name === 'dailyReports') {
+        if (name === 'dailyReports') {
           return {
             where: vi.fn().mockReturnValue({
               get: vi.fn().mockResolvedValue({ docs: [] }),
             }),
-            doc: vi.fn().mockReturnValue({
-              collection: vi.fn().mockReturnValue({
-                doc: vi.fn().mockReturnValue({}),
-              }),
+            doc: vi.fn().mockImplementation((docId: string) => ({
+              path: `dailyReports/${docId}`,
+              collection: vi.fn().mockImplementation((subCol: string) => ({
+                doc: vi.fn().mockImplementation((subDocId: string) => ({
+                  path: `dailyReports/${docId}/${subCol}/${subDocId}`,
+                })),
+              })),
+            })),
+          };
+        }
+        if (name === 'dailyReportLocks') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({ docs: [] }),
             }),
+            doc: vi.fn().mockImplementation((docId: string) => ({
+              path: `dailyReportLocks/${docId}`,
+            })),
           };
         }
         return {
@@ -265,6 +278,17 @@ describe('End-to-End Historical Data Importer Suite', () => {
       expect(res.importedCount).toBe(2);
       expect(res.failedCount).toBe(0);
       expect(res.status).toBe('COMPLETED');
+
+      // Verify canonical writes and no top-level dailyReports writes
+      const writtenPaths = mockBatch.set.mock.calls.map((call: any) => call[0]?.path).filter(Boolean);
+      expect(writtenPaths).toContain('dailyReports/farmer-ap12/dailyLogs/2025-05-10');
+      expect(writtenPaths).toContain('dailyReports/farmer-ap13/dailyLogs/2025-05-10');
+      expect(writtenPaths).toContain('dailyReports/farmer-ap12');
+      expect(writtenPaths).toContain('dailyReports/farmer-ap13');
+      expect(writtenPaths).toContain('dailyReportLocks/AP12_2025-05-10');
+      expect(writtenPaths).toContain('dailyReportLocks/AP13_2025-05-10');
+      expect(writtenPaths).not.toContain('dailyReports/AP12_2025-05-10');
+      expect(writtenPaths).not.toContain('dailyReports/AP13_2025-05-10');
 
       // Verify that master farm inventory was NOT modified by summing snapshots
       const farmDocCalls = mockBatch.set.mock.calls.filter((call: any) =>

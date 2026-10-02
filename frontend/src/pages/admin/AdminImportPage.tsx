@@ -143,13 +143,15 @@ export function AdminImportPage() {
     setRevertTargetWorksheet(worksheet || null);
     setRevertConfirmationInput('');
     setRevertAckChecked(false);
+    setRevertingBatch(false);
     setRevertError(null);
     setRevertSuccessResult(null);
     setShowRevertSample(false);
     setLoadingRevertPreview(true);
 
     try {
-      const preview = await fetchRevertPreview(batch.batchId, worksheet?.worksheetKey);
+      const targetBatchId = String(batch?.id || batch?.batchId || '').trim();
+      const preview = await fetchRevertPreview(targetBatchId, worksheet?.worksheetKey);
       setRevertPreview(preview);
     } catch (err: any) {
       console.error('[handleOpenRevertModal] Failed loading revert preview:', err);
@@ -165,6 +167,7 @@ export function AdminImportPage() {
     setRevertPreview(null);
     setRevertConfirmationInput('');
     setRevertAckChecked(false);
+    setRevertingBatch(false);
     setRevertError(null);
     setRevertSuccessResult(null);
   };
@@ -175,11 +178,16 @@ export function AdminImportPage() {
     // Unmistakable confirmation input:
     // If reverting a specific worksheet: require the worksheet sheet name or key (e.g. AP15).
     // If reverting the full batch: require the exact batch ID.
+    const targetBatchId = String(revertModalBatch?.id || revertModalBatch?.batchId || '').trim();
     const expectedConfirmation = revertTargetWorksheet
-      ? (revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey).trim()
-      : revertModalBatch.batchId.trim();
+      ? String(revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey || targetBatchId).trim()
+      : targetBatchId;
 
-    if (revertConfirmationInput.trim().toUpperCase() !== expectedConfirmation.toUpperCase()) {
+    const enteredInput = revertConfirmationInput.trim();
+    if (
+      !expectedConfirmation ||
+      (enteredInput !== expectedConfirmation && enteredInput.toUpperCase() !== expectedConfirmation.toUpperCase())
+    ) {
       setRevertError(`Confirmation mismatch. Expected '${expectedConfirmation}'.`);
       return;
     }
@@ -193,14 +201,14 @@ export function AdminImportPage() {
 
     try {
       const res = await executeRevertImportBatch(
-        revertModalBatch.batchId,
-        revertModalBatch.batchId,
+        targetBatchId,
+        targetBatchId,
         revertTargetWorksheet?.worksheetKey,
       );
       setRevertSuccessResult(res);
 
       // Keep importResult (Step 5) updated in real-time if currently viewed
-      if (importResult && importResult.batchId === revertModalBatch.batchId) {
+      if (importResult && (importResult.batchId === targetBatchId || importResult.id === targetBatchId)) {
         if (res.updatedBatch) {
           setImportResult(res.updatedBatch);
         } else if (revertTargetWorksheet) {
@@ -2425,11 +2433,11 @@ export function AdminImportPage() {
                   </h3>
                   {revertTargetWorksheet ? (
                     <p style={{ margin: '2px 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-                      File: <strong>{revertTargetWorksheet.sourceFile || revertTargetWorksheet.fileName}</strong> • Farm: <strong>{revertTargetWorksheet.farmId}</strong> • Batch: <code>{revertModalBatch.batchId}</code>
+                      File: <strong>{revertTargetWorksheet.sourceFile || revertTargetWorksheet.fileName}</strong> • Farm: <strong>{revertTargetWorksheet.farmId}</strong> • Batch: <code>{revertModalBatch.id || revertModalBatch.batchId}</code>
                     </p>
                   ) : (
                     <p style={{ margin: '2px 0 0', fontSize: '0.85rem', color: '#64748b' }}>
-                      Batch ID: <code>{revertModalBatch.batchId}</code> • Total Worksheets: <strong>{revertModalBatch.worksheets?.length || revertModalBatch.filenames?.length || 1}</strong>
+                      Batch ID: <code>{revertModalBatch.id || revertModalBatch.batchId}</code> • Total Worksheets: <strong>{revertModalBatch.worksheets?.length || revertModalBatch.filenames?.length || 1}</strong>
                     </p>
                   )}
                 </div>
@@ -2468,7 +2476,7 @@ export function AdminImportPage() {
                 <p style={{ color: '#475569', fontSize: '0.9rem', marginBottom: 20 }}>
                   {revertTargetWorksheet
                     ? `The records imported from worksheet '${revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey}' have been safely rolled back.`
-                    : `The records imported in batch ${revertModalBatch.batchId} have been safely rolled back.`}
+                    : `The records imported in batch ${revertModalBatch.id || revertModalBatch.batchId} have been safely rolled back.`}
                 </p>
 
                 <div className="kpi-grid" style={{ marginBottom: 24 }}>
@@ -2519,7 +2527,7 @@ export function AdminImportPage() {
                       <div style={{ marginTop: 4 }}>
                         This action will undo daily reports, logs, and lock records imported <strong>ONLY</strong> from worksheet{' '}
                         <strong>"{revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey}"</strong> for farm{' '}
-                        <strong>{revertTargetWorksheet.farmId}</strong>. All other worksheets in batch <code>{revertModalBatch.batchId}</code> will remain completely intact in Firestore.
+                        <strong>{revertTargetWorksheet.farmId}</strong>. All other worksheets in batch <code>{revertModalBatch.id || revertModalBatch.batchId}</code> will remain completely intact in Firestore.
                       </div>
                     </div>
                   </div>
@@ -2548,11 +2556,41 @@ export function AdminImportPage() {
 
                 {/* Loading Revert Preview */}
                 {loadingRevertPreview ? (
-                  <div style={{ textAlign: 'center', padding: '32px 0' }}>
-                    <RefreshCw className="animate-spin text-emerald-600" size={32} style={{ margin: '0 auto 12px' }} />
-                    <p style={{ margin: 0, color: '#64748b', fontSize: '0.9rem' }}>
+                  <div
+                    className="revert-loading-card"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <div className="revert-spinner-wrapper" style={{ marginBottom: 14 }}>
+                      <span className="revert-pulse-beacon revert-pulse-beacon--emerald" aria-hidden="true" />
+                      <RefreshCw
+                        className="revert-spin-icon text-emerald-600"
+                        size={32}
+                        aria-hidden="true"
+                      />
+                    </div>
+                    <div style={{ fontWeight: 600, fontSize: '0.98rem', color: '#0f172a', marginBottom: 4 }}>
                       Analyzing batch records and checking for subsequent modifications...
+                    </div>
+                    <p style={{ margin: '0 0 16px', color: '#64748b', fontSize: '0.85rem', lineHeight: 1.45, maxWidth: 440 }}>
+                      Verifying document versions, checking audit locks, and validating rollback safety. Please wait.
                     </p>
+
+                    {/* Indeterminate Animated Progress Bar */}
+                    <div
+                      className="revert-progress-track"
+                      role="progressbar"
+                      aria-label="Analyzing batch records for rollback safety"
+                      aria-busy="true"
+                      style={{
+                        maxWidth: 360,
+                        margin: '0 auto',
+                        height: 6,
+                        background: '#e2e8f0',
+                      }}
+                    >
+                      <div className="revert-progress-bar revert-progress-bar--emerald" />
+                    </div>
                   </div>
                 ) : revertPreview ? (
                   <>
@@ -2693,9 +2731,10 @@ export function AdminImportPage() {
 
                     {/* Revert Form Inputs (Only enabled if reversible) */}
                     {revertPreview.isReversible && (() => {
+                      const displayedBatchId = String(revertModalBatch.id || revertModalBatch.batchId || '').trim();
                       const expectedConfirmation = revertTargetWorksheet
-                        ? (revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey).trim()
-                        : revertModalBatch.batchId.trim();
+                        ? String(revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey || displayedBatchId).trim()
+                        : displayedBatchId;
 
                       return (
                         <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
@@ -2720,7 +2759,7 @@ export function AdminImportPage() {
                             />
                             <span>
                               {revertTargetWorksheet
-                                ? `I understand that reverting this worksheet will remove its imported records without modifying records from other worksheets in batch ${revertModalBatch.batchId}.`
+                                ? `I understand that reverting this worksheet will remove its imported records without modifying records from other worksheets in batch ${revertModalBatch.id || revertModalBatch.batchId}.`
                                 : 'I understand that reverting this batch will permanently remove imported records across all worksheets and restore pre-import data where applicable.'}
                             </span>
                           </label>
@@ -2764,26 +2803,75 @@ export function AdminImportPage() {
 
                 {/* Revert Error Display */}
                 {revertError && (
-                  <div className="alert alert--error" style={{ marginBottom: 16 }}>
+                  <div className="alert alert--error" role="alert" aria-live="assertive" style={{ marginBottom: 16 }}>
                     {revertError}
                   </div>
                 )}
 
-                {/* Reverting Progress Bar */}
+                {/* Live Revert Execution Progress Indicator */}
                 {revertingBatch && (
-                  <div style={{ margin: '16px 0', padding: 12, background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem', color: '#0f172a' }}>
-                      <RefreshCw className="animate-spin text-rose-600" size={16} />
-                      <span>Reverting records and restoring documents... Please wait.</span>
+                  <div
+                    className="revert-executing-card"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <div className="revert-spinner-wrapper" style={{ flexShrink: 0 }}>
+                        <span className="revert-pulse-beacon revert-pulse-beacon--rose" aria-hidden="true" />
+                        <RefreshCw
+                          className="revert-spin-icon"
+                          size={24}
+                          style={{ color: '#e11d48' }}
+                          aria-hidden="true"
+                        />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.95rem', color: '#9f1239', marginBottom: 2 }}>
+                          Revert in progress. Processing batch records...
+                        </div>
+                        <div style={{ fontSize: '0.82rem', color: '#be123c', lineHeight: 1.45 }}>
+                          Rolling back imported records and restoring pre-import data in Firestore. Please do not close or refresh this window.
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Indeterminate Animated Progress Bar */}
+                    <div
+                      className="revert-progress-track"
+                      role="progressbar"
+                      aria-label="Batch rollback in progress"
+                      aria-busy="true"
+                      style={{
+                        marginTop: 14,
+                        height: 6,
+                        background: '#fecdd3',
+                      }}
+                    >
+                      <div className="revert-progress-bar revert-progress-bar--rose" />
                     </div>
                   </div>
                 )}
 
                 {/* Modal Action Buttons */}
                 {(() => {
+                  const displayedBatchId = String(revertModalBatch.id || revertModalBatch.batchId || '').trim();
                   const expectedConfirmation = revertTargetWorksheet
-                    ? (revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey).trim()
-                    : revertModalBatch.batchId.trim();
+                    ? String(revertTargetWorksheet.sheetName || revertTargetWorksheet.worksheetKey || displayedBatchId).trim()
+                    : displayedBatchId;
+
+                  const enteredBatchId = revertConfirmationInput.trim();
+                  const isIdMatched = Boolean(
+                    expectedConfirmation &&
+                    (enteredBatchId === expectedConfirmation || enteredBatchId.toUpperCase() === expectedConfirmation.toUpperCase())
+                  );
+
+                  const canConfirm = Boolean(
+                    revertAckChecked &&
+                    isIdMatched &&
+                    !revertingBatch &&
+                    !loadingRevertPreview &&
+                    revertPreview?.isReversible
+                  );
 
                   return (
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24, borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
@@ -2800,19 +2888,13 @@ export function AdminImportPage() {
                         type="button"
                         className="btn btn--danger"
                         onClick={handleExecuteRevert}
-                        disabled={
-                          revertingBatch ||
-                          !revertAckChecked ||
-                          revertConfirmationInput.trim().toUpperCase() !== expectedConfirmation.toUpperCase() ||
-                          loadingRevertPreview ||
-                          !revertPreview?.isReversible
-                        }
+                        disabled={!canConfirm}
                         style={{ display: 'flex', alignItems: 'center', gap: 6 }}
                       >
                         {revertingBatch ? (
-                          <RefreshCw className="animate-spin" size={16} />
+                          <RefreshCw className="revert-spin-icon" size={16} aria-hidden="true" />
                         ) : (
-                          <RotateCcw size={16} />
+                          <RotateCcw size={16} aria-hidden="true" />
                         )}
                         <span>
                           {revertingBatch

@@ -351,31 +351,30 @@ export function FarmerFormPage() {
   const [weeklyMetrics, setWeeklyMetrics] = useState<WeeklyMetricsDoc | null>(null);
   const [isEditingWeekly, setIsEditingWeekly] = useState<boolean>(false);
 
-  // When reportDate changes, reset form to empty defaults so newly opened reports never show stale/zero values
+  const isInitialSnapshotRef = useRef<boolean>(true);
+  const hasSubmittedInSessionRef = useRef<boolean>(false);
+
+  const farmId = userProfile?.farmIds?.[0] ?? (userProfile as any)?.farmId ?? (userProfile as any)?.farmID ?? '';
+  const userName = userProfile?.name || firebaseUser?.displayName || 'Farmer';
+
+  // When reportDate or farmId changes, reset form to empty defaults so newly opened reports never show stale/zero values
   useEffect(() => {
+    isInitialSnapshotRef.current = true;
+    hasSubmittedInSessionRef.current = false;
     setTodayReport(null);
-    setData((prev) => ({
+    setData({
       ...INITIAL_FARM_FORM_DATA,
-      flockId: prev.flockId,
-      birdCount: prev.birdCount,
-    }));
+    });
     setStep(0);
     setErrors({});
     setSubmitted(false);
     setSubmittedOffline(false);
     setSubmitError('');
+    setShowStatusModal(false);
     setHasDismissedModal(false);
     setIsEditingWeekly(false);
-  }, [reportDate]);
+  }, [reportDate, farmId]);
 
-  useEffect(() => {
-    if (todayReport && (todayReport.submissionVersion != null || todayReport.status) && !hasDismissedModal) {
-      setShowStatusModal(true);
-    }
-  }, [todayReport?.submissionVersion, todayReport?.status, hasDismissedModal]);
-
-  const farmId = userProfile?.farmIds?.[0] ?? (userProfile as any)?.farmId ?? (userProfile as any)?.farmID ?? '';
-  const userName = userProfile?.name || firebaseUser?.displayName || 'Farmer';
   const birdCount =
     Number(data.birdCount) ||
     todayReport?.openingBirdCount ||
@@ -421,14 +420,40 @@ export function FarmerFormPage() {
   // Subscribe to today's canonical report for current farm & date
   useEffect(() => {
     if (!userProfile?.uid || !farmId) return;
-    const effectiveFlockId = data.flockId || flocks[0]?.flockId || `${farmId}_FL01`;
-    const unsub = subscribeToTodayReport(userProfile.uid, effectiveFlockId, reportDate, (rep) => {
+    isInitialSnapshotRef.current = true;
+    const unsub = subscribeToTodayReport(userProfile.uid, farmId, reportDate, (rep) => {
+      const isInitial = isInitialSnapshotRef.current;
+      isInitialSnapshotRef.current = false;
+
       setTodayReport(rep);
+      if (!rep) {
+        setShowStatusModal(false);
+        return;
+      }
+
+      // Only display the "Report Already Submitted" modal if an existing report was detected
+      // upon the initial snapshot load of this date and it was not an administrative import.
+      // Never display it when a report is submitted in the current active session.
+      if (
+        isInitial &&
+        rep &&
+        rep.submissionMethod !== 'HISTORICAL_IMPORT' &&
+        (rep.submissionVersion != null || rep.status) &&
+        !hasSubmittedInSessionRef.current &&
+        !hasDismissedModal
+      ) {
+        setShowStatusModal(true);
+      }
+
       if (rep && (rep.submissionVersion != null || rep.status === 'submitted' || rep.status === 'corrected')) {
         setData((prev) => ({
           ...prev,
           flockId: rep.flockId || prev.flockId,
-          birdCount: String(rep.openingBirdCount ?? rep.birdCount ?? prev.birdCount),
+          birdCount: (rep.openingBirdCount && rep.openingBirdCount > 0)
+            ? String(rep.openingBirdCount)
+            : (rep.birdCount && rep.birdCount > 0)
+              ? String(rep.birdCount)
+              : prev.birdCount || (farmDoc?.currentBirdCount ? String(farmDoc.currentBirdCount) : ''),
           feedQuantity: rep.feedKg != null ? String(rep.feedKg) : prev.feedQuantity,
           mortality: rep.mortality != null ? String(rep.mortality) : prev.mortality,
           culling: rep.culling != null ? String(rep.culling) : prev.culling,
@@ -451,7 +476,7 @@ export function FarmerFormPage() {
       }
     });
     return () => unsub();
-  }, [userProfile?.uid, farmId, reportDate, flocks.length]);
+  }, [userProfile?.uid, farmId, reportDate]);
 
   // Network Connectivity & Auto-Sync Listener
   useEffect(() => {
@@ -671,7 +696,7 @@ export function FarmerFormPage() {
   };
 
   const handleNext = () => {
-    const effectiveFlockId = data.flockId || flocks[0]?.flockId || `${farmId}_FL01`;
+    const effectiveFlockId = data.flockId || flocks[0]?.flockId || '';
     const effectiveBirdCount = birdCount || (farmDoc?.currentBirdCount ?? flocks[0]?.currentBirds ?? 0);
     const avgTemp = (Number(data.tempMin) + Number(data.tempMax)) / 2;
 
@@ -720,6 +745,7 @@ export function FarmerFormPage() {
 
     const hasExistingReport =
       todayReport &&
+      todayReport.submissionMethod !== 'HISTORICAL_IMPORT' &&
       (todayReport.submissionVersion >= 1 ||
         todayReport.status === 'submitted' ||
         todayReport.status === 'corrected');
@@ -738,6 +764,7 @@ export function FarmerFormPage() {
 
     const hasExistingReport =
       todayReport &&
+      todayReport.submissionMethod !== 'HISTORICAL_IMPORT' &&
       (todayReport.submissionVersion >= 1 ||
         todayReport.status === 'submitted' ||
         todayReport.status === 'corrected');
@@ -757,6 +784,9 @@ export function FarmerFormPage() {
 
   const executeSubmission = async () => {
     setShowOverwriteModal(false);
+    setShowStatusModal(false);
+    setHasDismissedModal(true);
+    hasSubmittedInSessionRef.current = true;
     setSubmitting(true);
     setSubmitError('');
     try {
@@ -777,7 +807,7 @@ export function FarmerFormPage() {
         feedKg = feedKg / 1000;
       }
 
-      const effectiveFlockId = data.flockId || flocks[0]?.flockId || `${farmId}_FL01`;
+      const effectiveFlockId = data.flockId || flocks[0]?.flockId || '';
       const avgTemp = (Number(data.tempMin) + Number(data.tempMax)) / 2;
 
       const hasBw = data.bodyWeightMin !== '' && data.bodyWeightMax !== '';
@@ -879,6 +909,8 @@ export function FarmerFormPage() {
     setSubmitted(false);
     setSubmittedOffline(false);
     setSubmitError('');
+    setShowStatusModal(false);
+    setHasDismissedModal(true);
   };
 
   const handleLogout = async () => {
@@ -1606,18 +1638,18 @@ export function FarmerFormPage() {
                     submitting ||
                     isLoadingUser ||
                     !reportingWeek.isValid ||
-                    (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))
+                    Boolean(todayReport && todayReport.submissionMethod !== 'HISTORICAL_IMPORT' && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))
                   }
                   style={{
-                    opacity: (isLoadingUser || !reportingWeek.isValid || (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))) ? 0.6 : 1,
-                    cursor: (isLoadingUser || !reportingWeek.isValid || (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))) ? 'not-allowed' : 'pointer',
+                    opacity: (isLoadingUser || !reportingWeek.isValid || Boolean(todayReport && todayReport.submissionMethod !== 'HISTORICAL_IMPORT' && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))) ? 0.6 : 1,
+                    cursor: (isLoadingUser || !reportingWeek.isValid || Boolean(todayReport && todayReport.submissionMethod !== 'HISTORICAL_IMPORT' && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized'))) ? 'not-allowed' : 'pointer',
                   }}
                 >
                   {submitting ? (
                     <span className="spinner" />
-                  ) : (todayReport && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized')) ? (
+                  ) : (todayReport && todayReport.submissionMethod !== 'HISTORICAL_IMPORT' && (todayReport.submissionVersion >= 2 || todayReport.status === 'corrected' || todayReport.status === 'finalized')) ? (
                     t('farmer.correctionLimitReached')
-                  ) : (todayReport && todayReport.submissionVersion === 1) ? (
+                  ) : (todayReport && todayReport.submissionMethod !== 'HISTORICAL_IMPORT' && todayReport.submissionVersion === 1) ? (
                     t('farmer.submitCorrection')
                   ) : (
                     t('farmer.submitReport')

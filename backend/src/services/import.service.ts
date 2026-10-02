@@ -208,15 +208,23 @@ export class ImportService {
       }
 
       // 2. Fetch existing farmers to map assigned userId
-      const farmerUserMap = new Map<string, string>();
+      const farmToUsersMap = new Map<string, Set<string>>();
       const usersSnap = await this.db.collection('users').where('role', '==', 'farmer').get();
       usersSnap.docs.forEach((u) => {
         const udata = u.data();
-        const uFarmIds: string[] = udata['farmIds'] || [];
-        uFarmIds.forEach((fId) => {
-          if (!farmerUserMap.has(fId)) {
-            farmerUserMap.set(fId, u.id);
+        if (udata['active'] === false) return;
+        const rawFarmIds: string[] = Array.isArray(udata['farmIds'])
+          ? udata['farmIds']
+          : typeof udata['farmId'] === 'string' && udata['farmId'].trim()
+            ? [udata['farmId'].trim()]
+            : [];
+        rawFarmIds.forEach((fId) => {
+          if (!fId || typeof fId !== 'string') return;
+          const cleanFId = fId.trim().toUpperCase();
+          if (!farmToUsersMap.has(cleanFId)) {
+            farmToUsersMap.set(cleanFId, new Set<string>());
           }
+          farmToUsersMap.get(cleanFId)!.add(u.id);
         });
       });
 
@@ -279,6 +287,34 @@ export class ImportService {
           continue;
         }
 
+        // Validate farm-to-user mapping for DAILY_REPORT
+        let assignedUserId: string | null = null;
+        if (record.recordType === 'DAILY_REPORT') {
+          const cleanFId = record.farmId ? record.farmId.trim().toUpperCase() : '';
+          const matchedFarmers = Array.from(farmToUsersMap.get(cleanFId) || []);
+          if (matchedFarmers.length === 0) {
+            errors.push({
+              file: record.sourceFile,
+              row: record.sourceRow,
+              field: 'farmId',
+              reason: `No registered farmer assigned to farm '${record.farmId}'. Cannot resolve report path.`,
+              rawData: record as any,
+            });
+            continue;
+          }
+          if (matchedFarmers.length > 1) {
+            errors.push({
+              file: record.sourceFile,
+              row: record.sourceRow,
+              field: 'farmId',
+              reason: `Ambiguous farmer mapping for farm '${record.farmId}'. Multiple farmers assigned (${matchedFarmers.join(', ')}). Cannot resolve report path.`,
+              rawData: record as any,
+            });
+            continue;
+          }
+          assignedUserId = matchedFarmers[0]!;
+        }
+
         const identityKey = `${record.farmId}_${record.submissionDate}`;
         const existingLock = existingLocksMap.get(identityKey);
         const existingReport = existingReportsMap.get(identityKey);
@@ -320,15 +356,13 @@ export class ImportService {
 
         // Write Record based on type
         if (record.recordType === 'DAILY_REPORT') {
-          const assignedUserId = farmerUserMap.get(record.farmId) || user.uid;
           const docId = record.flockId
             ? `${record.submissionDate}_${record.flockId}`
             : record.submissionDate;
 
-          const parentRef = this.db.collection('dailyReports').doc(assignedUserId);
+          const parentRef = this.db.collection('dailyReports').doc(assignedUserId!);
           const dailyLogRef = parentRef.collection('dailyLogs').doc(docId);
           const lockRef = this.db.collection('dailyReportLocks').doc(identityKey);
-          const topLevelReportRef = this.db.collection('dailyReports').doc(identityKey);
 
           const openingBirdCount = record.openingBirdCount ?? record.birdCount ?? null;
           const mortality = record.mortality ?? 0;
@@ -348,7 +382,7 @@ export class ImportService {
           const weekLabel = record.weekLabel || (record.weekNumber != null ? String(record.weekNumber) : null);
 
           const reportData: Record<string, any> = {
-            userId: assignedUserId,
+            userId: assignedUserId!,
             submittedBy: user.uid,
             farmId: record.farmId,
             flockId: record.flockId || '',
@@ -393,7 +427,7 @@ export class ImportService {
           };
 
           currentBatch.set(parentRef, {
-            userId: assignedUserId,
+            userId: assignedUserId!,
             farmId: record.farmId,
             updatedAt: now,
           }, { merge: true });
@@ -409,8 +443,7 @@ export class ImportService {
             updatedAt: now,
           });
 
-          currentBatch.set(topLevelReportRef, reportData, { merge: true });
-          operationsInCurrentBatch += 4;
+          operationsInCurrentBatch += 3;
 
           if (record.bodyWeight && (record.bodyWeight.avg > 0 || record.bodyWeight.min > 0) && intWeekNumber) {
             const weeklyLockRef = this.db.collection('dailyReportLocks').doc(`weekly_${record.farmId}_W${intWeekNumber}`);
@@ -420,7 +453,7 @@ export class ImportService {
               reportDate: record.submissionDate,
               bodyWeight: record.bodyWeight,
               ammoniaPpm: record.ammoniaPpm ?? null,
-              submittedBy: assignedUserId,
+              submittedBy: assignedUserId!,
               submittedAt: now,
               updatedAt: now,
               importBatchId: batchId,
@@ -441,7 +474,6 @@ export class ImportService {
             targetDocs: [
               { collectionPath: `dailyReports/${assignedUserId}/dailyLogs`, docId },
               { collectionPath: 'dailyReportLocks', docId: identityKey },
-              { collectionPath: 'dailyReports', docId: identityKey },
             ],
             beforeData: isExisting ? { ...(existingReport || {}), ...(existingLock || {}) } : null,
             importedData: reportData,

@@ -90,12 +90,32 @@ describe('CreateFarmerSchema Validation Suite', () => {
     expect(result.success).toBe(false);
   });
 
-  it('should reject password less than 6 characters', () => {
-    const result = CreateFarmerSchema.safeParse({
+  it('should reject password less than 8 characters', () => {
+    const result5 = CreateFarmerSchema.safeParse({
       ...validPayload,
       password: '12345',
     });
-    expect(result.success).toBe(false);
+    expect(result5.success).toBe(false);
+
+    const result7 = CreateFarmerSchema.safeParse({
+      ...validPayload,
+      password: '1234567',
+    });
+    expect(result7.success).toBe(false);
+  });
+
+  it('should accept password with exactly 8 characters and longer', () => {
+    const result8 = CreateFarmerSchema.safeParse({
+      ...validPayload,
+      password: '12345678',
+    });
+    expect(result8.success).toBe(true);
+
+    const resultLonger = CreateFarmerSchema.safeParse({
+      ...validPayload,
+      password: 'FarmerSecurePassword2026!',
+    });
+    expect(resultLonger.success).toBe(true);
   });
 
   it('should reject unknown extra properties due to strict mode', () => {

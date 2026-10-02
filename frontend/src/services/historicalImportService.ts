@@ -2059,18 +2059,32 @@ export async function executeHistoricalImport(
   const manifest: any[] = [];
 
   // Lookup farmers
-  const farmerUserMap = new Map<string, string>();
+  const farmToUsersMap = new Map<string, Set<string>>();
   try {
     const usersSnap = await db.collection('users').where('role', '==', 'farmer').get();
     usersSnap.docs.forEach((u: any) => {
-      const udata = u.data();
-      const uFarmIds: string[] = udata.farmIds || [];
-      uFarmIds.forEach((fId) => farmerUserMap.set(fId, u.id));
+      const udata = u.data() || {};
+      if (udata.active === false) return;
+      const rawFarmIds: string[] = Array.isArray(udata.farmIds)
+        ? udata.farmIds
+        : typeof udata.farmId === 'string' && udata.farmId.trim()
+          ? [udata.farmId.trim()]
+          : [];
+      rawFarmIds.forEach((fId: string) => {
+        if (!fId || typeof fId !== 'string') return;
+        const cleanFId = fId.trim().toUpperCase();
+        if (!farmToUsersMap.has(cleanFId)) {
+          farmToUsersMap.set(cleanFId, new Set<string>());
+        }
+        farmToUsersMap.get(cleanFId)!.add(u.id);
+      });
     });
-  } catch {}
+  } catch (err) {
+    console.warn('[historicalImportService] Error loading farmer map:', err);
+  }
 
   const adminUid = user?.uid || 'admin';
-  const BATCH_SIZE = 75; // 75 rows * 4 writes = 300 operations (safe under 500)
+  const BATCH_SIZE = 100; // 100 rows * 3 writes = 300 operations (safe under 500)
   const totalBatches = Math.ceil(rowsToImport.length / BATCH_SIZE);
 
   for (let b = 0; b < totalBatches; b++) {
@@ -2092,15 +2106,32 @@ export async function executeHistoricalImport(
         }
       }
 
-      const assignedUserId = farmerUserMap.get(row.farmId) || adminUid;
-      const identityKey = `${row.farmId}_${row.submissionDate}`;
-
       if (row.recordType === 'DAILY_REPORT') {
+        const cleanFId = row.farmId ? row.farmId.trim().toUpperCase() : '';
+        const matchedFarmers = Array.from(farmToUsersMap.get(cleanFId) || []);
+        if (matchedFarmers.length === 0) {
+          errors.push({
+            file: row.fileName,
+            row: row.rowNumber,
+            reason: `No registered farmer assigned to farm '${row.farmId}'. Cannot resolve report path.`,
+          });
+          return;
+        }
+        if (matchedFarmers.length > 1) {
+          errors.push({
+            file: row.fileName,
+            row: row.rowNumber,
+            reason: `Ambiguous farmer mapping for farm '${row.farmId}'. Multiple farmers assigned (${matchedFarmers.join(', ')}). Cannot resolve report path.`,
+          });
+          return;
+        }
+        const assignedUserId = matchedFarmers[0]!;
+        const identityKey = `${row.farmId}_${row.submissionDate}`;
+
         const docId = row.flockId ? `${row.submissionDate}_${row.flockId}` : row.submissionDate;
         const parentRef = db?.collection ? db.collection('dailyReports').doc(assignedUserId) : null;
         const dailyLogRef = parentRef?.collection ? parentRef.collection('dailyLogs').doc(docId) : null;
         const lockRef = db?.collection ? db.collection('dailyReportLocks').doc(identityKey) : null;
-        const topLevelReportRef = db?.collection ? db.collection('dailyReports').doc(identityKey) : null;
 
         const openingBirdCount = row.openingBirdCount ?? row.birdCount ?? null;
         const mortality = row.mortality ?? 0;
@@ -2168,7 +2199,6 @@ export async function executeHistoricalImport(
           batch.set(parentRef, { userId: assignedUserId, farmId: row.farmId, updatedAt: now }, { merge: true });
           batch.set(dailyLogRef, reportData, { merge: true });
           batch.set(lockRef, { farmId: row.farmId, submissionDate: row.submissionDate, reportId: docId, importBatchId: batchId, createdAt: now });
-          batch.set(topLevelReportRef, reportData, { merge: true });
 
           if (row.bodyWeight && (row.bodyWeight.avg > 0 || row.bodyWeight.min > 0) && intWeekNumber) {
             const weeklyLockRef = db?.collection ? db.collection('dailyReportLocks').doc(`weekly_${row.farmId}_W${intWeekNumber}`) : null;
@@ -2199,7 +2229,6 @@ export async function executeHistoricalImport(
           targetDocs: [
             { collectionPath: `dailyReports/${assignedUserId}/dailyLogs`, docId },
             { collectionPath: 'dailyReportLocks', docId: identityKey },
-            { collectionPath: 'dailyReports', docId: identityKey },
           ],
           beforeData: row.diff || null,
           importedAt: now,
