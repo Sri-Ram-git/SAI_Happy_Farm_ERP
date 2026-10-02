@@ -745,7 +745,6 @@ export function FarmerFormPage() {
 
     const hasExistingReport =
       todayReport &&
-      todayReport.submissionMethod !== 'HISTORICAL_IMPORT' &&
       (todayReport.submissionVersion >= 1 ||
         todayReport.status === 'submitted' ||
         todayReport.status === 'corrected');
@@ -764,7 +763,6 @@ export function FarmerFormPage() {
 
     const hasExistingReport =
       todayReport &&
-      todayReport.submissionMethod !== 'HISTORICAL_IMPORT' &&
       (todayReport.submissionVersion >= 1 ||
         todayReport.status === 'submitted' ||
         todayReport.status === 'corrected');
