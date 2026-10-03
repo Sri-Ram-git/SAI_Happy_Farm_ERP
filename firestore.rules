@@ -86,37 +86,37 @@ service cloud.firestore {
 
     // Daily Reports (Root Collection & Subcollections)
     match /dailyReports/{reportOrUserId} {
-      allow read: if isAuthenticated() && (
+      allow read: if isAuthenticated() && isUserActive() && (
         isOwner(reportOrUserId) ||
-        (isUserActive() && (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))))
+        (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
       );
-      allow create, update: if isAuthenticated() && (
+      allow create, update: if isAuthenticated() && isUserActive() && (
         isOwner(reportOrUserId) ||
-        (isUserActive() && (isAdmin() || hasFarmAccess(request.resource.data.farmId)))
+        (isAdmin() || hasFarmAccess(request.resource.data.farmId))
       );
       allow delete: if isAdmin();
 
       // Subcollection: dailyLogs
       match /dailyLogs/{logDate} {
-        allow read: if isAuthenticated() && (
+        allow read: if isAuthenticated() && isUserActive() && (
           isOwner(reportOrUserId) ||
-          (isUserActive() && (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))))
+          (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
         );
-        allow create, update: if isAuthenticated() && (
+        allow create, update: if isAuthenticated() && isUserActive() && (
           isOwner(reportOrUserId) ||
-          (isUserActive() && (isAdmin() || hasFarmAccess(request.resource.data.farmId)))
+          (isAdmin() || hasFarmAccess(request.resource.data.farmId))
         );
         allow delete: if isAdmin();
 
         // Subcollection: revisions (Version History / Audit Archive for Version 2 Corrections)
         match /revisions/{revId} {
-          allow read: if isAuthenticated() && (
+          allow read: if isAuthenticated() && isUserActive() && (
             isOwner(reportOrUserId) ||
-            (isUserActive() && (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))))
+            (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
           );
-          allow create, update: if isAuthenticated() && (
+          allow create, update: if isAuthenticated() && isUserActive() && (
             isOwner(reportOrUserId) ||
-            (isUserActive() && (isAdmin() || hasFarmAccess(request.resource.data.farmId)))
+            (isAdmin() || hasFarmAccess(request.resource.data.farmId))
           );
           allow delete: if isAdmin();
         }
