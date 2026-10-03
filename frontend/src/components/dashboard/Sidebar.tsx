@@ -17,7 +17,6 @@ import {
   MoreHorizontal,
   History,
 } from 'lucide-react';
-
 interface SidebarProps {
   role: 'supervisor' | 'admin';
   userName?: string;
@@ -107,6 +106,7 @@ export function Sidebar({ role, userName }: SidebarProps) {
             <div className="sidebar-brand-name">SAI Happy Farms</div>
             <div className="sidebar-brand-role">{role === 'admin' ? 'Admin' : 'Supervisor'}</div>
           </div>
+          
         </div>
 
         <nav className="sidebar-nav">

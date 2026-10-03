@@ -43,6 +43,7 @@ export function SupervisorFarmsPage() {
     <DashboardLayout role="supervisor" userName={userProfile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
+
           <h2>My Farms</h2>
           <DateFilter days={days} onChange={setDays} />
         </div>

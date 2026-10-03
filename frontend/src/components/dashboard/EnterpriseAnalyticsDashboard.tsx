@@ -11,6 +11,7 @@ import { type BirdInventory, subscribeToAllBirdInventories } from '../../service
 import { type FlockDoc, subscribeToAllFlocks } from '../../services/flockDataService';
 import { DashboardMetricDetailModal } from './DashboardMetricDetailModal';
 import { ExportReportsCard } from './ExportReportsCard';
+import { NotificationBell } from './NotificationBell';
 import { type ChartType } from './ChartDataTable';
 import { useAllDailyReports, useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { getIstDate, getDaysAgo, generateDateArray, getShortDate, formatDisplayDate, formatTime } from '../../utils/dateUtils';
@@ -304,121 +305,7 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
     return Number((avgProd - targetStdProdPct).toFixed(1));
   }, [avgProd, targetStdProdPct]);
 
-  // Real-time Operational Alerts Engine
-  const alerts = useMemo(() => {
-    const list: { id: string; type: 'critical' | 'warning' | 'info'; title: string; desc: string; farmId: string }[] = [];
 
-    // While data is still loading, do not produce false missing report warnings
-    if (reportsLoading || dataLoading) {
-      return list;
-    }
-
-    if (reportsError) {
-      list.push({
-        id: 'query_error',
-        type: 'warning',
-        title: 'Unable to Verify Reports',
-        desc: 'Report submission status could not be verified due to a query or network error.',
-        farmId: 'ALL',
-      });
-      return list;
-    }
-
-    const targetFarms = selectedFarmId ? activeFarms.filter((f) => f.farmId === selectedFarmId) : activeFarms;
-
-    // Only farms that have at least one active assigned farmer are expected to submit reports
-    const expectedFarmsToReport = targetFarms.filter((f) =>
-      farmers.some((u) => u.farmIds?.some((id) => id?.trim().toUpperCase() === f.farmId?.trim().toUpperCase()))
-    );
-
-    // Map of normalized submitted farm IDs for today (excluding drafts)
-    const validTodayReports = todayReports.filter((r) => r.status !== 'draft');
-    const submittedFarmIdsSet = new Set(
-      validTodayReports.map((r) => r.farmId?.trim().toUpperCase()).filter(Boolean)
-    );
-
-    // Check missing submissions today for farms expected to report
-    expectedFarmsToReport.forEach((f) => {
-      const normalizedId = f.farmId?.trim().toUpperCase();
-      if (!submittedFarmIdsSet.has(normalizedId)) {
-        const farmLabel = f.name ? `Farm ${f.farmId} (${f.name})` : `Farm ${f.farmId}`;
-        list.push({
-          id: `missing_${f.farmId}`,
-          type: 'warning',
-          title: `Missing Daily Report Today`,
-          desc: `${farmLabel} has not submitted a report for ${formatDisplayDate(today)}.`,
-          farmId: f.farmId,
-        });
-      }
-    });
-
-    // Check recent high mortality or low production on valid reports
-    validTodayReports.forEach((r) => {
-      const farmObj = activeFarms.find((f) => f.farmId?.trim().toUpperCase() === r.farmId?.trim().toUpperCase());
-      const farmLabel = farmObj?.name ? `Farm ${r.farmId} (${farmObj.name})` : `Farm ${r.farmId || 'Unknown'}`;
-
-      const base = getEligibleBirdCount(r);
-      const mort = Number(r.mortality) || 0;
-      const mortPct = base > 0 ? calcMortalityRate(mort, base) : 0;
-      const prodPct = base > 0 ? calcProductionRate(r.eggsProduced ?? 0, base) : 0;
-      const selectPct = calcSelectionRate(r.selectionEggs ?? 0, r.eggsProduced ?? 0);
-
-      if (base > 0 && mort >= base) {
-        list.push({
-          id: `mort_disaster_${r.farmId}`,
-          type: 'critical',
-          title: `TOTAL FLOCK MORTALITY DISASTER`,
-          desc: `${farmLabel} reported 100% loss of the entire eligible flock (${mort.toLocaleString()} dead birds). Immediate operational intervention required.`,
-          farmId: r.farmId,
-        });
-      } else if (mortPct >= (KPI_THRESHOLDS.mortalityRateCritical ?? 10)) {
-        list.push({
-          id: `mort_crit_${r.farmId}`,
-          type: 'critical',
-          title: `CRITICAL Mortality Alert (${mortPct}%)`,
-          desc: `${farmLabel} recorded ${mort} dead birds (${mortPct}% mortality rate, exceeding critical threshold).`,
-          farmId: r.farmId,
-        });
-      } else if (mortPct >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5)) {
-        list.push({
-          id: `mort_warn_${r.farmId}`,
-          type: 'warning',
-          title: `High Daily Mortality Alert (${mortPct}%)`,
-          desc: `${farmLabel} recorded ${mort} dead birds (${mortPct}% mortality rate).`,
-          farmId: r.farmId,
-        });
-      }
-      if (prodPct < 55.0 && base > 0) {
-        list.push({
-          id: `prod_${r.farmId}`,
-          type: 'critical',
-          title: `Low Production Drop Alert`,
-          desc: `${farmLabel} production dropped to ${prodPct}% (${r.eggsProduced.toLocaleString()} eggs).`,
-          farmId: r.farmId,
-        });
-      }
-      if (selectPct < 80.0 && r.eggsProduced > 0) {
-        list.push({
-          id: `select_${r.farmId}`,
-          type: 'warning',
-          title: `Egg Quality / Selection Warning`,
-          desc: `${farmLabel} selection egg rate is ${selectPct}% (${r.selectionEggs} selection eggs).`,
-          farmId: r.farmId,
-        });
-      }
-      if (r.temperature && (r.temperature > 50 || r.temperature < 10)) {
-        list.push({
-          id: `temp_${r.farmId}`,
-          type: 'warning',
-          title: `Abnormal Temperature Warning`,
-          desc: `${farmLabel} temperature recorded at ${r.temperature}°C (acceptable: 10°C – 50°C).`,
-          farmId: r.farmId,
-        });
-      }
-    });
-
-    return list;
-  }, [activeFarms, todayReports, today, reportsLoading, dataLoading, reportsError, selectedFarmId, farmers]);
 
   // Farm Ranking & Multi-KPI Comparison
   const farmRankings = useMemo(() => {
@@ -587,6 +474,7 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           )}
 
           <DateFilter days={days} onChange={setDays} />
+          {variant === 'overview' && <NotificationBell role={role} />}
         </div>
       </div>
 
@@ -638,32 +526,7 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
             />
           </div>
 
-          {/* LEVEL 2: OPERATIONAL ALERTS & ATTENTION REQUIRED */}
-          {alerts.length > 0 && (
-            <div className="section-card" style={{ marginBottom: 24 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: 16, color: '#1e293b' }}>
-                  <ShieldAlert size={18} style={{ color: '#dc2626' }} />
-                  Operational Alerts ({alerts.length})
-                </h3>
-              </div>
-              <div className="ent-alerts-grid">
-                {alerts.slice(0, 4).map((a) => (
-                  <div 
-                    key={a.id} 
-                    className={`ent-alert-card ent-alert-card--${a.type} ${a.id.startsWith('missing_') ? 'ent-alert-card--clickable' : ''}`}
-                    onClick={a.id.startsWith('missing_') ? () => setExpandedMetric({ type: 'submission', title: 'Missing Submission Details', sub: 'Review expected report paths and assignment details' }) : undefined}
-                    style={{ cursor: a.id.startsWith('missing_') ? 'pointer' : 'default' }}
-                  >
-                    <div className="ent-alert-top">
-                      <span className="ent-alert-title">{a.title}</span>
-                    </div>
-                    <p className="ent-alert-desc">{a.desc}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+
 
           {/* LEVEL 3: FARM PERFORMANCE RANKING & COMPARISON TABLE */}
           <div className="section-card" style={{ marginBottom: 24 }}>

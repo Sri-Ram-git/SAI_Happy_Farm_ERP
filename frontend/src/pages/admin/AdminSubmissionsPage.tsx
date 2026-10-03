@@ -68,6 +68,7 @@ export function AdminSubmissionsPage() {
           </Link>
         </div>
         <div className="mgmt-page-header">
+
           <h2>Submissions - {formatDisplayDate(date)}</h2>
           <div className="header-controls">
             <input

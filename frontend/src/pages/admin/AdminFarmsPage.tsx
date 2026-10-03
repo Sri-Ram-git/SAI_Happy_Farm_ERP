@@ -53,6 +53,7 @@ export function AdminFarmsPage() {
       <div className="mgmt-page">
         {error && <div className="alert alert--error" style={{ marginBottom: 16 }}>{error}</div>}
         <div className="mgmt-page-header">
+
           <h2>Farm Management</h2>
           <DateFilter days={days} onChange={setDays} />
         </div>

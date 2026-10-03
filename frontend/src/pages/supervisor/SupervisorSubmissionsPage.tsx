@@ -46,6 +46,7 @@ export function SupervisorSubmissionsPage() {
     <DashboardLayout role="supervisor" userName={userProfile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
+
           <h2>Submissions - {formatDisplayDate(date)}</h2>
           <div className="header-controls">
             <span className="submission-count">{submittedCount} / {farms.length} submitted</span>

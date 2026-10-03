@@ -684,6 +684,11 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
           });
         }
 
+        // --- NEW NOTIFICATION HOOK ---
+        import('./notificationService').then(mod => {
+          mod.generateNotificationsForReport(input, farmData.name || input.farmId, openingBirdCount);
+        });
+
       } else {
         // EXISTING REPORT: CORRECTION / REVISION (VERSION 2) OR HISTORICAL IMPORT REPLACEMENT
         const existingData = existingLog.data();
@@ -1016,6 +1021,11 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
               updatedAt: now,
             }, { merge: true });
           }
+          
+          // --- NEW NOTIFICATION HOOK ---
+          import('./notificationService').then(mod => {
+            mod.generateNotificationsForReport(input, farmData.name || input.farmId, openingBirdCount);
+          });
         }
       }
     });

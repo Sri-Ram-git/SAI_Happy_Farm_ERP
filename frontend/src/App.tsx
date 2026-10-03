@@ -27,6 +27,8 @@ import { AdminImportPage } from './pages/admin/AdminImportPage';
 import { FeedLoadPage } from './pages/admin/FeedLoadPage';
 import { AdminFlocksPage } from './pages/admin/AdminFlocksPage';
 import { PredictionPage } from './pages/admin/PredictionPage';
+import { NotificationsPage } from './pages/NotificationsPage';
+import { DevNotificationTrigger } from './pages/DevNotificationTrigger';
 import { LoadingScreen } from './components/LoadingScreen';
 import { getRouteForRole } from './utils/routeByRole';
 import './styles.css';
@@ -197,6 +199,21 @@ function AppRoutes() {
           <ErrorBoundary><FeedLoadPage /></ErrorBoundary>
         </ProtectedManagementRoute>
       } />
+      <Route path="/supervisor/notifications" element={
+        <ProtectedManagementRoute allowedRoles={['supervisor']}>
+          <ErrorBoundary><NotificationsPage role="supervisor" /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+      <Route path="/admin/notifications" element={
+        <ProtectedManagementRoute allowedRoles={['admin']}>
+          <ErrorBoundary><NotificationsPage role="admin" /></ErrorBoundary>
+        </ProtectedManagementRoute>
+      } />
+
+      {/* Dev routes */}
+      {import.meta.env.DEV && (
+        <Route path="/dev/trigger-notification" element={<DevNotificationTrigger />} />
+      )}
 
       {/* Root */}
       <Route path="/" element={<RootRedirect />} />
