@@ -256,6 +256,23 @@ export class ImportService {
         });
       }
 
+      try {
+        const dailyLogsSnap = await this.db.collectionGroup('dailyLogs').get();
+        dailyLogsSnap.docs.forEach((doc) => {
+          const d = doc.data();
+          const fId = d['farmId'];
+          const dateStr = d['submissionDate'] || d['reportDate'];
+          if (fId && dateStr && farmIds.includes(fId)) {
+            const key = `${fId}_${dateStr}`;
+            if (!existingReportsMap.has(key)) {
+              existingReportsMap.set(key, d);
+            }
+          }
+        });
+      } catch (err) {
+        logger.warn('Could not query collectionGroup dailyLogs in executeImport', { error: err });
+      }
+
       // Bounded batch configuration (safe under Firestore's 500 ops limit)
       const OPERATIONS_PER_BATCH_LIMIT = 300;
       let currentBatch = this.db.batch();

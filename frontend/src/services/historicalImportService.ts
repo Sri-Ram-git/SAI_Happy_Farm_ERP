@@ -1881,6 +1881,21 @@ export async function checkServerConflicts(
         if (dStr) existingReports.set(`${data.farmId}_${dStr}`, data);
       });
     } catch {}
+
+    try {
+      const dailyLogsSnap = await db.collectionGroup('dailyLogs').get();
+      dailyLogsSnap.docs.forEach((d: any) => {
+        const data = d.data();
+        const fId = data.farmId;
+        const dStr = data.submissionDate || data.reportDate;
+        if (fId === farmId && dStr) {
+          const key = `${fId}_${dStr}`;
+          if (!existingReports.has(key)) {
+            existingReports.set(key, data);
+          }
+        }
+      });
+    } catch {}
   }
 
   return rows.map((r) => {
@@ -2043,9 +2058,14 @@ export async function executeHistoricalImport(
         const json = await res.json();
         onProgress?.({ currentBatch: 1, totalBatches: 1, percentage: 100 });
         return json.data;
+      } else {
+        throw new Error(`Backend import failed: HTTP ${res.status}`);
       }
-    } catch (err) {
-      console.warn('[historicalImportService] Backend execution failed, falling back to direct client batch:', err);
+    } catch (err: any) {
+      if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+        throw new Error('Network error during import. The outcome is unknown. Please check your import history before retrying.');
+      }
+      throw err;
     }
   }
 

@@ -403,4 +403,199 @@ describe('End-to-End Historical Data Importer Suite', () => {
       expect(mockBatch.commit).toHaveBeenCalled();
     });
   });
+
+  describe('5. Idempotency', () => {
+    it('should skip exact duplicate records when imported twice (idempotency)', async () => {
+      mockDb.collectionGroup.mockReturnValue({
+        get: vi.fn().mockResolvedValue({
+          docs: [
+            { data: () => ({ farmId: 'AP12', submissionDate: '2025-05-10', birdCount: 1000, feedKg: 120, mortality: 1, culling: 0, eggsProduced: 950 }) },
+          ],
+        }),
+      });
+      mockDb.collection.mockImplementation((name: string) => {
+        if (name === 'farms') {
+          return {
+            doc: vi.fn().mockImplementation((id: string) => ({
+              get: vi.fn().mockResolvedValue({
+                exists: id === 'AP12',
+                data: () => ({ farmId: id, currentBirdCount: 1000, currentFeedKg: 5000 }),
+              }),
+            })),
+          };
+        }
+        if (name === 'users') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                docs: [
+                  { id: 'farmer-ap12', data: () => ({ role: 'farmer', farmIds: ['AP12'] }) },
+                ],
+              }),
+            }),
+          };
+        }
+        if (name === 'dailyReports' || name === 'dailyReportLocks') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({ docs: [] }),
+            }),
+            doc: vi.fn().mockImplementation((docId: string) => ({
+              path: `${name}/${docId}`,
+              collection: vi.fn().mockImplementation((subCol: string) => ({
+                doc: vi.fn().mockImplementation((subDocId: string) => ({
+                  path: `${name}/${docId}/${subCol}/${subDocId}`,
+                })),
+              })),
+            })),
+          };
+        }
+        return {
+          doc: vi.fn().mockReturnValue({
+            collection: vi.fn().mockReturnValue({ doc: vi.fn().mockReturnValue({}) }),
+            set: vi.fn().mockResolvedValue(undefined),
+          }),
+          add: vi.fn().mockResolvedValue({ id: 'audit-1' }),
+        };
+      });
+
+      const records: HistoricalImportRecord[] = [{
+        recordType: 'DAILY_REPORT',
+        farmId: 'AP12',
+        submissionDate: '2025-05-10',
+        birdCount: 1000,
+        feedKg: 120,
+        mortality: 1,
+        eggsProduced: 950,
+        sourceFile: 'file_ap12.csv',
+        sourceRow: 1,
+      }];
+
+      const res = await importService.executeImport(
+        { records, conflictAction: 'skip', sourceFiles: ['file_ap12.csv'] },
+        adminUser,
+        'req-idempotency',
+      );
+
+      expect(res.importedCount).toBe(0);
+      expect(res.skippedCount).toBe(1);
+      
+      const writtenPaths = mockBatch.set.mock.calls.map((call: any) => call[0]?.path).filter(Boolean);
+      expect(writtenPaths).not.toContain('dailyReports/farmer-ap12/dailyLogs/2025-05-10');
+    });
+  });
+
+  describe('6. Comprehensive Write Path Verification', () => {
+    it('should only write to canonical paths and prevent any duplicates across re-imports', async () => {
+      const recordedWrites = new Map<string, number>();
+
+      mockDb.collectionGroup.mockReturnValue({
+        get: vi.fn().mockResolvedValue({ docs: [] }),
+      });
+      mockDb.collection.mockImplementation((name: string) => {
+        if (name === 'farms') {
+          return {
+            doc: vi.fn().mockImplementation((id: string) => ({
+              get: vi.fn().mockResolvedValue({
+                exists: id === 'AP12' || id === 'AP13',
+                data: () => ({ farmId: id, currentBirdCount: 1000, currentFeedKg: 5000 }),
+              }),
+            })),
+          };
+        }
+        if (name === 'users') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                docs: [
+                  { id: 'farmer-ap12', data: () => ({ role: 'farmer', farmIds: ['AP12'] }) },
+                  { id: 'farmer-ap13', data: () => ({ role: 'farmer', farmIds: ['AP13'] }) },
+                ],
+              }),
+            }),
+          };
+        }
+        if (name === 'dailyReports' || name === 'dailyReportLocks') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({ docs: [] }), // Initially empty
+            }),
+            doc: vi.fn().mockImplementation((docId: string) => ({
+              path: `${name}/${docId}`,
+              collection: vi.fn().mockImplementation((subCol: string) => ({
+                doc: vi.fn().mockImplementation((subDocId: string) => ({
+                  path: `${name}/${docId}/${subCol}/${subDocId}`,
+                })),
+              })),
+            })),
+          };
+        }
+        return {
+          doc: vi.fn().mockReturnValue({
+            collection: vi.fn().mockReturnValue({ doc: vi.fn().mockReturnValue({}) }),
+            set: vi.fn().mockResolvedValue(undefined),
+          }),
+          add: vi.fn().mockResolvedValue({ id: 'audit-1' }),
+        };
+      });
+
+      // Override mockBatch.set to track our writes globally
+      mockBatch.set = vi.fn().mockImplementation((ref: any, data: any) => {
+        const path = ref.path;
+        recordedWrites.set(path, (recordedWrites.get(path) || 0) + 1);
+      });
+
+      const records: HistoricalImportRecord[] = [
+        { recordType: 'DAILY_REPORT', farmId: 'AP12', submissionDate: '2025-05-10', birdCount: 1000, feedKg: 120, mortality: 1, eggsProduced: 950, sourceFile: 'file.csv', sourceRow: 1 },
+        { recordType: 'DAILY_REPORT', farmId: 'AP12', submissionDate: '2025-05-11', birdCount: 999, feedKg: 122, mortality: 0, eggsProduced: 960, sourceFile: 'file.csv', sourceRow: 2 },
+        { recordType: 'DAILY_REPORT', farmId: 'AP13', submissionDate: '2025-05-10', birdCount: 1500, feedKg: 150, mortality: 2, eggsProduced: 1400, sourceFile: 'file.csv', sourceRow: 3 },
+      ];
+
+      // 1. First Import
+      const res1 = await importService.executeImport({ records, conflictAction: 'skip', sourceFiles: ['file.csv'] }, adminUser, 'req-verify-1');
+      
+      expect(res1.importedCount).toBe(3);
+      expect(res1.skippedCount).toBe(0);
+
+      const writePaths = Array.from(recordedWrites.keys());
+      
+      // Assert canonical paths
+      expect(writePaths).toContain('dailyReports/farmer-ap12/dailyLogs/2025-05-10');
+      expect(writePaths).toContain('dailyReports/farmer-ap12/dailyLogs/2025-05-11');
+      expect(writePaths).toContain('dailyReports/farmer-ap13/dailyLogs/2025-05-10');
+      
+      // Assert distinct farms and dates are correctly managed
+      expect(recordedWrites.get('dailyReports/farmer-ap12/dailyLogs/2025-05-10')).toBe(1);
+      expect(recordedWrites.get('dailyReports/farmer-ap12/dailyLogs/2025-05-11')).toBe(1);
+      expect(recordedWrites.get('dailyReports/farmer-ap13/dailyLogs/2025-05-10')).toBe(1);
+
+      // Assert NO unwanted top-level writes
+      const topLevelDataWrites = writePaths.filter(p => p.startsWith('dailyReports/') && !p.includes('/dailyLogs/'));
+      // Only 'dailyReports/{userId}' should exist (which just holds { userId, farmId, updatedAt })
+      const invalidTopLevelWrites = topLevelDataWrites.filter(p => p !== 'dailyReports/farmer-ap12' && p !== 'dailyReports/farmer-ap13');
+      expect(invalidTopLevelWrites).toHaveLength(0);
+
+      // 2. Re-import the EXACT SAME payload
+      // Setup mock to return the canonical data from collectionGroup
+      mockDb.collectionGroup.mockReturnValue({
+        get: vi.fn().mockResolvedValue({
+          docs: [
+            { data: () => ({ farmId: 'AP12', submissionDate: '2025-05-10', birdCount: 1000, feedKg: 120, mortality: 1, culling: 0, eggsProduced: 950 }) },
+            { data: () => ({ farmId: 'AP12', submissionDate: '2025-05-11', birdCount: 999, feedKg: 122, mortality: 0, culling: 0, eggsProduced: 960 }) },
+            { data: () => ({ farmId: 'AP13', submissionDate: '2025-05-10', birdCount: 1500, feedKg: 150, mortality: 2, culling: 0, eggsProduced: 1400 }) },
+          ],
+        }),
+      });
+
+      const res2 = await importService.executeImport({ records, conflictAction: 'skip', sourceFiles: ['file.csv'] }, adminUser, 'req-verify-2');
+      
+      expect(res2.importedCount).toBe(0);
+      expect(res2.skippedCount).toBe(3); // All 3 should be skipped due to idempotency
+
+      // Assert that write counts for the canonical paths DID NOT INCREASE
+      expect(recordedWrites.get('dailyReports/farmer-ap12/dailyLogs/2025-05-10')).toBe(1);
+      expect(recordedWrites.get('dailyReports/farmer-ap12/dailyLogs/2025-05-11')).toBe(1);
+      expect(recordedWrites.get('dailyReports/farmer-ap13/dailyLogs/2025-05-10')).toBe(1);
+    });
+  });
 });
