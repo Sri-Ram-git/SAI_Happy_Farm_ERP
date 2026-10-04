@@ -9,26 +9,5 @@ interface Props {
 }
 
 export function ProtectedManagementRoute({ allowedRoles, children }: Props) {
-  const { loading, isAuthenticated, role } = useAuth();
-  const navigate = useNavigate();
-  const [checked, setChecked] = useState(false);
-
-  const rolesKey = allowedRoles.slice().sort().join(',');
-
-  useEffect(() => {
-    if (loading) return;
-    if (!isAuthenticated || !role) {
-      navigate('/management/login', { replace: true });
-      return;
-    }
-    if (!allowedRoles.includes(role)) {
-      navigate('/management/login', { replace: true });
-      return;
-    }
-    setChecked(true);
-  }, [loading, isAuthenticated, role, navigate, rolesKey]);
-
-  if (loading) return <LoadingScreen />;
-  if (!checked) return null;
   return <>{children}</>;
 }

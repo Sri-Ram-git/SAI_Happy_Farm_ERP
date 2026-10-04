@@ -378,7 +378,6 @@
     "loading": "लोड हो रहा है...",
     "error": "त्रुटि",
     "success": "सफलता",
-    "successMessage": "Your daily report has been recorded successfully.",
     "save": "सहेजें",
     "delete": "हटाएं",
     "edit": "संपादित करें",
@@ -407,4 +406,3 @@
     "goToLogin": "लॉगइन पर जाएं"
   }
 }
-

@@ -378,7 +378,6 @@
     "loading": "Loading...",
     "error": "Error",
     "success": "Success",
-    "successMessage": "Your daily report has been recorded successfully.",
     "save": "Save",
     "delete": "Delete",
     "edit": "Edit",
@@ -407,4 +406,3 @@
     "goToLogin": "Go to Login"
   }
 }
-
