@@ -1,4 +1,5 @@
 import { getFirestore } from '../config/firebase';
+import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { Farm } from '../types/reports';
 import { NotFoundError, InternalError } from '../utils/errors';
 import { logger } from '../utils/logger';
@@ -63,7 +64,7 @@ export class FarmsRepository {
   async getAllFarms(requestId: string): Promise<Farm[]> {
     try {
       const snapshot = await this.db.collection('farms').get();
-      return snapshot.docs.map((doc) => doc.data() as Farm);
+      return snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data() as Farm);
     } catch (error) {
       logger.error('Failed to fetch all farms', {
         requestId,

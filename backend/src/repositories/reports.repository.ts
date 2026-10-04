@@ -1,4 +1,5 @@
 import { getFirestore } from '../config/firebase';
+import type { QueryDocumentSnapshot, Transaction } from 'firebase-admin/firestore';
 import { DailyReport, DailyReportResponse, Farm } from '../types/reports';
 import { NotFoundError, DuplicateError, InternalError } from '../utils/errors';
 import { logger } from '../utils/logger';
@@ -17,7 +18,7 @@ export class ReportsRepository {
       const lockRef = this.db.collection('dailyReportLocks').doc(lockDocId);
       const reportRef = this.db.collection('dailyReports').doc(report.reportId);
 
-      await this.db.runTransaction(async (transaction) => {
+      await this.db.runTransaction(async (transaction: Transaction) => {
         const lockDoc = await lockRef.get();
 
         if (lockDoc.exists) {
@@ -126,7 +127,7 @@ export class ReportsRepository {
       // 1. Fetch from collectionGroup('dailyLogs')
       try {
         const snap = await this.db.collectionGroup('dailyLogs').get();
-        snap.docs.forEach((doc) => {
+        snap.docs.forEach((doc: QueryDocumentSnapshot) => {
           const data = doc.data();
           const dateStr = data['submissionDate'] || data['reportDate'];
           const fId = data['farmId'];
@@ -143,7 +144,7 @@ export class ReportsRepository {
       // 2. Fetch from top-level dailyReports collection
       try {
         const snap = await this.db.collection('dailyReports').get();
-        snap.docs.forEach((doc) => {
+        snap.docs.forEach((doc: QueryDocumentSnapshot) => {
           const data = doc.data();
           const dateStr = data['submissionDate'] || data['reportDate'];
           const fId = data['farmId'];
@@ -173,4 +174,3 @@ export class ReportsRepository {
     }
   }
 }
-

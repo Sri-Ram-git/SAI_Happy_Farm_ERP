@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import type { QueryDocumentSnapshot, Transaction } from 'firebase-admin/firestore';
 import { getFirestore, getAuth } from '../config/firebase';
 import { AuditService } from './audit.service';
 import { DuplicateError, NotFoundError, ValidationError } from '../utils/errors';
@@ -78,7 +79,7 @@ export class FarmerService {
     const newFarmId = cleanFarmId;
     let openingFlockId: string | undefined = undefined;
     try {
-      await this.db.runTransaction(async (t) => {
+      await this.db.runTransaction(async (t: Transaction) => {
         const farmRef = this.db.collection('farms').doc(newFarmId);
         const farmSnap = await t.get(farmRef);
         if (farmSnap.exists) {
@@ -372,7 +373,7 @@ export class FarmerService {
 
     if (!active && role === 'admin') {
       const allAdminsSnap = await this.db.collection('users').where('role', '==', 'admin').get();
-      const activeAdmins = allAdminsSnap.docs.filter((d) => d.data()['active'] !== false);
+      const activeAdmins = allAdminsSnap.docs.filter((d: QueryDocumentSnapshot) => d.data()['active'] !== false);
       if (activeAdmins.length <= 1) {
         throw new ValidationError('Cannot deactivate the last remaining active administrator.');
       }
@@ -422,7 +423,7 @@ export class FarmerService {
   async getAllUsers(requestId: string): Promise<any[]> {
     try {
       const snap = await this.db.collection('users').get();
-      return snap.docs.map((doc) => ({
+      return snap.docs.map((doc: QueryDocumentSnapshot) => ({
         uid: doc.id,
         ...doc.data(),
       }));
