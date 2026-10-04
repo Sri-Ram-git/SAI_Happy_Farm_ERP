@@ -183,8 +183,6 @@ export function validateStep(
         errors.selectionEggs = tr('validation.required', 'Required');
       } else if (!Number.isInteger(se) || se < 0) {
         errors.selectionEggs = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
-      } else if (!isNaN(ep) && ep >= 0 && se > ep) {
-        errors.selectionEggs = tr('validation.exceedsEggsProduced', 'Cannot exceed eggs produced');
       }
 
       let de = 0;
@@ -197,27 +195,24 @@ export function validateStep(
         }
       }
 
-      // Production, Selection, and Damaged Eggs Constraint:
-      // Selection Eggs + Damaged Eggs must never exceed Egg Production
-      if (!errors.eggsProduced && !errors.selectionEggs && !errors.damagedEggs) {
-        if (se + de > ep) {
-          errors.selectionEggs = tr(
-            'validation.selectionDamagedExceeds',
-            'Selection + Damaged eggs cannot exceed Egg Production'
-          );
-          if (data.damagedEggs !== '' && de > 0) {
-            errors.damagedEggs = tr(
-              'validation.selectionDamagedExceeds',
-              'Selection + Damaged eggs cannot exceed Egg Production'
-            );
-          }
+      let fe = 0;
+      if (data.floorEggs !== '') {
+        const parsedFe = Number(data.floorEggs);
+        if (isNaN(parsedFe) || !Number.isInteger(parsedFe) || parsedFe < 0) {
+          errors.floorEggs = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+        } else {
+          fe = parsedFe;
         }
       }
 
-      if (data.floorEggs !== '') {
-        const fe = Number(data.floorEggs);
-        if (isNaN(fe) || !Number.isInteger(fe) || fe < 0) {
-          errors.floorEggs = tr('validation.invalidWholeNumber', 'Enter a valid non-negative whole number');
+      // Production, Selection, Damaged, and Floor Eggs Constraint:
+      // Egg Production must equal Selection Eggs + Damaged Eggs + Floor Eggs
+      if (!errors.eggsProduced && !errors.selectionEggs && !errors.damagedEggs && !errors.floorEggs) {
+        if (se + de + fe !== ep) {
+          errors.eggsProduced = tr(
+            'validation.eggProductionMismatch',
+            'Egg Production must equal Selection Eggs + Damaged Eggs + Floor Eggs.'
+          );
         }
       }
 

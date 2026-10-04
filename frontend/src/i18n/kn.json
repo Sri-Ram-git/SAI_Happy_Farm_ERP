@@ -381,6 +381,7 @@
     "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ...",
     "error": "ದೋಷ",
     "success": "ಯಶಸ್ವಿ",
+    "successMessage": "Your daily report has been recorded successfully.",
     "save": "ಉಳಿಸಿ",
     "delete": "ಅಳಿಸಿ",
     "edit": "ಸಂಪಾದಿಸಿ",
@@ -409,3 +410,4 @@
     "goToLogin": "ಲಾಗಿನ್‌ಗೆ ಹೋಗಿ"
   }
 }
+

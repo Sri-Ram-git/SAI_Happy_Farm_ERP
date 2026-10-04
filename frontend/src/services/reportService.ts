@@ -478,6 +478,12 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
   const userRef = db.collection('users').doc(userId);
 
   let finalVersion = 1;
+  let notificationContext: {
+    report: SubmitReportInput;
+    farmName: string;
+    openingBirdCount: number;
+    currentFeedStock: number;
+  } | null = null;
 
   try {
     await db.runTransaction(async (transaction: any) => {
@@ -684,10 +690,12 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
           });
         }
 
-        // --- NEW NOTIFICATION HOOK ---
-        import('./notificationService').then(mod => {
-          mod.generateNotificationsForReport(input, farmData.name || input.farmId, openingBirdCount);
-        });
+        notificationContext = {
+          report: { ...input, submissionDate },
+          farmName: farmData.name || input.farmId,
+          openingBirdCount,
+          currentFeedStock: currentFeedStock - input.feedKg,
+        };
 
       } else {
         // EXISTING REPORT: CORRECTION / REVISION (VERSION 2) OR HISTORICAL IMPORT REPLACEMENT
@@ -861,6 +869,13 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
             });
           }
 
+          notificationContext = {
+            report: { ...input, submissionDate },
+            farmName: farmData.name || input.farmId,
+            openingBirdCount,
+            currentFeedStock: currentFeedStock - input.feedKg,
+          };
+
         } else {
           // EXISTING REPORT: CORRECTION / REVISION (VERSION 2)
           if (!hasDataChanged(input, existingData)) {
@@ -1022,13 +1037,49 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
             }, { merge: true });
           }
           
-          // --- NEW NOTIFICATION HOOK ---
-          import('./notificationService').then(mod => {
-            mod.generateNotificationsForReport(input, farmData.name || input.farmId, openingBirdCount);
-          });
+          notificationContext = {
+            report: { ...input, submissionDate },
+            farmName: farmData.name || input.farmId,
+            openingBirdCount,
+            currentFeedStock: currentFeedStock - feedDiff,
+          };
         }
       }
     });
+
+    // Generate notifications only after the report transaction commits. This
+    // avoids duplicate side effects from Firestore transaction retries and
+    // keeps the report event and notification event in the same submission
+    // path, including imported-record replacement and V2 correction writes.
+    // The context is assigned inside the transaction callback, so keep the
+    // committed value explicit for TypeScript's closure analysis.
+    const committedNotificationContext = notificationContext as {
+      report: SubmitReportInput;
+      farmName: string;
+      openingBirdCount: number;
+      currentFeedStock: number;
+    } | null;
+    if (committedNotificationContext) {
+      try {
+        const notificationService = await import('./notificationService');
+        await Promise.all([
+          notificationService.generateNotificationsForReport(
+            committedNotificationContext.report,
+            committedNotificationContext.farmName,
+            committedNotificationContext.openingBirdCount,
+          ),
+          notificationService.evaluateFeedStockNotification(
+            committedNotificationContext.report.farmId,
+            committedNotificationContext.farmName,
+            committedNotificationContext.currentFeedStock,
+          ),
+        ]);
+      } catch (notificationError) {
+        // Notification failure must not roll back a successfully committed
+        // report; the report path remains the source of truth.
+        console.error('[reportService] Notification generation failed:', notificationError);
+      }
+    }
 
     // Clean up any pending queue item if online submission succeeded
     try {

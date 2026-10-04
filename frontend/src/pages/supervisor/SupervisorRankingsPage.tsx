@@ -36,6 +36,131 @@ import {
 type ActiveTab = 'ranking' | 'weekly_data' | 'summary';
 type RankingMetric = 'productionGap' | 'fcr' | 'eggDamage' | 'mortality' | 'selection';
 
+// Reusable Excel formatting helpers
+const applyTitleStyle = (ws: XLSX.WorkSheet, r: number, c: number, colsCount: number) => {
+  for (let idx = c; idx < c + colsCount; idx++) {
+    const cellRef = XLSX.utils.encode_cell({ r, c: idx });
+    if (!ws[cellRef]) ws[cellRef] = { t: 's', v: '' }; // Create empty cell for styling if missing
+    ws[cellRef].s = {
+      font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } },
+      fill: { fgColor: { rgb: "047857" } },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: {
+        top: { style: 'medium', color: { rgb: "D1D5DB" } },
+        bottom: { style: 'medium', color: { rgb: "D1D5DB" } },
+        left: { style: 'medium', color: { rgb: "D1D5DB" } },
+        right: { style: 'medium', color: { rgb: "D1D5DB" } }
+      }
+    };
+  }
+};
+
+const applyMetadataStyle = (ws: XLSX.WorkSheet, R: number, colsCount: number) => {
+  for (let c = 0; c < colsCount; c++) {
+    const cellRef = XLSX.utils.encode_cell({ r: R, c });
+    if (!ws[cellRef]) ws[cellRef] = { t: 's', v: '' };
+    ws[cellRef].s = {
+      font: { color: { rgb: "172033" } },
+      fill: { fgColor: { rgb: "ECFDF5" } },
+      alignment: { vertical: "center" },
+      border: {
+        top: { style: 'thin', color: { rgb: "D1D5DB" } },
+        bottom: { style: 'thin', color: { rgb: "D1D5DB" } },
+        left: { style: 'thin', color: { rgb: "D1D5DB" } },
+        right: { style: 'thin', color: { rgb: "D1D5DB" } }
+      }
+    };
+  }
+};
+
+const applyHeaderStyle = (ws: XLSX.WorkSheet, r: number, colsCount: number) => {
+  for (let c = 0; c < colsCount; c++) {
+    const cellRef = XLSX.utils.encode_cell({ r, c });
+    if (!ws[cellRef]) ws[cellRef] = { t: 's', v: '' };
+    ws[cellRef].s = {
+      font: { bold: true, color: { rgb: "FFFFFF" } },
+      fill: { fgColor: { rgb: "047857" } },
+      alignment: { vertical: "center", horizontal: "center", wrapText: true },
+      border: {
+        top: { style: 'thin', color: { rgb: "D1D5DB" } },
+        bottom: { style: 'thin', color: { rgb: "D1D5DB" } },
+        left: { style: 'thin', color: { rgb: "D1D5DB" } },
+        right: { style: 'thin', color: { rgb: "D1D5DB" } }
+      }
+    };
+  }
+};
+
+const applyRowBanding = (ws: XLSX.WorkSheet, startRow: number, endRow: number, colsCount: number, isRanking = false) => {
+  for (let R = startRow; R <= endRow; R++) {
+    const rowIndex = R - startRow;
+    let bgColor = rowIndex % 2 === 1 ? "F8FAFC" : "FFFFFF";
+
+    if (isRanking) {
+      if (rowIndex === 0) bgColor = "DCFCE7";
+      else if (rowIndex === 1) bgColor = "F1F5F9";
+      else if (rowIndex === 2) bgColor = "FEF3C7";
+    }
+
+    for (let c = 0; c < colsCount; c++) {
+      const cellRef = XLSX.utils.encode_cell({ r: R, c });
+      if (!ws[cellRef]) ws[cellRef] = { t: 's', v: '' };
+
+      const existingS = ws[cellRef].s || {};
+      ws[cellRef].s = {
+        ...existingS,
+        fill: { fgColor: { rgb: bgColor } },
+        font: existingS.font || { color: { rgb: "172033" } },
+        border: existingS.border || {
+          bottom: { style: 'thin', color: { rgb: "D1D5DB" } },
+          top: { style: 'thin', color: { rgb: "D1D5DB" } },
+          left: { style: 'thin', color: { rgb: "D1D5DB" } },
+          right: { style: 'thin', color: { rgb: "D1D5DB" } }
+        }
+      };
+    }
+  }
+};
+
+const applyConditionalStatusStyle = (ws: XLSX.WorkSheet, r: number, c: number, status: 'good' | 'attention' | 'critical' | 'none') => {
+  if (status === 'none') return;
+  const cellRef = XLSX.utils.encode_cell({ r, c });
+  if (ws[cellRef]) {
+    const existingS = ws[cellRef].s || {};
+    let fgColor = "FFFFFF";
+    let fontColor = "172033";
+    if (status === 'good') { fgColor = "DCFCE7"; fontColor = "15803D"; }
+    else if (status === 'attention') { fgColor = "FEF3C7"; fontColor = "B45309"; }
+    else if (status === 'critical') { fgColor = "FEE2E2"; fontColor = "B91C1C"; }
+
+    ws[cellRef].s = {
+      ...existingS,
+      fill: { fgColor: { rgb: fgColor } },
+      font: { ...existingS.font, color: { rgb: fontColor }, bold: true }
+    };
+  }
+};
+
+const applyNumberFormats = (ws: XLSX.WorkSheet, startRow: number, endRow: number, formatMap: Record<number, string>) => {
+  for (let R = startRow; R <= endRow; R++) {
+    for (const [colStr, format] of Object.entries(formatMap)) {
+      const C = parseInt(colStr, 10);
+      const cellRef = XLSX.utils.encode_cell({ r: R, c: C });
+      if (ws[cellRef] && ws[cellRef].t === 'n') {
+        ws[cellRef].z = format;
+      }
+    }
+  }
+};
+
+const setColumnWidths = (ws: XLSX.WorkSheet, widths: number[]) => {
+  ws['!cols'] = widths.map(w => ({ wch: w }));
+};
+
+const configurePrintLayout = (ws: XLSX.WorkSheet) => {
+  ws['!pageSetup'] = { fitToPage: 1, fitToWidth: 1, orientation: 'landscape' };
+};
+
 export function SupervisorRankingsPage() {
   const { userProfile } = useAuth();
   const navigate = useNavigate();
@@ -197,7 +322,7 @@ export function SupervisorRankingsPage() {
           k.farmId,
           k.farmName,
           k.birdCount,
-          k.actualProductionPct !== null ? `${k.actualProductionPct}%` : 'N/A',
+          k.actualProductionPct !== null ? k.actualProductionPct : 'N/A',
           k.feedConsumedKg,
           k.eggsProduced,
           k.avgEggWeightG !== null ? k.avgEggWeightG : 'N/A',
@@ -205,15 +330,52 @@ export function SupervisorRankingsPage() {
           k.damageCount,
           k.selectedEggs,
           k.mortalityBirds,
-          k.productionGapPct !== null ? `${k.productionGapPct >= 0 ? '+' : ''}${k.productionGapPct}%` : 'N/A',
+          k.productionGapPct !== null ? k.productionGapPct : 'N/A',
           k.fcr !== null ? k.fcr : 'N/A',
-          k.eggDamagePct !== null ? `${k.eggDamagePct}%` : 'N/A',
-          k.mortalityPct !== null ? `${k.mortalityPct}%` : 'N/A',
-          k.selectionPct !== null ? `${k.selectionPct}%` : 'N/A',
+          k.eggDamagePct !== null ? k.eggDamagePct : 'N/A',
+          k.mortalityPct !== null ? k.mortalityPct : 'N/A',
+          k.selectionPct !== null ? k.selectionPct : 'N/A',
           k.hasIncompleteData ? `Incomplete (${k.missingFields.join(', ')})` : 'Complete',
         ]),
       ];
       const wsWeeklyData = XLSX.utils.aoa_to_sheet(weeklyDataAoa);
+      wsWeeklyData['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 16 } }];
+      wsWeeklyData['!views'] = [{ state: 'frozen', xSplit: 0, ySplit: 4, topLeftCell: 'A5', activePane: 'bottomLeft' }];
+      wsWeeklyData['!autofilter'] = { ref: `A4:Q${4 + farmKpis.length}` };
+
+      applyTitleStyle(wsWeeklyData, 0, 0, 17);
+      applyMetadataStyle(wsWeeklyData, 1, 17);
+      applyHeaderStyle(wsWeeklyData, 3, 17);
+      applyRowBanding(wsWeeklyData, 4, 3 + farmKpis.length, 17);
+      setColumnWidths(wsWeeklyData, [12, 24, 16, 20, 22, 18, 18, 18, 18, 18, 20, 24, 16, 22, 20, 20, 24]);
+
+      applyNumberFormats(wsWeeklyData, 4, 3 + farmKpis.length, {
+        2: '#,##0',
+        3: '0.0"%"',
+        4: '#,##0.0',
+        5: '#,##0',
+        6: '0.00',
+        7: '#,##0',
+        8: '#,##0',
+        9: '#,##0',
+        10: '#,##0',
+        11: '+0.0"%";-0.0"%";0.0"%"',
+        12: '0.00',
+        13: '0.0"%"',
+        14: '0.0"%"',
+        15: '0.0"%"',
+      });
+
+      farmKpis.forEach((k, i) => {
+        const R = 4 + i;
+        if (k.productionGapPct !== null) applyConditionalStatusStyle(wsWeeklyData, R, 11, k.productionGapPct >= 0 ? 'good' : 'critical');
+        if (k.fcr !== null) applyConditionalStatusStyle(wsWeeklyData, R, 12, k.fcr <= 2.2 ? 'good' : 'attention');
+        if (k.eggDamagePct !== null) applyConditionalStatusStyle(wsWeeklyData, R, 13, k.eggDamagePct <= 2.0 ? 'good' : 'critical');
+        if (k.mortalityPct !== null) applyConditionalStatusStyle(wsWeeklyData, R, 14, k.mortalityPct <= 1.0 ? 'good' : 'critical');
+        if (k.selectionPct !== null) applyConditionalStatusStyle(wsWeeklyData, R, 15, k.selectionPct >= 85 ? 'good' : 'attention');
+      });
+
+      configurePrintLayout(wsWeeklyData);
       XLSX.utils.book_append_sheet(wb, wsWeeklyData, 'Weekly Data');
 
       // Sheet 2: Final Ranking
@@ -239,15 +401,47 @@ export function SupervisorRankingsPage() {
           `#${idx + 1}`,
           k.farmId,
           k.farmName,
-          k.productionGapPct !== null ? `${k.productionGapPct >= 0 ? '+' : ''}${k.productionGapPct}%` : 'N/A',
+          k.productionGapPct !== null ? k.productionGapPct : 'N/A',
           k.fcr !== null ? k.fcr : 'N/A',
-          k.eggDamagePct !== null ? `${k.eggDamagePct}%` : 'N/A',
-          k.mortalityPct !== null ? `${k.mortalityPct}%` : 'N/A',
-          k.selectionPct !== null ? `${k.selectionPct}%` : 'N/A',
+          k.eggDamagePct !== null ? k.eggDamagePct : 'N/A',
+          k.mortalityPct !== null ? k.mortalityPct : 'N/A',
+          k.selectionPct !== null ? k.selectionPct : 'N/A',
           `${k.reportCount} / ${expectedDays} days`,
         ]),
       ];
       const wsRanking = XLSX.utils.aoa_to_sheet(rankingAoa);
+      wsRanking['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 8 } }];
+      wsRanking['!views'] = [{ state: 'frozen', xSplit: 0, ySplit: 7, topLeftCell: 'A8', activePane: 'bottomLeft' }];
+      wsRanking['!autofilter'] = { ref: `A7:I${7 + sortedRankings.length}` };
+
+      applyTitleStyle(wsRanking, 0, 0, 9);
+      applyMetadataStyle(wsRanking, 1, 9);
+      applyMetadataStyle(wsRanking, 2, 9);
+      applyMetadataStyle(wsRanking, 3, 9);
+      applyMetadataStyle(wsRanking, 4, 9);
+      applyHeaderStyle(wsRanking, 6, 9);
+      applyRowBanding(wsRanking, 7, 6 + sortedRankings.length, 9, true);
+      setColumnWidths(wsRanking, [10, 12, 25, 24, 16, 22, 20, 20, 22]);
+
+      applyNumberFormats(wsRanking, 7, 6 + sortedRankings.length, {
+        3: '+0.0"%";-0.0"%";0.0"%"',
+        4: '0.00',
+        5: '0.0"%"',
+        6: '0.0"%"',
+        7: '0.0"%"',
+      });
+
+      sortedRankings.forEach((k, i) => {
+        const R = 7 + i;
+        if (k.productionGapPct !== null) applyConditionalStatusStyle(wsRanking, R, 3, k.productionGapPct >= 0 ? 'good' : 'critical');
+        if (k.fcr !== null) applyConditionalStatusStyle(wsRanking, R, 4, k.fcr <= 2.2 ? 'good' : 'attention');
+        if (k.eggDamagePct !== null) applyConditionalStatusStyle(wsRanking, R, 5, k.eggDamagePct <= 2.0 ? 'good' : 'critical');
+        if (k.mortalityPct !== null) applyConditionalStatusStyle(wsRanking, R, 6, k.mortalityPct <= 1.0 ? 'good' : 'critical');
+        if (k.selectionPct !== null) applyConditionalStatusStyle(wsRanking, R, 7, k.selectionPct >= 85 ? 'good' : 'attention');
+        applyConditionalStatusStyle(wsRanking, R, 8, k.reportCount >= expectedDays ? 'good' : 'attention');
+      });
+
+      configurePrintLayout(wsRanking);
       XLSX.utils.book_append_sheet(wb, wsRanking, 'Final Ranking');
 
       // Sheet 3: Summary Dashboard
@@ -265,13 +459,42 @@ export function SupervisorRankingsPage() {
         ['Total Selected Eggs', summaryAggregates.totalSelectedEggs, 'Eggs'],
         ['Total Damaged Eggs', summaryAggregates.totalDamagedEggs, 'Eggs'],
         ['Total Dead Birds (Mortality)', summaryAggregates.totalMortality, 'Birds'],
-        ['Average Production Gap %', summaryAggregates.avgProductionGap !== null ? `${summaryAggregates.avgProductionGap}%` : 'N/A', '%'],
+        ['Average Production Gap %', summaryAggregates.avgProductionGap !== null ? summaryAggregates.avgProductionGap : 'N/A', '%'],
         ['Average FCR', summaryAggregates.avgFcr !== null ? summaryAggregates.avgFcr : 'N/A', 'Ratio'],
-        ['Average Egg Damage %', summaryAggregates.avgEggDamage !== null ? `${summaryAggregates.avgEggDamage}%` : 'N/A', '%'],
-        ['Average Mortality %', summaryAggregates.avgMortality !== null ? `${summaryAggregates.avgMortality}%` : 'N/A', '%'],
-        ['Average Selection %', summaryAggregates.avgSelection !== null ? `${summaryAggregates.avgSelection}%` : 'N/A', '%'],
+        ['Average Egg Damage %', summaryAggregates.avgEggDamage !== null ? summaryAggregates.avgEggDamage : 'N/A', '%'],
+        ['Average Mortality %', summaryAggregates.avgMortality !== null ? summaryAggregates.avgMortality : 'N/A', '%'],
+        ['Average Selection %', summaryAggregates.avgSelection !== null ? summaryAggregates.avgSelection : 'N/A', '%'],
       ];
       const wsSummary = XLSX.utils.aoa_to_sheet(summaryAoa);
+      wsSummary['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }];
+      wsSummary['!views'] = [{ state: 'frozen', xSplit: 0, ySplit: 5, topLeftCell: 'A6', activePane: 'bottomLeft' }];
+
+      applyTitleStyle(wsSummary, 0, 0, 3);
+      applyMetadataStyle(wsSummary, 1, 3);
+      applyMetadataStyle(wsSummary, 2, 3);
+      applyHeaderStyle(wsSummary, 4, 3);
+      applyRowBanding(wsSummary, 5, 17, 3);
+      setColumnWidths(wsSummary, [35, 20, 10]);
+
+      for (let R = 5; R <= 17; R++) {
+        const cellRef = XLSX.utils.encode_cell({ r: R, c: 1 });
+        if (wsSummary[cellRef] && wsSummary[cellRef].t === 'n') {
+          if (R >= 5 && R <= 7) wsSummary[cellRef].z = '#,##0';
+          else if (R === 8) wsSummary[cellRef].z = '#,##0.0';
+          else if (R >= 9 && R <= 12) wsSummary[cellRef].z = '#,##0';
+          else if (R === 13) wsSummary[cellRef].z = '+0.0"%";-0.0"%";0.0"%"';
+          else if (R === 14) wsSummary[cellRef].z = '0.00';
+          else if (R >= 15 && R <= 17) wsSummary[cellRef].z = '0.0"%"';
+        }
+      }
+
+      if (summaryAggregates.avgProductionGap !== null) applyConditionalStatusStyle(wsSummary, 13, 1, summaryAggregates.avgProductionGap >= 0 ? 'good' : 'critical');
+      if (summaryAggregates.avgFcr !== null) applyConditionalStatusStyle(wsSummary, 14, 1, summaryAggregates.avgFcr <= 2.2 ? 'good' : 'attention');
+      if (summaryAggregates.avgEggDamage !== null) applyConditionalStatusStyle(wsSummary, 15, 1, summaryAggregates.avgEggDamage <= 2.0 ? 'good' : 'critical');
+      if (summaryAggregates.avgMortality !== null) applyConditionalStatusStyle(wsSummary, 16, 1, summaryAggregates.avgMortality <= 1.0 ? 'good' : 'critical');
+      if (summaryAggregates.avgSelection !== null) applyConditionalStatusStyle(wsSummary, 17, 1, summaryAggregates.avgSelection >= 85 ? 'good' : 'attention');
+
+      configurePrintLayout(wsSummary);
       XLSX.utils.book_append_sheet(wb, wsSummary, 'Summary Dashboard');
 
       const filename = `Supervisor_Farm_Rankings_${startDate}_to_${endDate}.xlsx`;

@@ -56,8 +56,11 @@ export function validateDailyReportBusinessRules(input: DailyReportInput): void 
     fields['eggsProduced'] = `Egg production cannot exceed 95% of bird count (maximum allowed: ${maxEggs})`;
   }
 
-  if (input.selectionEggs > input.eggsProduced) {
-    fields['selectionEggs'] = 'Selection eggs cannot exceed egg production';
+  const se = input.selectionEggs || 0;
+  const de = input.damagedEggs || 0;
+  const fe = input.floorEggs || 0;
+  if (se + de + fe !== input.eggsProduced) {
+    fields['eggsProduced'] = 'Egg Production must equal Selection Eggs + Damaged Eggs + Floor Eggs.';
   }
 
   if (input.damagedEggs !== undefined && input.damagedEggs !== null) {

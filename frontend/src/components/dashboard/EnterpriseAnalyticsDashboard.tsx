@@ -444,6 +444,7 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
         </div>
 
         <div className="mgmt-header-actions">
+          {variant === 'overview' && <NotificationBell role={role} />}
           <select
             className="form-input form-input--sm mgmt-filter-select"
             value={selectedFarmId}
@@ -474,7 +475,6 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           )}
 
           <DateFilter days={days} onChange={setDays} />
-          {variant === 'overview' && <NotificationBell role={role} />}
         </div>
       </div>
 

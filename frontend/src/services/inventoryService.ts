@@ -104,6 +104,10 @@ export async function updateFeedInventory(
     inventoryUpdatedAt: now,
     updatedAt: now,
   }, { merge: true });
+
+  import('./notificationService').then(mod => {
+    mod.evaluateFeedStockNotification(farmId, farmId, newFeedStockKg);
+  });
 }
 
 export interface FeedLogDoc {
@@ -180,7 +184,7 @@ export async function addFeedLoad(
   const feedLogRef = db.collection('logs').doc(farmId).collection('feedLogs').doc();
   const txRef = db.collection('farms').doc(farmId).collection('feedTransactions').doc();
 
-  await db.runTransaction(async (transaction: any) => {
+  const finalStock = await db.runTransaction(async (transaction: any) => {
     const farmSnap = await transaction.get(farmRef);
     if (!farmSnap.exists) {
       throw new Error('FARM_NOT_FOUND');
@@ -223,6 +227,11 @@ export async function addFeedLoad(
       loadedBy,
       notes: notes || '',
     });
+    return newStockKg;
+  });
+
+  import('./notificationService').then(mod => {
+    mod.evaluateFeedStockNotification(farmId, farmId, finalStock);
   });
 }
 
@@ -310,3 +319,4 @@ export function subscribeToAllBirdInventories(
     unsubscribes.forEach((unsub) => unsub());
   };
 }
+

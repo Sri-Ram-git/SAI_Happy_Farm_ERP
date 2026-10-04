@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, CheckCheck } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import { AppNotification, markNotificationAsRead, markAllNotificationsAsRead, subscribeToUserNotifications } from '../../services/notificationService';
 import { useAuth } from '../../context/AuthContext';
 
@@ -142,11 +142,15 @@ export function NotificationBell({ role }: NotificationBellProps) {
                     />
                     <div className="notif-item-content">
                       <div className="notif-item-title-row">
+                        <span className="notif-item-priority">{notif.priority}</span>
                         <span className="notif-item-title">{notif.title}</span>
                       </div>
                       {notif.farmName && (
-                        <div className="notif-item-farm">Farm {notif.farmName}</div>
+                        <div className="notif-item-farm">
+                          Farm {notif.farmId}{notif.farmName !== notif.farmId ? ` • ${notif.farmName}` : ''}
+                        </div>
                       )}
+                      <div className="notif-item-message">{notif.message}</div>
                       <div className="notif-item-meta">
                         {getRelativeTime(notif.createdAt)}
                       </div>

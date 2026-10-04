@@ -80,7 +80,7 @@ if (require.main === module) {
   const app = createApp();
   const env = getEnv();
 
-  app.listen(env.PORT, () => {
+  app.listen(env.PORT, '0.0.0.0', () => {
     logger.info(`SAI Happy Farms API running on port ${env.PORT}`, {
       environment: env.NODE_ENV,
     });

@@ -178,5 +178,34 @@ service cloud.firestore {
         allow create, update, delete: if isAdmin();
       }
     }
+
+    // Notifications Collection
+    match /notifications/{notificationId} {
+      // Writes are allowed from:
+      //   1. Any active user who has farm access (farmer submitting report triggering notification)
+      //   2. Admin (for bootstrap/catch-up of existing farm conditions)
+      //   3. Supervisor for their assigned farms (bootstrap)
+      // All writes must target valid roles and use only IN_APP channel.
+      allow create: if isUserActive()
+                    && (
+                      isAdmin() ||
+                      hasFarmAccess(request.resource.data.farmId)
+                    )
+                    && request.resource.data.targetRoles.hasOnly(['admin', 'supervisor'])
+                    && request.resource.data.channels.hasOnly(['IN_APP']);
+      // Allow update for bootstrap (merge:true sets non-readBy fields too) and readBy updates
+      allow update: if isUserActive()
+                    && (
+                      isAdmin() ||
+                      (hasRole('supervisor') && resource.data.farmId in getUserData().farmIds) ||
+                      (isUserActive() && hasFarmAccess(resource.data.farmId) &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']))
+                    );
+      allow read: if isAdmin() || (
+                    hasRole('supervisor') &&
+                    resource.data.farmId in getUserData().farmIds
+                  );
+      allow delete: if isAdmin();
+    }
   }
 }

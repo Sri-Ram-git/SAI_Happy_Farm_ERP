@@ -381,6 +381,7 @@
     "loading": "ஏற்றுகிறது...",
     "error": "பிழை",
     "success": "வெற்றி",
+    "successMessage": "Your daily report has been recorded successfully.",
     "save": "சேமி",
     "delete": "நீக்கு",
     "edit": "திருத்து",
@@ -409,3 +410,4 @@
     "goToLogin": "உள்நுழைவுக்கு செல்"
   }
 }
+

@@ -381,6 +381,7 @@
     "loading": "లోడ్ అవుతోంది...",
     "error": "లోపం",
     "success": "విజయం",
+    "successMessage": "Your daily report has been recorded successfully.",
     "save": "సేవ్",
     "delete": "తొలగించు",
     "edit": "మార్చు",
@@ -409,3 +410,4 @@
     "goToLogin": "లాగిన్‌కు వెళ్ళు"
   }
 }
+

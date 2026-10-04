@@ -10,7 +10,9 @@ describe('Business Rule Validation', () => {
     mortality: 10,
     culling: 2,
     eggsProduced: 4500,
-    selectionEggs: 100,
+    selectionEggs: 4500,
+    damagedEggs: 0,
+    floorEggs: 0,
     temperature: 25.5,
     eggWeight: { min: 58, max: 62, avg: 60 },
     bodyWeight: { min: 1700, max: 1900, avg: 1800 },
@@ -141,17 +143,35 @@ describe('Business Rule Validation', () => {
       validateDailyReportBusinessRules({
         ...validInput,
         eggsProduced: 4750,
+        selectionEggs: 4750,
+        damagedEggs: 0,
+        floorEggs: 0,
       }),
     ).not.toThrow();
   });
 
-  it('should reject selectionEggs > eggsProduced', () => {
+  it('should reject when eggsProduced !== selectionEggs + damagedEggs + floorEggs', () => {
     expect(() =>
       validateDailyReportBusinessRules({
         ...validInput,
-        selectionEggs: 5000,
+        eggsProduced: 4500,
+        selectionEggs: 4000,
+        damagedEggs: 100,
+        floorEggs: 0,
       }),
     ).toThrow();
+  });
+
+  it('should allow when eggsProduced === selectionEggs + damagedEggs + floorEggs', () => {
+    expect(() =>
+      validateDailyReportBusinessRules({
+        ...validInput,
+        eggsProduced: 4500,
+        selectionEggs: 4000,
+        damagedEggs: 400,
+        floorEggs: 100,
+      }),
+    ).not.toThrow();
   });
 
   it('should reject temperature < 10', () => {
@@ -205,6 +225,7 @@ describe('Business Rule Validation', () => {
         ...validInput,
         damagedEggs: 12,
         floorEggs: 6,
+        selectionEggs: 4482,
       }),
     ).not.toThrow();
   });

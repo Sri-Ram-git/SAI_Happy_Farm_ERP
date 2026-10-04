@@ -20,7 +20,6 @@ import { saveFarmerDraft, getFarmerDraft, clearFarmerDraft } from '../services/o
 import { subscribeToFlocksByFarm, type FlockDoc } from '../services/flockDataService';
 import { subscribeToFarm, type FarmDoc } from '../services/farmDataService';
 import { LanguageSelector } from '../components/LanguageSelector';
-import { ReportStatusModal } from '../components/ReportStatusModal';
 import { OverwriteConfirmationModal } from '../components/OverwriteConfirmationModal';
 import { TotalMortalityConfirmationModal } from '../components/TotalMortalityConfirmationModal';
 import { Calendar, Check, Home, Lock, LogOut, AlertTriangle } from 'lucide-react';
@@ -344,7 +343,8 @@ export function FarmerFormPage() {
   const [flocks, setFlocks] = useState<FlockDoc[]>([]);
   const [farmDoc, setFarmDoc] = useState<FarmDoc | null>(null);
   const [todayReport, setTodayReport] = useState<any | null>(null);
-  const [showStatusModal, setShowStatusModal] = useState<boolean>(false);
+  const [showLimitModal, setShowLimitModal] = useState<boolean>(false);
+  const [showDisclaimerModal, setShowDisclaimerModal] = useState<boolean>(false);
   const [hasDismissedModal, setHasDismissedModal] = useState<boolean>(false);
   const [showTotalMortalityModal, setShowTotalMortalityModal] = useState<boolean>(false);
   const [totalMortalityConfirmed, setTotalMortalityConfirmed] = useState<boolean>(false);
@@ -370,7 +370,8 @@ export function FarmerFormPage() {
     setSubmitted(false);
     setSubmittedOffline(false);
     setSubmitError('');
-    setShowStatusModal(false);
+    setShowLimitModal(false);
+    setShowDisclaimerModal(false);
     setHasDismissedModal(false);
     setIsEditingWeekly(false);
   }, [reportDate, farmId]);
@@ -427,7 +428,8 @@ export function FarmerFormPage() {
 
       setTodayReport(rep);
       if (!rep) {
-        setShowStatusModal(false);
+        setShowLimitModal(false);
+    setShowDisclaimerModal(false);
         return;
       }
 
@@ -439,10 +441,9 @@ export function FarmerFormPage() {
         rep &&
         rep.submissionMethod !== 'HISTORICAL_IMPORT' &&
         (rep.submissionVersion != null || rep.status) &&
-        !hasSubmittedInSessionRef.current &&
-        !hasDismissedModal
+        !hasSubmittedInSessionRef.current
       ) {
-        setShowStatusModal(true);
+        setSubmitted(true);
       }
 
       if (rep && (rep.submissionVersion != null || rep.status === 'submitted' || rep.status === 'corrected')) {
@@ -489,7 +490,8 @@ export function FarmerFormPage() {
         const synced = await syncPendingSubmissions(userProfile.uid);
         if (synced > 0) {
           console.log(`[FarmerForm] Successfully synced ${synced} pending report(s).`);
-          if (submittedOffline) {
+
+  if (submittedOffline) {
             setSubmittedOffline(false);
             setSubmitted(true);
           }
@@ -782,7 +784,8 @@ export function FarmerFormPage() {
 
   const executeSubmission = async () => {
     setShowOverwriteModal(false);
-    setShowStatusModal(false);
+    setShowLimitModal(false);
+    setShowDisclaimerModal(false);
     setHasDismissedModal(true);
     hasSubmittedInSessionRef.current = true;
     setSubmitting(true);
@@ -875,12 +878,23 @@ export function FarmerFormPage() {
 
       const res = await submitReport(payload);
 
+      // Explicit race-safe check: If backend didn't bump the version when we expected a V2 write
+      if (todayReport?.submissionVersion === 1 && res.version === 1 && !res.isOffline) {
+        // This means they tried to submit a correction but NO data was changed,
+        // or something failed silently. We should NOT let them think V2 succeeded.
+        setSubmitError(t('farmer.noChangesDetected', 'No changes detected. Please modify the data to submit a correction.'));
+        setSubmitting(false);
+        return;
+      }
+
       if (res.isOffline) {
         setSubmittedOffline(true);
       } else {
         if (userProfile?.uid && farmId) {
           await clearFarmerDraft(userProfile.uid, farmId, reportDate);
         }
+        // Prevent UI race conditions by manually syncing the returned version immediately
+        setTodayReport((prev: any) => prev ? { ...prev, submissionVersion: res.version } : { submissionVersion: res.version });
         setSubmitted(true);
       }
     } catch (err: any) {
@@ -897,17 +911,25 @@ export function FarmerFormPage() {
     }
   };
 
-  const handleReset = () => {
+  const handleStartCorrection = () => {
+    if (todayReport?.submissionVersion >= 2 || todayReport?.status === 'finalized') {
+      setShowLimitModal(true);
+    } else {
+      setShowDisclaimerModal(true);
+    }
+  };
+
+  const handleConfirmCorrection = () => {
+    setShowDisclaimerModal(false);
     if (userProfile?.uid && farmId) {
       clearFarmerDraft(userProfile.uid, farmId, reportDate);
     }
-    setData(INITIAL_FARM_FORM_DATA);
     setErrors({});
     setStep(0);
     setSubmitted(false);
     setSubmittedOffline(false);
     setSubmitError('');
-    setShowStatusModal(false);
+    setShowLimitModal(false);
     setHasDismissedModal(true);
   };
 
@@ -937,6 +959,50 @@ export function FarmerFormPage() {
   const feedKgDisplay = data.feedQuantity ? Number(data.feedQuantity) : 0;
   const feedPerBirdDisplay = calculateFeedGramsPerBird(feedKgDisplay, birdCount);
   const maxEggsAllowed = birdCount > 0 ? Math.floor(birdCount * 0.95) : 0;
+
+
+  const renderModals = () => (
+    <>
+      {showLimitModal && (
+        <div className="farmer-modal-overlay" onClick={() => setShowLimitModal(false)} role="dialog">
+          <div className="farmer-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="farmer-modal-icon-badge" style={{ background: '#fef2f2', color: '#dc2626' }}>
+              <AlertTriangle size={26} strokeWidth={2.5} />
+            </div>
+            <h3 className="farmer-modal-title">Daily submission limit reached</h3>
+            <p className="farmer-modal-desc">
+              You have already completed the maximum of 2 submissions for today. Your next submission will be available on the next allowed day.
+            </p>
+            <button type="button" className="farmer-modal-action-btn" onClick={() => setShowLimitModal(false)}>
+              {t('common.ok', 'OK')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showDisclaimerModal && (
+        <div className="farmer-modal-overlay" onClick={() => setShowDisclaimerModal(false)} role="dialog">
+          <div className="farmer-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="farmer-modal-icon-badge" style={{ background: '#fffbeb', color: '#d97706' }}>
+              <AlertTriangle size={26} strokeWidth={2.5} />
+            </div>
+            <h3 className="farmer-modal-title">Second submission for today</h3>
+            <p className="farmer-modal-desc">
+              You have already submitted today's farm report once. You are allowed one additional submission today. Please continue only if you need to submit the second report.
+            </p>
+            <div className="farmer-modal-tiles" style={{ display: 'flex', gap: '10px', marginTop: '20px', flexDirection: 'column' }}>
+              <button type="button" className="btn btn--primary" style={{ width: '100%', padding: '14px', borderRadius: '8px' }} onClick={handleConfirmCorrection}>
+                Continue to Second Submission
+              </button>
+              <button type="button" className="btn btn--outline" style={{ width: '100%', padding: '14px', borderRadius: '8px', border: '1px solid #cbd5e1', background: 'transparent' }} onClick={() => setShowDisclaimerModal(false)}>
+                {t('common.cancel', 'Cancel')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 
   if (submittedOffline) {
     return (
@@ -977,10 +1043,13 @@ export function FarmerFormPage() {
             <p className="text-muted" style={{ marginTop: '14px' }}>
               {t('common.date')}: {formatDisplayDate(reportDate)} | {t('farmer.week')} {weekLabel} | {t('flock.farm')}: {farmId}
             </p>
-            <button className="btn btn--primary btn--full" style={{ marginTop: 20 }} onClick={handleReset}>
-              {t('common.save')}
-            </button>
-          </div>
+            {(todayReport && todayReport.submissionVersion === 1 && todayReport.submissionMethod !== 'HISTORICAL_IMPORT') && (
+              <button className="btn btn--primary btn--full" style={{ marginTop: 20 }} onClick={handleStartCorrection}>
+                {t('farmer.submitCorrection')}
+              </button>
+            )}
+          {renderModals()}
+        </div>
         </main>
       </div>
     );
@@ -1019,12 +1088,19 @@ export function FarmerFormPage() {
           <div className="success-screen">
             <div className="success-icon"><Check size={36} /></div>
             <h2>{t('common.success')}</h2>
-            <p>{t('farmer.successMessage')}</p>
+            <p>
+              {todayReport && todayReport.submissionVersion >= 2
+                ? t('farmer.correctionSuccessMsg', 'Correction submitted successfully.')
+                : t('farmer.successMessage')}
+            </p>
             <p className="text-muted">{t('common.date')}: {formatDisplayDate(reportDate)} | {t('farmer.week')} {weekLabel} | {t('flock.farm')}: {farmId}</p>
-            <button className="btn btn--primary btn--full" style={{ marginTop: 20 }} onClick={handleReset}>
-              {t('common.save')}
-            </button>
-          </div>
+            {(todayReport && todayReport.submissionVersion === 1 && todayReport.submissionMethod !== 'HISTORICAL_IMPORT') && (
+              <button className="btn btn--primary btn--full" style={{ marginTop: 20 }} onClick={handleStartCorrection}>
+                {t('farmer.submitCorrection')}
+              </button>
+            )}
+          {renderModals()}
+        </div>
         </main>
       </div>
     );
@@ -1658,14 +1734,7 @@ export function FarmerFormPage() {
           </>
         )}
       </main>
-      <ReportStatusModal
-        isOpen={showStatusModal}
-        onClose={() => {
-          setShowStatusModal(false);
-          setHasDismissedModal(true);
-        }}
-        submissionVersion={todayReport?.submissionVersion || 1}
-      />
+      {renderModals()}
       <OverwriteConfirmationModal
         isOpen={showOverwriteModal}
         onClose={() => setShowOverwriteModal(false)}
