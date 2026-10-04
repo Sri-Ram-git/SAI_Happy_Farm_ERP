@@ -180,8 +180,8 @@ export class ReportsService {
 
     const payload = { farms: farmsPayload };
 
-    // Resolve project root: __dirname = backend/src/services → go up 3 levels to project root
-    const projectRoot = path.resolve(__dirname, '..', '..', '..');
+    // Resolve the backend root from the compiled service directory (backend/dist/services).
+    const projectRoot = path.resolve(__dirname, '..', '..');
     const tmpDir = path.join(projectRoot, 'scratch');
     if (!fs.existsSync(tmpDir)) {
       fs.mkdirSync(tmpDir, { recursive: true });
