@@ -1,306 +1,329 @@
+#!/usr/bin/env python3
+"""
+generate_production_curve.py
+============================
+Generates the authoritative Production Curve Excel export (.xlsx) from JSON input.
+TABLE-ONLY FORMAT: ZERO CHARTS.
+Reproduces the exact table structure, rows, row colors, and week-start column highlighting
+from the reference production workbook.
+
+Called by: backend/src/services/reports.service.ts  generateProductionCurveExport()
+Usage:     python generate_production_curve.py <input_json_path> <output_xlsx_path>
+
+Rows:
+  1. DATE
+  2. WEEKS
+  3. NO.OF BIRDS
+  4. PRODUCTION
+  5. SELECTION
+  6. SELECTION %
+  7. DAMAGE/REJECTED
+  8. Mortality
+  9. Temp
+  10. Feed Kgs
+  11. Feed Gms/Bird
+  12. STD %
+  13. ACT %
+"""
+
 import sys
-import json
 import os
-import openpyxl
-from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-from openpyxl.chart import LineChart, BarChart, Reference
+import json
+import math
+import datetime
 
-# Standard Production Curves Data
-CF_STD_CURVE = [
-    (20, 0), (21, 2), (22, 8), (23, 22), (24, 42), (25, 62), (26, 76), (27, 83), (28, 85),
-    (29, 85.5), (30, 85), (31, 84.5), (32, 84), (33, 83), (34, 82), (35, 81), (36, 80),
-    (37, 79), (38, 78), (39, 77), (40, 76), (41, 74.5), (42, 73), (43, 71.5), (44, 70),
-    (45, 68.5), (46, 67), (47, 65.5), (48, 64), (49, 62), (50, 60), (51, 58), (52, 56),
-    (53, 54), (54, 52), (55, 50), (56, 48), (57, 46), (58, 44), (59, 42), (60, 40),
-    (61, 38), (62, 36), (63, 34), (64, 32), (65, 30)
-]
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
-FR_STD_CURVE = [
-    (20, 0), (21, 3), (22, 12), (23, 30), (24, 52), (25, 70), (26, 80), (27, 84), (28, 85),
-    (29, 84.5), (30, 84), (31, 83), (32, 82), (33, 81), (34, 80), (35, 79), (36, 77.5),
-    (37, 76), (38, 75), (39, 73.5), (40, 72), (41, 70.5), (42, 69), (43, 67.5), (44, 66),
-    (45, 64.5), (46, 63), (47, 61.5), (48, 60), (49, 58), (50, 56), (51, 54), (52, 52),
-    (53, 50), (54, 48), (55, 46), (56, 44), (57, 42), (58, 40), (59, 38), (60, 36),
-    (61, 34), (62, 32), (63, 30), (64, 28), (65, 26)
-]
+# ────────────────────────────────────────────────────────
+# Reference Standard Production Curves (from reference workbook CF STD / FR STD)
+# ────────────────────────────────────────────────────────
 
-def get_std_prod_pct(curve_type, age_weeks):
+CF_STD_CURVE = {
+    16: 0.0, 17: 0.0, 18: 0.0, 19: 3.19, 20: 17.96, 21: 46.5, 22: 73.82, 23: 85.25, 24: 87.46,
+    25: 90.71, 26: 89.11, 27: 89.24, 28: 88.83, 29: 89.04, 30: 90.37, 31: 90.42, 32: 90.93,
+    33: 90.27, 34: 88.83, 35: 91.19, 36: 89.13, 37: 89.78, 38: 90.26, 39: 89.7, 40: 87.02,
+    41: 88.63, 42: 88.03, 43: 88.02, 44: 87.26, 45: 87.56, 46: 87.02, 47: 86.01, 48: 86.56,
+    49: 86.51, 50: 85.95, 51: 85.54, 52: 85.03, 53: 84.56, 54: 84.0, 55: 84.23, 56: 84.23,
+    57: 83.21, 58: 83.15, 59: 83.02, 60: 82.0, 61: 82.58, 62: 82.54, 63: 82.01, 64: 81.01,
+    65: 81.25, 66: 81.75, 67: 81.54, 68: 81.58, 69: 80.47, 70: 80.45, 71: 80.98, 72: 80.56,
+    73: 79.54, 74: 79.54, 75: 79.25, 76: 78.25, 77: 78.85, 78: 78.24, 79: 78.01, 80: 78.14
+}
+
+FR_STD_CURVE = {
+    16: 0.0, 17: 0.0, 18: 0.0, 19: 0.0, 20: 0.0, 21: 3.54, 22: 18.66, 23: 46.59, 24: 70.4,
+    25: 82.31, 26: 83.2, 27: 84.83, 28: 89.87, 29: 90.06, 30: 89.25, 31: 89.4, 32: 87.25,
+    33: 87.97, 34: 86.65, 35: 86.0, 36: 86.21, 37: 85.01, 38: 85.21, 39: 84.01, 40: 84.21,
+    41: 83.21, 42: 82.1, 43: 80.53, 44: 84.64, 45: 81.64, 46: 82.13, 47: 79.83, 48: 80.72,
+    49: 82.6, 50: 83.49, 51: 83.5, 52: 83.57, 53: 84.59, 54: 85.59, 55: 85.87, 56: 86.25,
+    57: 86.98, 58: 85.26, 59: 85.4, 60: 84.26, 61: 84.01, 62: 84.7, 63: 84.25, 64: 83.02,
+    65: 83.41, 66: 83.21, 67: 83.04, 68: 82.01, 69: 82.01, 70: 82.65, 71: 82.98, 72: 82.1,
+    73: 81.02, 74: 81.54, 75: 80.29, 76: 80.25, 77: 79.02, 78: 79.54, 79: 78.01, 80: 78.2
+}
+
+def get_std_pct(curve_type, age_weeks):
+    """
+    Interpolate standard production % using daily increments matching reference workbook.
+    age_weeks is in W.D format (e.g. 21.0, 21.1, ..., 21.6).
+    Daily increment = (Std(W+1) - Std(W)) / 7.
+    Std(W.D) = Std(W) + D * daily_increment.
+    """
     curve = CF_STD_CURVE if curve_type == 'CF_STD' else FR_STD_CURVE
-    if age_weeks <= curve[0][0]:
-        return curve[0][1]
-    if age_weeks >= curve[-1][0]:
-        return curve[-1][1]
-    
-    for i in range(len(curve) - 1):
-        w1, p1 = curve[i]
-        w2, p2 = curve[i+1]
-        if w1 <= age_weeks <= w2:
-            frac = (age_weeks - w1) / (w2 - w1)
-            return p1 + frac * (p2 - p1)
-    return 0.0
+    w_int = int(age_weeks)
+    d_frac = round((age_weeks - w_int) * 10)  # 0 to 6
+    if d_frac < 0 or d_frac > 6:
+        d_frac = min(6, max(0, round((age_weeks - w_int) * 7)))
 
-def build_workbook(payload):
-    wb = openpyxl.Workbook()
-    wb.remove(wb.active) # Remove default sheet
+    weeks_list = sorted(curve.keys())
+    if w_int <= weeks_list[0]:
+        base_val = curve[weeks_list[0]]
+        next_val = curve.get(weeks_list[0] + 1, base_val)
+    elif w_int >= weeks_list[-1]:
+        return curve[weeks_list[-1]]
+    else:
+        base_val = curve.get(w_int, 0.0)
+        next_val = curve.get(w_int + 1, base_val)
 
-    # 1. CF STD Sheet
-    ws_cf = wb.create_sheet(title="CF STD")
-    ws_cf.append(["Age (Weeks)", "Prod %"])
-    for w, p in CF_STD_CURVE:
-        ws_cf.append([w, p])
+    inc = (next_val - base_val) / 7.0
+    val = base_val + d_frac * inc
+    return round(max(0.0, val), 2)
 
-    # 2. FR STD Sheet
-    ws_fr = wb.create_sheet(title="FR STD")
-    ws_fr.append(["Age (Weeks)", "Prod %"])
-    for w, p in FR_STD_CURVE:
-        ws_fr.append([w, p])
 
-    # Fonts & Styles
-    font_calibri = Font(name="Calibri", size=11)
-    font_bold = Font(name="Calibri", size=11, bold=True)
-    align_center = Alignment(horizontal="center", vertical="center")
-    align_left = Alignment(horizontal="left", vertical="center")
-    yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-    thin_border_side = Side(border_style="thin", color="D3D3D3")
-    thin_border = Border(left=thin_border_side, right=thin_border_side, top=thin_border_side, bottom=thin_border_side)
+# ────────────────────────────────────────────────────────
+# Styles Matching Reference Production Sheet
+# ────────────────────────────────────────────────────────
 
-    farms_data = payload.get("farms", [])
+FILL_WEEK_HEADER = PatternFill(start_color='F8CBAD', end_color='F8CBAD', fill_type='solid')  # Solid Peach for week-start cell
+FILL_WEEK_COL    = PatternFill(start_color='FCE4D6', end_color='FCE4D6', fill_type='solid')  # Soft Peach for week-start column
+FILL_PURPLE      = PatternFill(start_color='7030A0', end_color='7030A0', fill_type='solid')  # Deep Purple for SELECTION %
+FILL_CYAN        = PatternFill(start_color='DDEBF7', end_color='DDEBF7', fill_type='solid')  # Light Blue for Feed Gms/Bird
+FILL_YELLOW      = PatternFill(start_color='FFFF00', end_color='FFFF00', fill_type='solid')  # Yellow for ACT %
+FILL_WHITE       = PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid')
 
-    for farm in farms_data:
-        farm_id = str(farm.get("farmId", "FARM")).strip()
-        farm_name = str(farm.get("farmName", farm_id)).strip() # Worksheet name
-        sheet_title = farm_name[:31] if farm_name else "FARM"
-        
-        ws = wb.create_sheet(title=sheet_title)
+FONT_BOLD_BLACK  = Font(name='Calibri', size=11, bold=True, color='000000')
+FONT_REG_BLACK   = Font(name='Calibri', size=11, bold=False, color='000000')
+FONT_BOLD_YELLOW = Font(name='Calibri', size=11, bold=True, color='FFFF00')
+FONT_BOLD_RED    = Font(name='Calibri', size=11, bold=True, color='FF0000')
 
-        # Label definitions in Column B starting Row 25
-        labels = [
-            (25, "Date"),
-            (26, "WEEKS"),
-            (27, "NO.OF BIRDS"),
-            (28, "PRODUCTION"),
-            (29, "SELECTION"),
-            (30, "SELECTION %"),
-            (31, "DAMAGE/REJECTED"),
-            (32, "Mortality"),
-            (33, "Temp"),
-            (34, "Feed Kgs"),
-            (35, "Feed Gms/Bird"),
-            (36, "STD %"),
-            (37, "ACT %"),
+BORDER_THIN = Border(
+    left=Side(style='thin', color='000000'),
+    right=Side(style='thin', color='000000'),
+    top=Side(style='thin', color='000000'),
+    bottom=Side(style='thin', color='000000'),
+)
+BORDER_WEEK_START = Border(
+    left=Side(style='medium', color='000000'),
+    right=Side(style='thin', color='000000'),
+    top=Side(style='thin', color='000000'),
+    bottom=Side(style='thin', color='000000'),
+)
+
+ALIGN_CENTER = Alignment(horizontal='center', vertical='center')
+ALIGN_LEFT   = Alignment(horizontal='left', vertical='center')
+
+ROW_LABELS = [
+    'DATE',
+    'WEEKS',
+    'NO.OF BIRDS',
+    'PRODUCTION',
+    'SELECTION',
+    'SELECTION %',
+    'DAMAGE/REJECTED',
+    'Mortality',
+    'Temp',
+    'Feed Kgs',
+    'Feed Gms/Bird',
+    'STD %',
+    'ACT %',
+]
+
+
+def build_farm_sheet(wb, farm):
+    farm_name = farm.get('farmName', farm.get('farmId', 'Unknown'))
+    reports = farm.get('reports', [])
+    curve_type = farm.get('productionCurve', 'CF_STD')
+    initial_birds = farm.get('initialBirds', 1200)
+
+    # Sanitize sheet title (Excel max 31 chars)
+    sheet_title = farm_name[:31]
+    for ch in ['/', '\\', '*', '?', '[', ']', ':']:
+        sheet_title = sheet_title.replace(ch, '-')
+    if sheet_title in wb.sheetnames:
+        sheet_title = sheet_title[:28] + '_' + str(len(wb.sheetnames))
+    ws = wb.create_sheet(title=sheet_title)
+
+    # ZERO CHARTS - purely the production table
+
+    # Freeze panes: freeze Column A so metric labels stay visible on horizontal scroll
+    ws.freeze_panes = 'B1'
+
+    # Column A width (ample space to prevent clipping of 'DAMAGE/REJECTED' and 'Feed Gms/Bird')
+    ws.column_dimensions['A'].width = 21.5
+
+    # Populate Column A labels (Rows 1 to 13)
+    for idx, label in enumerate(ROW_LABELS):
+        r = idx + 1
+        cell = ws.cell(row=r, column=1, value=label)
+        cell.alignment = ALIGN_LEFT
+        cell.border = BORDER_THIN
+        ws.row_dimensions[r].height = 20.0
+
+        if label == 'STD %':
+            cell.font = FONT_BOLD_RED
+            cell.fill = FILL_WHITE
+        elif label == 'ACT %':
+            cell.font = FONT_BOLD_BLACK
+            cell.fill = FILL_YELLOW
+        elif label == 'SELECTION %':
+            cell.font = FONT_BOLD_BLACK
+            cell.fill = FILL_WHITE
+        elif label == 'Feed Gms/Bird':
+            cell.font = FONT_BOLD_BLACK
+            cell.fill = FILL_WHITE
+        else:
+            cell.font = FONT_BOLD_BLACK
+            cell.fill = FILL_WHITE
+
+    if not reports:
+        return
+
+    # Sort reports chronologically
+    reports.sort(key=lambda r: r.get('submissionDate', ''))
+
+    # Populate Data Columns (B onwards)
+    for col_idx, rep in enumerate(reports):
+        col = col_idx + 2
+        col_letter = get_column_letter(col)
+        ws.column_dimensions[col_letter].width = 12.0
+
+        date_str = rep.get('submissionDate', '')
+        age_weeks = float(rep.get('ageWeeks', 0) or 0)
+        birds = rep.get('openingBirdCount') or initial_birds
+        prod = rep.get('eggsProduced')
+        sel = rep.get('selectionEggs')
+        mort = rep.get('mortality')
+        temp = rep.get('temperature')
+        feed = rep.get('feedKg')
+
+        # Detect week start dynamically (whole number age: 20, 21, 22...)
+        is_week_start = (round(age_weeks, 2) % 1 == 0) or (abs(age_weeks - round(age_weeks)) < 0.01)
+
+        # Parse date to date object for Excel date format
+        date_obj = None
+        if date_str:
+            try:
+                date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+            except:
+                date_obj = date_str
+
+        # Calculations (same column aligned, zero-division safe)
+        damage_rej = None
+        if prod is not None and sel is not None:
+            damage_rej = max(0, prod - sel)
+
+        sel_pct = None
+        if prod and prod > 0 and sel is not None:
+            sel_pct = round((sel / prod) * 100, 2)
+
+        feed_gms = None
+        if birds and birds > 0 and feed is not None:
+            feed_gms = int(round((feed * 1000) / birds))
+
+        act_pct = None
+        if birds and birds > 0 and prod is not None:
+            act_pct = round((prod / birds) * 100, 2)
+
+        std_pct = get_std_pct(curve_type, age_weeks)
+
+        # Week display: integer for week start (21), decimal for day offset (21.1)
+        week_val = int(round(age_weeks)) if is_week_start else round(age_weeks, 1)
+
+        border = BORDER_WEEK_START if is_week_start else BORDER_THIN
+        base_fill = FILL_WEEK_COL if is_week_start else FILL_WHITE
+
+        # Values mapping for rows 1 to 13
+        row_data = [
+            # Row 1: DATE
+            (date_obj, 'dd-mmm', FONT_BOLD_BLACK, base_fill),
+            # Row 2: WEEKS
+            (week_val, 'General', FONT_BOLD_BLACK, FILL_WEEK_HEADER if is_week_start else FILL_WHITE),
+            # Row 3: NO.OF BIRDS
+            (birds, '#,##0', FONT_REG_BLACK, base_fill),
+            # Row 4: PRODUCTION
+            (prod if prod is not None else '', '#,##0', FONT_REG_BLACK, base_fill),
+            # Row 5: SELECTION
+            (sel if sel is not None else '', '#,##0', FONT_REG_BLACK, base_fill),
+            # Row 6: SELECTION %
+            (sel_pct if sel_pct is not None else '', '0.00', FONT_BOLD_YELLOW, FILL_PURPLE),
+            # Row 7: DAMAGE/REJECTED
+            (damage_rej if damage_rej is not None else '', '#,##0', FONT_REG_BLACK, base_fill),
+            # Row 8: Mortality (blank if 0 or None, matching reference sheet)
+            (mort if mort and mort > 0 else '', 'General', FONT_REG_BLACK, base_fill),
+            # Row 9: Temp
+            (temp if temp is not None else '', '0', FONT_REG_BLACK, base_fill),
+            # Row 10: Feed Kgs
+            (feed if feed is not None else '', '#,##0', FONT_REG_BLACK, base_fill),
+            # Row 11: Feed Gms/Bird
+            (feed_gms if feed_gms is not None else '', '0', FONT_BOLD_BLACK, FILL_CYAN),
+            # Row 12: STD %
+            (std_pct, '0.00', FONT_BOLD_RED, base_fill),
+            # Row 13: ACT %
+            (act_pct if act_pct is not None else '', '0.00', FONT_BOLD_BLACK, FILL_YELLOW),
         ]
 
-        for r_idx, label in labels:
-            cell = ws.cell(row=r_idx, column=2, value=label)
-            cell.font = font_bold if r_idx in (25, 26, 37) else font_calibri
-            cell.alignment = align_left
-            if r_idx == 37:
-                cell.fill = yellow_fill
+        for idx, (val, fmt, font, fill) in enumerate(row_data):
+            r = idx + 1
+            cell = ws.cell(row=r, column=col, value=val)
+            cell.number_format = fmt
+            cell.font = font
+            cell.fill = fill
+            cell.alignment = ALIGN_CENTER
+            cell.border = border
 
-        reports = farm.get("reports", [])
-        if not reports:
-            continue
-
-        # Sort chronologically by date
-        reports.sort(key=lambda r: r.get("submissionDate", ""))
-
-        curve_type = farm.get("productionCurve", "CF_STD")
-        initial_birds = farm.get("initialBirds", 1000)
-
-        start_col = 3 # Column C
-        last_col = start_col + len(reports) - 1
-
-        for idx, rep in enumerate(reports):
-            col = start_col + idx
-            col_letter = openpyxl.utils.get_column_letter(col)
-            
-            sub_date = rep.get("submissionDate", "")
-            # Format date as MM-DD-YY if string YYYY-MM-DD
-            if len(sub_date) == 10 and sub_date[4] == '-' and sub_date[7] == '-':
-                parts = sub_date.split('-')
-                formatted_date = f"{parts[1]}-{parts[2]}-{parts[0][2:]}"
-            else:
-                formatted_date = sub_date
-
-            age_weeks = rep.get("ageWeeks", 17.0 + idx * 0.1)
-
-            # Row 25: Date
-            c25 = ws.cell(row=25, column=col, value=formatted_date)
-            c25.font = font_calibri
-            c25.alignment = align_center
-
-            # Row 26: WEEKS
-            c26 = ws.cell(row=26, column=col, value=round(age_weeks, 1))
-            c26.font = font_bold
-            c26.alignment = align_center
-            c26.border = thin_border
-
-            # Row 27: NO.OF BIRDS
-            if idx == 0:
-                c27 = ws.cell(row=27, column=col, value=rep.get("openingBirdCount", initial_birds))
-            else:
-                prev_col_letter = openpyxl.utils.get_column_letter(col - 1)
-                c27 = ws.cell(row=27, column=col, value=f"={prev_col_letter}27-{prev_col_letter}32")
-            c27.font = font_calibri
-            c27.alignment = align_center
-            c27.border = thin_border
-
-            # Row 28: PRODUCTION
-            prod_val = rep.get("eggsProduced", None)
-            c28 = ws.cell(row=28, column=col, value=prod_val if prod_val is not None else "")
-            c28.font = font_calibri
-            c28.alignment = align_center
-            c28.border = thin_border
-
-            # Row 29: SELECTION
-            sel_val = rep.get("selectionEggs", None)
-            c29 = ws.cell(row=29, column=col, value=sel_val if sel_val is not None else "")
-            c29.font = font_calibri
-            c29.alignment = align_center
-            c29.border = thin_border
-
-            # Row 30: SELECTION %
-            c30 = ws.cell(row=30, column=col, value=f"=IF(AND(ISNUMBER({col_letter}28), {col_letter}28>0, ISNUMBER({col_letter}29)), ({col_letter}29/{col_letter}28)*100, \"\")")
-            c30.font = font_calibri
-            c30.alignment = align_center
-            c30.number_format = "0.00"
-            c30.border = thin_border
-
-            # Row 31: DAMAGE/REJECTED
-            if prod_val is not None and sel_val is not None:
-                dmg_val = max(0, prod_val - sel_val)
-            else:
-                dmg_val = ""
-            c31 = ws.cell(row=31, column=col, value=dmg_val)
-            c31.font = font_calibri
-            c31.alignment = align_center
-            c31.border = thin_border
-
-            # Row 32: Mortality
-            mort_val = rep.get("mortality", None)
-            c32 = ws.cell(row=32, column=col, value=mort_val if (mort_val is not None and mort_val > 0) else "")
-            c32.font = font_calibri
-            c32.alignment = align_center
-            c32.border = thin_border
-
-            # Row 33: Temp
-            temp_val = rep.get("temperature", None)
-            c33 = ws.cell(row=33, column=col, value=temp_val if temp_val is not None else "")
-            c33.font = font_calibri
-            c33.alignment = align_center
-            c33.border = thin_border
-
-            # Row 34: Feed Kgs
-            feed_val = rep.get("feedKg", None)
-            c34 = ws.cell(row=34, column=col, value=feed_val if feed_val is not None else "")
-            c34.font = font_calibri
-            c34.alignment = align_center
-            c34.border = thin_border
-
-            # Row 35: Feed Gms/Bird
-            c35 = ws.cell(row=35, column=col, value=f"=IF(AND(ISNUMBER({col_letter}27), {col_letter}27>0, ISNUMBER({col_letter}34)), ({col_letter}34*1000)/{col_letter}27, \"\")")
-            c35.font = font_calibri
-            c35.alignment = align_center
-            c35.number_format = "0.00"
-            c35.border = thin_border
-
-            # Row 36: STD %
-            std_pct = get_std_prod_pct(curve_type, age_weeks)
-            c36 = ws.cell(row=36, column=col, value=round(std_pct, 2))
-            c36.font = font_calibri
-            c36.alignment = align_center
-            c36.number_format = "0.00"
-            c36.border = thin_border
-
-            # Row 37: ACT %
-            c37 = ws.cell(row=37, column=col, value=f"=IF(AND(ISNUMBER({col_letter}27), {col_letter}27>0, ISNUMBER({col_letter}28)), ({col_letter}28/{col_letter}27)*100, \"\")")
-            c37.font = font_bold
-            c37.alignment = align_center
-            c37.fill = yellow_fill
-            c37.number_format = "0.00"
-            c37.border = thin_border
-
-        # Adjust Column Widths
-        ws.column_dimensions['A'].width = 3
-        ws.column_dimensions['B'].width = 22
-        for c in range(start_col, last_col + 1):
-            ws.column_dimensions[openpyxl.utils.get_column_letter(c)].width = 12
-
-        # 1. Main Production Chart (Top at B2)
-        main_chart = LineChart()
-        main_chart.title = f"{sheet_title} - PRODUCTION"
-        main_chart.style = 13
-        main_chart.height = 10
-        main_chart.width = 18
-
-        xvalues = Reference(ws, min_col=start_col, min_row=26, max_col=last_col, max_row=26)
-        act_series = Reference(ws, min_col=2, min_row=37, max_col=last_col, max_row=37)
-        std_series = Reference(ws, min_col=2, min_row=36, max_col=last_col, max_row=36)
-
-        main_chart.add_data(act_series, titles_from_data=True, from_rows=True)
-        main_chart.add_data(std_series, titles_from_data=True, from_rows=True)
-        main_chart.set_categories(xvalues)
-        ws.add_chart(main_chart, "B2")
-
-        # 2. Lower Chart 1: Selection Curve (B39)
-        sel_chart = LineChart()
-        sel_chart.title = "SELECTION CURVE"
-        sel_chart.height = 7
-        sel_chart.width = 11
-        sel_series = Reference(ws, min_col=2, min_row=30, max_col=last_col, max_row=30)
-        sel_chart.add_data(sel_series, titles_from_data=True, from_rows=True)
-        sel_chart.set_categories(xvalues)
-        ws.add_chart(sel_chart, "B39")
-
-        # 3. Lower Chart 2: Feed Gms vs Production (I39)
-        feed_chart = LineChart()
-        feed_chart.title = "FEED GMS vs PRODUCTION"
-        feed_chart.height = 7
-        feed_chart.width = 11
-        feed_series = Reference(ws, min_col=2, min_row=35, max_col=last_col, max_row=35)
-        feed_chart.add_data(feed_series, titles_from_data=True, from_rows=True)
-        feed_chart.add_data(act_series, titles_from_data=True, from_rows=True)
-        feed_chart.set_categories(xvalues)
-        ws.add_chart(feed_chart, "I39")
-
-        # 4. Lower Chart 3: Production vs Temperature (P39)
-        temp_chart = BarChart()
-        temp_chart.title = "PRODUCTION vs TEMPERATURE"
-        temp_chart.height = 7
-        temp_chart.width = 11
-        temp_series = Reference(ws, min_col=2, min_row=33, max_col=last_col, max_row=33)
-        temp_chart.add_data(temp_series, titles_from_data=True, from_rows=True)
-        temp_chart.add_data(act_series, titles_from_data=True, from_rows=True)
-        temp_chart.set_categories(xvalues)
-        ws.add_chart(temp_chart, "P39")
-
-    # Safety Validation: Verify worksheets and references
-    for ws_check in wb.worksheets:
-        for chart in ws_check._charts:
-            for s in chart.series:
-                ref_str = s.val.numRef.f if (hasattr(s, 'val') and s.val and hasattr(s.val, 'numRef') and s.val.numRef) else str(getattr(s, 'val', s))
-                # Ensure chart references ONLY its own worksheet or valid sheet title
-                if "!" in ref_str:
-                    sheet_in_ref = ref_str.split("!")[0].replace("'", "")
-                    if sheet_in_ref != ws_check.title:
-                        raise ValueError(f"Cross-farm reference detected in chart! Sheet '{ws_check.title}' references '{sheet_in_ref}'.")
-
-    return wb
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python generate_production_curve.py <input_json_path> <output_xlsx_path>", file=sys.stderr)
+        print('Usage: python generate_production_curve.py <input.json> <output.xlsx>', file=sys.stderr)
         sys.exit(1)
 
-    input_json_path = sys.argv[1]
-    output_xlsx_path = sys.argv[2]
+    input_path = sys.argv[1]
+    output_path = sys.argv[2]
 
-    with open(input_json_path, 'r', encoding='utf-8') as f:
+    with open(input_path, 'r', encoding='utf-8') as f:
         payload = json.load(f)
 
-    wb = build_workbook(payload)
-    wb.save(output_xlsx_path)
-    print(f"SUCCESS: {output_xlsx_path}")
+    farms = payload.get('farms', [])
+    if not farms:
+        print('ERROR: No farms in input payload', file=sys.stderr)
+        sys.exit(1)
 
-if __name__ == "__main__":
+    wb = Workbook()
+    if 'Sheet' in wb.sheetnames:
+        del wb['Sheet']
+
+    for farm in farms:
+        try:
+            build_farm_sheet(wb, farm)
+        except Exception as e:
+            farm_name = farm.get('farmName', farm.get('farmId', 'Unknown'))
+            print('WARNING: Failed to build sheet for {}: {}'.format(farm_name, e), file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            sheet_title = farm_name[:31]
+            for ch in ['/', '\\', '*', '?', '[', ']', ':']:
+                sheet_title = sheet_title.replace(ch, '-')
+            if sheet_title not in wb.sheetnames:
+                ws = wb.create_sheet(title=sheet_title)
+                ws['A1'] = 'Error generating data for {}: {}'.format(farm_name, str(e))
+
+    if len(wb.sheetnames) == 0:
+        ws = wb.create_sheet(title='No Data')
+        ws['A1'] = 'No farm data available for the selected date range.'
+
+    wb.save(output_path)
+    print('SUCCESS: Table-only workbook saved to {}'.format(output_path))
+
+
+if __name__ == '__main__':
     main()
