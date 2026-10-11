@@ -85,6 +85,7 @@ export function DashboardMetricDetailModal({
   const farmLabel = farmFilter ? `Farm ${farmFilter}` : 'All Authorized Farms';
   const flockLabel = flockFilter ? `Flock ${flockFilter}` : 'All Flocks';
   const rangeLabel = days === 1 ? 'Today' : `Last ${days} Days`;
+  const modalFarms = farmFilter ? activeFarms.filter((f) => f.farmId === farmFilter) : activeFarms;
 
   return (
     <div className="chart-modal-backdrop" onClick={onClose} style={{ zIndex: 9999 }}>
@@ -161,7 +162,7 @@ export function DashboardMetricDetailModal({
 
             {metricType === 'birds' && (
               <button className={`chart-modal-tab ${activeTab === 'birds_list' ? 'chart-modal-tab--active' : ''}`} onClick={() => setActiveTab('birds_list')}>
-                <Users size={15} /> <span>Population Breakdown ({activeFarms.length} Farms)</span>
+                <Users size={15} /> <span>Population Breakdown ({modalFarms.length} {modalFarms.length === 1 ? 'Farm' : 'Farms'})</span>
               </button>
             )}
 
@@ -297,7 +298,7 @@ export function DashboardMetricDetailModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {activeFarms.map((f) => {
+                  {modalFarms.map((f) => {
                     const inv = farmInventories.get(f.farmId);
                     const lastRep = reports.filter(r => r.farmId === f.farmId).pop();
                     const liveBirds = inv?.currentBirdCount ?? lastRep?.closingBirdCount ?? (f as any).currentBirds ?? 0;

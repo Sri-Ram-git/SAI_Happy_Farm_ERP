@@ -13,6 +13,7 @@ import {
   compareBySelection,
   RANKING_WEIGHTS,
   type FarmWeeklyRankingKpi,
+  calcTotalBirdPopulation,
 } from './kpiCalculations';
 
 const makeFarm = (overrides: Partial<FarmWeeklyRankingKpi>): FarmWeeklyRankingKpi => ({
@@ -351,4 +352,141 @@ describe('Supervisor Farm Performance Ranking Suite (Phase 1)', () => {
       expect(compareByFcr(farmWithNull2, farmWithNull)).toBeGreaterThan(0);
     });
   });
+
+  describe('Total Bird Population KPI Suite', () => {
+    const mockFarms = [
+      { farmId: 'AP12', name: 'Farm AP12', active: true },
+      { farmId: 'AP15', name: 'Farm AP15', active: true },
+      { farmId: 'AP16', name: 'Farm AP16', active: true },
+    ];
+
+    const mockInventories = new Map([
+      ['AP12', { currentBirdCount: 1000 }],
+      ['AP15', { currentBirdCount: 2000 }],
+      ['AP16', { currentBirdCount: 1974 }],
+    ]);
+
+    it('1. All Farms: should aggregate current bird population across all active farms without double-counting (4974 total)', () => {
+      const total = calcTotalBirdPopulation({
+        selectedFarmId: '',
+        farms: mockFarms,
+        farmInventories: mockInventories,
+      });
+      expect(total).toBe(4974);
+    });
+
+    it('2. Farm AP12: should return bird population for AP12 only (1000)', () => {
+      const total = calcTotalBirdPopulation({
+        selectedFarmId: 'AP12',
+        farms: mockFarms,
+        farmInventories: mockInventories,
+      });
+      expect(total).toBe(1000);
+    });
+
+    it('3. Farm AP15: should return bird population for AP15 only (2000)', () => {
+      const total = calcTotalBirdPopulation({
+        selectedFarmId: 'AP15',
+        farms: mockFarms,
+        farmInventories: mockInventories,
+      });
+      expect(total).toBe(2000);
+    });
+
+    it('4. Farm AP16: should return bird population for AP16 only (1974)', () => {
+      const total = calcTotalBirdPopulation({
+        selectedFarmId: 'AP16',
+        farms: mockFarms,
+        farmInventories: mockInventories,
+      });
+      expect(total).toBe(1974);
+    });
+
+    it('5. Farm Switching: should immediately return correct population when switching between farms and All Farms', () => {
+      expect(calcTotalBirdPopulation({ selectedFarmId: '', farms: mockFarms, farmInventories: mockInventories })).toBe(4974);
+      expect(calcTotalBirdPopulation({ selectedFarmId: 'AP12', farms: mockFarms, farmInventories: mockInventories })).toBe(1000);
+      expect(calcTotalBirdPopulation({ selectedFarmId: 'AP15', farms: mockFarms, farmInventories: mockInventories })).toBe(2000);
+      expect(calcTotalBirdPopulation({ selectedFarmId: 'AP16', farms: mockFarms, farmInventories: mockInventories })).toBe(1974);
+      expect(calcTotalBirdPopulation({ selectedFarmId: '', farms: mockFarms, farmInventories: mockInventories })).toBe(4974);
+    });
+
+    it('6. Filter Consistency: should remain authoritative current inventory regardless of multiple historical reports', () => {
+      const historicalReports = [
+        { farmId: 'AP12', submissionDate: '2026-10-01', closingBirdCount: 1000 },
+        { farmId: 'AP12', submissionDate: '2026-10-02', closingBirdCount: 998 },
+        { farmId: 'AP12', submissionDate: '2026-10-03', closingBirdCount: 995 },
+      ];
+      const total = calcTotalBirdPopulation({
+        selectedFarmId: 'AP12',
+        farms: mockFarms,
+        farmInventories: mockInventories,
+        historicalReports,
+      });
+      expect(total).toBe(1000);
+    });
+
+    it('7. Supervisor Access: respects supervisor assigned farms and never exposes unauthorized farm counts', () => {
+      const supervisorFarms = [
+        { farmId: 'AP12', active: true },
+        { farmId: 'AP15', active: true },
+      ];
+      const supAll = calcTotalBirdPopulation({
+        selectedFarmId: '',
+        farms: supervisorFarms,
+        farmInventories: mockInventories,
+      });
+      expect(supAll).toBe(3000);
+
+      const supAP12 = calcTotalBirdPopulation({
+        selectedFarmId: 'AP12',
+        farms: supervisorFarms,
+        farmInventories: mockInventories,
+      });
+      expect(supAP12).toBe(1000);
+
+      const supAP16 = calcTotalBirdPopulation({
+        selectedFarmId: 'AP16',
+        farms: supervisorFarms,
+        farmInventories: mockInventories,
+      });
+      expect(supAP16).toBe(0);
+    });
+
+    it('8. Fallbacks & Missing Data: correctly uses today report or latest report when inventory record is not yet loaded', () => {
+      const emptyInventories = new Map();
+      const todayReports = [
+        { farmId: 'AP12', closingBirdCount: 950 },
+      ];
+      const historicalReports = [
+        { farmId: 'AP15', closingBirdCount: 1900 },
+      ];
+      const farmsWithFallback = [
+        { farmId: 'AP12', active: true },
+        { farmId: 'AP15', active: true },
+        { farmId: 'AP16', active: true, currentBirds: 1800 },
+      ];
+
+      expect(calcTotalBirdPopulation({ selectedFarmId: 'AP12', farms: farmsWithFallback, farmInventories: emptyInventories, todayReports, historicalReports })).toBe(950);
+      expect(calcTotalBirdPopulation({ selectedFarmId: 'AP15', farms: farmsWithFallback, farmInventories: emptyInventories, todayReports, historicalReports })).toBe(1900);
+      expect(calcTotalBirdPopulation({ selectedFarmId: 'AP16', farms: farmsWithFallback, farmInventories: emptyInventories, todayReports, historicalReports })).toBe(1800);
+      expect(calcTotalBirdPopulation({ selectedFarmId: '', farms: farmsWithFallback, farmInventories: emptyInventories, todayReports, historicalReports })).toBe(950 + 1900 + 1800);
+    });
+
+    it('9. Total Flock Loss: handles 0 currentBirdCount without falling back to stale nonzero counts', () => {
+      const zeroInventory = new Map([
+        ['AP12', { currentBirdCount: 0 }],
+      ]);
+      const historicalReports = [
+        { farmId: 'AP12', closingBirdCount: 1000 },
+      ];
+      const total = calcTotalBirdPopulation({
+        selectedFarmId: 'AP12',
+        farms: [{ farmId: 'AP12', active: true, currentBirds: 1000 }],
+        farmInventories: zeroInventory,
+        historicalReports,
+      });
+      expect(total).toBe(0);
+    });
+  });
 });
+

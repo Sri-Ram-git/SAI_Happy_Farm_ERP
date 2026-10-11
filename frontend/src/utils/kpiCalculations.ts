@@ -45,6 +45,39 @@ export function getEligibleBirdCount(report: {
   return closing > 0 ? closing : 0;
 }
 
+export interface BirdPopulationParams {
+  selectedFarmId?: string;
+  farms: { farmId: string; active?: boolean; currentBirds?: number; totalBirds?: number }[];
+  farmInventories: Map<string, { currentBirdCount?: number }>;
+  todayReports?: { farmId?: string; closingBirdCount?: number | null; birdCount?: number | null }[];
+  historicalReports?: { farmId?: string; closingBirdCount?: number | null; birdCount?: number | null }[];
+}
+
+export function calcTotalBirdPopulation(params: BirdPopulationParams): number {
+  const { selectedFarmId, farms, farmInventories, todayReports = [], historicalReports = [] } = params;
+  const activeFarms = farms.filter((f) => f.active !== false);
+  const targetFarms = selectedFarmId
+    ? farms.filter((f) => f.farmId === selectedFarmId)
+    : (activeFarms.length > 0 ? activeFarms : farms);
+
+  return targetFarms.reduce((sum, farm) => {
+    const inv = farmInventories.get(farm.farmId);
+    if (inv && typeof inv.currentBirdCount === 'number') {
+      return sum + inv.currentBirdCount;
+    }
+    const farmTodayRep = todayReports.find((r) => r.farmId === farm.farmId);
+    if (farmTodayRep && (farmTodayRep.closingBirdCount != null || farmTodayRep.birdCount != null)) {
+      return sum + (farmTodayRep.closingBirdCount ?? farmTodayRep.birdCount ?? 0);
+    }
+    const farmReports = historicalReports.filter((r) => r.farmId === farm.farmId);
+    const lastRep = farmReports[farmReports.length - 1];
+    if (lastRep && (lastRep.closingBirdCount != null || lastRep.birdCount != null)) {
+      return sum + (lastRep.closingBirdCount ?? lastRep.birdCount ?? 0);
+    }
+    return sum + (farm.currentBirds || farm.totalBirds || 0);
+  }, 0);
+}
+
 export function calcProductionRate(eggsProduced: number, birdCount: number): number {
   return parseFloat((safeDivide(eggsProduced, birdCount) * 100).toFixed(1));
 }

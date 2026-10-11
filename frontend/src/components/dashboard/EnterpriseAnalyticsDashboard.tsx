@@ -25,6 +25,7 @@ import {
   calcPerformanceScore,
   evaluateFarmHealth,
   getEligibleBirdCount,
+  calcTotalBirdPopulation,
 } from '../../utils/kpiCalculations';
 import { KPI_THRESHOLDS } from '../../config/kpiThresholds';
 import { getStandardProductionAtAge } from '../../data/productionCurves';
@@ -40,6 +41,154 @@ import {
 
 function normalizeRole(role: string | undefined | null): string {
   return (role ?? '').trim().toLowerCase();
+}
+
+function FeedChartCustomTooltip({ active, payload, label }: any) {
+  if (!active || !payload || !payload.length) return null;
+  const data = payload[0]?.payload;
+  if (!data) return null;
+
+  return (
+    <div
+      style={{
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '8px',
+        padding: '10px 14px',
+        boxShadow: '0 4px 14px rgba(0, 0, 0, 0.08)',
+        fontSize: '12px',
+        minWidth: '220px',
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '8px', borderBottom: '1px solid #f1f5f9', paddingBottom: '4px' }}>
+        {data.fullDate ? formatDisplayDate(data.fullDate) : label}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#7c3aed', display: 'inline-block' }} />
+            Actual Egg Production:
+          </span>
+          <strong style={{ color: '#7c3aed' }}>
+            {data.production !== null && data.production !== undefined ? `${data.production}%` : 'No Data'}
+          </strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#0d9488', display: 'inline-block' }} />
+            Feed per Bird:
+          </span>
+          <strong style={{ color: '#0d9488' }}>
+            {data.feedPerBirdG !== null && data.feedPerBirdG !== undefined ? `${data.feedPerBirdG.toFixed(0)} g/day` : 'No Data'}
+          </strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#2563eb', display: 'inline-block' }} />
+            Total Feed:
+          </span>
+          <strong style={{ color: '#2563eb' }}>
+            {data.feedKg !== null && data.feedKg !== undefined ? `${data.feedKg.toLocaleString()} kg` : 'No Data'}
+          </strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TemperatureChartCustomTooltip({ active, payload, label }: any) {
+  if (!active || !payload || !payload.length) return null;
+  const data = payload[0]?.payload;
+  if (!data) return null;
+
+  const temp = data.tempAvg;
+  let statusText = 'Comfortable (18°C – 30°C)';
+  let statusColor = '#15803d';
+  let statusBg = '#dcfce7';
+
+  if (temp !== null && temp !== undefined) {
+    if (temp > 34) {
+      statusText = 'Extreme Heat (> 34°C)';
+      statusColor = '#dc2626';
+      statusBg = '#fee2e2';
+    } else if (temp > 30) {
+      statusText = 'Warm Spikes (30°C – 34°C)';
+      statusColor = '#d97706';
+      statusBg = '#fef3c7';
+    } else if (temp < 18) {
+      statusText = 'Cold Drop (< 18°C)';
+      statusColor = '#0284c7';
+      statusBg = '#e0f2fe';
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: '#ffffff',
+        border: '1px solid #e2e8f0',
+        borderRadius: '8px',
+        padding: '10px 14px',
+        boxShadow: '0 4px 14px rgba(0, 0, 0, 0.08)',
+        fontSize: '12px',
+        minWidth: '230px',
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ fontWeight: 700, color: '#0f172a', marginBottom: '8px', borderBottom: '1px solid #f1f5f9', paddingBottom: '4px' }}>
+        {data.fullDate ? formatDisplayDate(data.fullDate) : label}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#7c3aed', display: 'inline-block' }} />
+            Actual Egg Production:
+          </span>
+          <strong style={{ color: '#7c3aed' }}>
+            {data.production !== null && data.production !== undefined ? `${data.production}%` : 'No Data'}
+          </strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#ea580c', display: 'inline-block' }} />
+            Average Temp:
+          </span>
+          <strong style={{ color: '#ea580c' }}>
+            {data.tempAvg !== null && data.tempAvg !== undefined ? `${data.tempAvg.toFixed(1)}°C` : 'No Data'}
+          </strong>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#475569' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b', display: 'inline-block' }} />
+            Maximum Temp:
+          </span>
+          <strong style={{ color: '#f59e0b' }}>
+            {data.tempMax !== null && data.tempMax !== undefined ? `${data.tempMax.toFixed(1)}°C` : 'No Data'}
+          </strong>
+        </div>
+        <div style={{ marginTop: '4px', paddingTop: '6px', borderTop: '1px dashed #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '11px', color: '#64748b' }}>Comfort Range:</span>
+          {temp !== null && temp !== undefined ? (
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                color: statusColor,
+                background: statusBg,
+                padding: '2px 6px',
+                borderRadius: '4px',
+              }}
+            >
+              {statusText}
+            </span>
+          ) : (
+            <span style={{ fontSize: '11px', color: '#94a3b8' }}>18°C – 30°C</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 interface EnterpriseAnalyticsDashboardProps {
@@ -226,13 +375,14 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
   const missingSubmissionsPeriod = submissionMatrix.missing.length;
 
   const totalBirdsLive = useMemo(() => {
-    return (
-      Array.from(farmInventories.values()).reduce((sum, inv) => sum + inv.currentBirdCount, 0) ||
-      todayReports.reduce((sum, r) => sum + (r.closingBirdCount || r.birdCount || 0), 0) ||
-      reports.reduce((sum, r) => Math.max(sum, r.closingBirdCount || r.birdCount || 0), 0) ||
-      farms.reduce((sum, f) => sum + ((f as any).currentBirds || 0), 0)
-    );
-  }, [farmInventories, todayReports, reports, farms]);
+    return calcTotalBirdPopulation({
+      selectedFarmId,
+      farms,
+      farmInventories,
+      todayReports,
+      historicalReports: rawReports,
+    });
+  }, [selectedFarmId, farms, farmInventories, todayReports, rawReports]);
 
   const avgProd = useMemo(() => {
     if (reports.length === 0) return null;
@@ -364,7 +514,9 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
 
       const cullingCount = dayReports.reduce((s, r) => s + (r.culling ?? 0), 0);
       const mortalityCount = dayReports.reduce((s, r) => s + (r.mortality ?? 0), 0);
-      const feedKg = dayReports.reduce((s, r) => s + (r.feedKg ?? 0), 0);
+      const feedKg = dayReports.length > 0
+        ? dayReports.reduce((s, r) => s + (r.feedKg ?? 0), 0)
+        : null;
 
       const feedPerBirdG = dayReports.length > 0
         ? calcAverage(dayReports.map((r) => { const b = r.openingBirdCount || r.birdCount; return b > 0 ? (r.feedKg * 1000) / b : null; }))
@@ -400,19 +552,19 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
         cullingCount,
         submitted,
         missing,
-        feedKg: Number(feedKg.toFixed(1)),
+        feedKg: feedKg !== null ? Number(feedKg.toFixed(1)) : null,
         feedPerBirdG: feedPerBirdG !== null ? Number(feedPerBirdG.toFixed(1)) : null,
-        eggWtMin: eggWtMin !== 0 ? eggWtMin : null,
-        eggWtMax: eggWtMax !== 0 ? eggWtMax : null,
-        eggWtAvg: eggWtAvg !== 0 ? eggWtAvg : null,
-        bodyWtMin: bodyWtMin !== 0 ? bodyWtMin : null,
-        bodyWtMax: bodyWtMax !== 0 ? bodyWtMax : null,
-        bodyWtAvg: bodyWtAvg !== 0 ? bodyWtAvg : null,
+        eggWtMin: eggWtMin !== 0 && eggWtMin !== null ? Number(eggWtMin.toFixed(1)) : null,
+        eggWtMax: eggWtMax !== 0 && eggWtMax !== null ? Number(eggWtMax.toFixed(1)) : null,
+        eggWtAvg: eggWtAvg !== 0 && eggWtAvg !== null ? Number(eggWtAvg.toFixed(1)) : null,
+        bodyWtMin: bodyWtMin !== 0 && bodyWtMin !== null ? Number(bodyWtMin.toFixed(0)) : null,
+        bodyWtMax: bodyWtMax !== 0 && bodyWtMax !== null ? Number(bodyWtMax.toFixed(0)) : null,
+        bodyWtAvg: bodyWtAvg !== 0 && bodyWtAvg !== null ? Number(bodyWtAvg.toFixed(0)) : null,
         selectionCount,
         selectionPct: selectionPct !== null ? Number(selectionPct.toFixed(1)) : null,
-        tempMin: tempMin !== 0 ? tempMin : null,
-        tempMax: tempMax !== 0 ? tempMax : null,
-        tempAvg: tempAvg !== 0 ? tempAvg : null,
+        tempMin: tempMin !== null ? Number(tempMin.toFixed(1)) : null,
+        tempMax: tempMax !== null ? Number(tempMax.toFixed(1)) : null,
+        tempAvg: tempAvg !== null ? Number(tempAvg.toFixed(1)) : null,
       };
     });
   }, [startDate, endDate, reports, expectedFarms, standardCurveType, avgFlockAgeWeeks, submissionMatrix]);
@@ -694,13 +846,13 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           onClick={() => setExpandedMetric({
             type: 'feed',
             title: 'Feed Consumption & Intake per Bird',
-            sub: 'Daily feed consumed (Kg) and per-bird daily intake (Grams/bird/day)',
+            sub: 'Daily feed intake (g/day) and total feed (Kg) compared with actual production %',
           })}
         >
           <div className="ent-chart-header">
             <div>
               <h3>Feed Consumption & Intake per Bird</h3>
-              <p className="ent-chart-sub">Daily feed consumed (Kg) and per-bird daily intake (Grams/bird/day)</p>
+              <p className="ent-chart-sub">Daily feed intake (g/day) and total feed (Kg) compared with actual production %</p>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               {fcrApprox !== null && (
@@ -711,18 +863,90 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
               <Maximize2 size={16} className="ent-expand-icon" />
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={280}>
-            <ComposedChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-              <YAxis yAxisId="left" tick={{ fontSize: 12 }} unit=" Kg" />
-              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 12 }} unit=" g" />
-              <Tooltip />
-              <Legend />
-              <Area yAxisId="left" type="monotone" dataKey="feedKg" stroke="#d97706" fill="#fef3c7" name="Total Feed (Kg)" />
-              <Line yAxisId="right" type="monotone" dataKey="feedPerBirdG" stroke="#059669" strokeWidth={2} name="Feed / Bird (g)" dot={{ r: 3 }} connectNulls />
-            </ComposedChart>
-          </ResponsiveContainer>
+
+          {/* Primary Comparison Chart: Actual Egg Production vs Feed Intake per Bird */}
+          <div style={{ width: '100%', height: 180 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }} syncId="feedChartSync">
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#64748b' }} minTickGap={16} />
+                <YAxis
+                  yAxisId="feedPerBird"
+                  orientation="left"
+                  tick={{ fontSize: 11, fill: '#0d9488' }}
+                  unit=" g"
+                  width={44}
+                />
+                <YAxis
+                  yAxisId="prod"
+                  orientation="right"
+                  domain={[0, 100]}
+                  tick={{ fontSize: 11, fill: '#7c3aed' }}
+                  unit="%"
+                  width={38}
+                />
+                <Tooltip content={<FeedChartCustomTooltip />} />
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: 2 }} iconType="circle" iconSize={8} />
+                <Line
+                  yAxisId="feedPerBird"
+                  type="monotone"
+                  dataKey="feedPerBirdG"
+                  stroke="#0d9488"
+                  strokeWidth={2}
+                  name="Feed per Bird (g/day)"
+                  dot={{ r: 2.5, fill: '#0d9488' }}
+                  activeDot={{ r: 4 }}
+                  connectNulls
+                />
+                <Line
+                  yAxisId="prod"
+                  type="monotone"
+                  dataKey="production"
+                  stroke="#7c3aed"
+                  strokeWidth={2.5}
+                  name="Actual Egg Production (%)"
+                  dot={{ r: 3, fill: '#7c3aed' }}
+                  activeDot={{ r: 5 }}
+                  connectNulls
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Compact Secondary Trend: Total Daily Feed Consumed (Kg) */}
+          <div style={{ width: '100%', height: 85, marginTop: '6px', borderTop: '1px solid #f1f5f9', paddingTop: '4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px', paddingLeft: '4px', paddingRight: '4px' }}>
+              <span style={{ fontSize: '10px', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Total Feed Consumed (Kg)
+              </span>
+              <span style={{ fontSize: '10px', color: '#64748b' }}>
+                Period Total: <strong style={{ color: '#2563eb' }}>{totalFeedKg.toLocaleString()} Kg</strong>
+              </span>
+            </div>
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartData} margin={{ top: 2, right: 54, left: 0, bottom: 0 }} syncId="feedChartSync">
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} minTickGap={16} />
+                <YAxis
+                  yAxisId="feedKg"
+                  orientation="left"
+                  tick={{ fontSize: 10, fill: '#2563eb' }}
+                  unit=" kg"
+                  width={44}
+                />
+                <Tooltip content={<FeedChartCustomTooltip />} />
+                <Bar
+                  yAxisId="feedKg"
+                  dataKey="feedKg"
+                  fill="#93c5fd"
+                  stroke="#2563eb"
+                  strokeWidth={1}
+                  radius={[2, 2, 0, 0]}
+                  name="Total Feed (Kg)"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
         </div>
 
         {/* GRAPH 4: EGG SELECTION (SUPERVISOR) OR EGG QUALITY & WEIGHT (ADMIN) */}
@@ -806,28 +1030,30 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
           onClick={() => setExpandedMetric({
             type: 'temperature',
             title: 'Environmental Temperature Monitoring',
-            sub: 'Daily temperature range (°C) with acceptable limits (18°C – 30°C)',
+            sub: 'Daily temperature range (°C) with comfort limits (18°C – 30°C) compared with actual production %',
           })}
         >
           <div className="ent-chart-header">
             <div>
               <h3>Environmental Temperature Monitoring</h3>
-              <p className="ent-chart-sub">Daily temperature range (°C) with acceptable limits (18°C – 30°C)</p>
+              <p className="ent-chart-sub">Daily temperature range (°C) with comfort limits (18°C – 30°C) compared with actual production %</p>
             </div>
             <Maximize2 size={16} className="ent-expand-icon" />
           </div>
           <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-              <YAxis domain={[10, 45]} tick={{ fontSize: 12 }} unit="°C" />
-              <Tooltip />
-              <Legend />
-              <ReferenceLine y={30} stroke="#dc2626" strokeDasharray="3 3" label={{ value: 'Max Comfort (30°C)', fill: '#dc2626', fontSize: 10 }} />
-              <ReferenceLine y={18} stroke="#0284c7" strokeDasharray="3 3" label={{ value: 'Min Comfort (18°C)', fill: '#0284c7', fontSize: 10 }} />
-              <Area type="monotone" dataKey="tempMax" stroke="#f59e0b" fill="#fef3c7" name="Max Temp (°C)" />
-              <Line type="monotone" dataKey="tempAvg" stroke="#ea580c" strokeWidth={2} name="Avg Temp (°C)" dot={{ r: 3 }} connectNulls />
-            </AreaChart>
+            <ComposedChart data={chartData} margin={{ top: 10, right: 16, left: 0, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#64748b' }} minTickGap={16} />
+              <YAxis yAxisId="left" domain={[10, 45]} tick={{ fontSize: 11, fill: '#ea580c' }} unit="°C" width={42} />
+              <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ fontSize: 11, fill: '#7c3aed' }} unit="%" width={38} />
+              <Tooltip content={<TemperatureChartCustomTooltip />} />
+              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: 4 }} iconType="circle" iconSize={8} />
+              <ReferenceLine yAxisId="left" y={30} stroke="#f87171" strokeDasharray="4 4" strokeWidth={1.2} label={{ value: '30°C Max Comfort', position: 'insideTopLeft', fill: '#dc2626', fontSize: 10, fontWeight: 500 }} />
+              <ReferenceLine yAxisId="left" y={18} stroke="#38bdf8" strokeDasharray="4 4" strokeWidth={1.2} label={{ value: '18°C Min Comfort', position: 'insideBottomLeft', fill: '#0284c7', fontSize: 10, fontWeight: 500 }} />
+              <Line yAxisId="left" type="monotone" dataKey="tempMax" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 4" name="Maximum Temperature (°C)" dot={{ r: 2, fill: '#f59e0b' }} connectNulls />
+              <Line yAxisId="left" type="monotone" dataKey="tempAvg" stroke="#ea580c" strokeWidth={2.2} name="Average Temperature (°C)" dot={{ r: 3, fill: '#ea580c' }} activeDot={{ r: 5 }} connectNulls />
+              <Line yAxisId="right" type="monotone" dataKey="production" stroke="#7c3aed" strokeWidth={2.5} name="Actual Egg Production (%)" dot={{ r: 3, fill: '#7c3aed' }} activeDot={{ r: 5 }} connectNulls />
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
 
@@ -929,18 +1155,49 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
               case 'feed':
                 return (
                   <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
-                    <ResponsiveContainer width="100%" height={chartHeight}>
-                      <ComposedChart data={chartData} margin={chartMargin}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                        <XAxis dataKey="date" tick={axisTick} />
-                        <YAxis yAxisId="left" tick={axisTick} unit=" Kg" />
-                        <YAxis yAxisId="right" orientation="right" tick={axisTick} unit=" g" />
-                        <Tooltip />
-                        <Legend wrapperStyle={legendStyle} />
-                        <Area yAxisId="left" type="monotone" dataKey="feedKg" stroke="#d97706" fill="#fef3c7" name="Total Feed (Kg)" />
-                        <Line yAxisId="right" type="monotone" dataKey="feedPerBirdG" stroke="#059669" strokeWidth={2} name="Feed / Bird (g)" dot={{ r: isMobileScreen ? 3 : 4 }} connectNulls />
-                      </ComposedChart>
-                    </ResponsiveContainer>
+                    {/* Primary Comparison Chart: Production vs Feed per Bird */}
+                    <div style={{ width: '100%', height: isMobileScreen ? 200 : 260 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={chartData} margin={chartMargin} syncId="feedModalSync">
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                          <XAxis dataKey="date" tick={axisTick} minTickGap={16} />
+                          <YAxis yAxisId="feedPerBird" orientation="left" tick={{ ...axisTick, fill: '#0d9488' }} unit=" g" width={isMobileScreen ? 36 : 46} />
+                          <YAxis yAxisId="prod" orientation="right" domain={[0, 100]} tick={{ ...axisTick, fill: '#7c3aed' }} unit="%" width={isMobileScreen ? 32 : 40} />
+                          <Tooltip content={<FeedChartCustomTooltip />} />
+                          <Legend wrapperStyle={legendStyle} iconType="circle" iconSize={isMobileScreen ? 6 : 8} />
+                          <Line yAxisId="feedPerBird" type="monotone" dataKey="feedPerBirdG" stroke="#0d9488" strokeWidth={2} name="Feed per Bird (g/day)" dot={{ r: isMobileScreen ? 2 : 3, fill: '#0d9488' }} activeDot={{ r: isMobileScreen ? 3 : 5 }} connectNulls />
+                          <Line yAxisId="prod" type="monotone" dataKey="production" stroke="#7c3aed" strokeWidth={2.5} name="Actual Egg Production (%)" dot={{ r: isMobileScreen ? 2.5 : 3.5, fill: '#7c3aed' }} activeDot={{ r: isMobileScreen ? 4 : 6 }} connectNulls />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Secondary Trend: Total Feed Consumed (Kg) */}
+                    <div style={{ width: '100%', height: isMobileScreen ? 90 : 130, marginTop: '8px', borderTop: '1px solid #f1f5f9', paddingTop: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', paddingLeft: '4px', paddingRight: '4px' }}>
+                        <span style={{ fontSize: isMobileScreen ? '10px' : '11px', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          Total Feed Consumed (Kg)
+                        </span>
+                        <span style={{ fontSize: isMobileScreen ? '10px' : '11px', color: '#64748b' }}>
+                          Period Total: <strong style={{ color: '#2563eb' }}>{totalFeedKg.toLocaleString()} Kg</strong>
+                        </span>
+                      </div>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart
+                          data={chartData}
+                          margin={{
+                            ...chartMargin,
+                            right: isMobileScreen ? chartMargin.right + 32 : chartMargin.right + 40,
+                          }}
+                          syncId="feedModalSync"
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                          <XAxis dataKey="date" tick={axisTick} tickLine={false} minTickGap={16} />
+                          <YAxis yAxisId="feedKg" orientation="left" tick={{ ...axisTick, fill: '#2563eb' }} unit=" kg" width={isMobileScreen ? 36 : 46} />
+                          <Tooltip content={<FeedChartCustomTooltip />} />
+                          <Bar yAxisId="feedKg" dataKey="feedKg" fill="#93c5fd" stroke="#2563eb" strokeWidth={1} radius={[2, 2, 0, 0]} name="Total Feed (Kg)" />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 );
 
@@ -1005,17 +1262,19 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
                 return (
                   <div className={`chart-modal-frame chart-modal-frame--${expandedMetric.type}`}>
                     <ResponsiveContainer width="100%" height={chartHeight}>
-                      <AreaChart data={chartData} margin={chartMargin}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                        <XAxis dataKey="date" tick={axisTick} />
-                        <YAxis domain={[10, 45]} tick={axisTick} unit="°C" />
-                        <Tooltip />
-                        <Legend wrapperStyle={legendStyle} />
-                        <ReferenceLine y={30} stroke="#dc2626" strokeDasharray="3 3" label={{ value: 'Max (30°C)', fill: '#dc2626', fontSize: isMobileScreen ? 10 : 12 }} />
-                        <ReferenceLine y={18} stroke="#0284c7" strokeDasharray="3 3" label={{ value: 'Min (18°C)', fill: '#0284c7', fontSize: isMobileScreen ? 10 : 12 }} />
-                        <Area type="monotone" dataKey="tempMax" stroke="#f59e0b" fill="#fef3c7" name="Max Temp (°C)" />
-                        <Line type="monotone" dataKey="tempAvg" stroke="#ea580c" strokeWidth={2} name="Avg Temp (°C)" dot={{ r: isMobileScreen ? 3 : 4 }} connectNulls />
-                      </AreaChart>
+                      <ComposedChart data={chartData} margin={chartMargin}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                        <XAxis dataKey="date" tick={axisTick} minTickGap={16} />
+                        <YAxis yAxisId="left" domain={[10, 45]} tick={{ ...axisTick, fill: '#ea580c' }} unit="°C" width={isMobileScreen ? 36 : 46} />
+                        <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={{ ...axisTick, fill: '#7c3aed' }} unit="%" width={isMobileScreen ? 32 : 40} />
+                        <Tooltip content={<TemperatureChartCustomTooltip />} />
+                        <Legend wrapperStyle={legendStyle} iconType="circle" iconSize={isMobileScreen ? 6 : 8} />
+                        <ReferenceLine yAxisId="left" y={30} stroke="#f87171" strokeDasharray="4 4" strokeWidth={1.2} label={{ value: '30°C Max Comfort', position: 'insideTopLeft', fill: '#dc2626', fontSize: isMobileScreen ? 9 : 11, fontWeight: 500 }} />
+                        <ReferenceLine yAxisId="left" y={18} stroke="#38bdf8" strokeDasharray="4 4" strokeWidth={1.2} label={{ value: '18°C Min Comfort', position: 'insideBottomLeft', fill: '#0284c7', fontSize: isMobileScreen ? 9 : 11, fontWeight: 500 }} />
+                        <Line yAxisId="left" type="monotone" dataKey="tempMax" stroke="#f59e0b" strokeWidth={1.5} strokeDasharray="4 4" name="Maximum Temperature (°C)" dot={{ r: isMobileScreen ? 2 : 2.5, fill: '#f59e0b' }} connectNulls />
+                        <Line yAxisId="left" type="monotone" dataKey="tempAvg" stroke="#ea580c" strokeWidth={2.2} name="Average Temperature (°C)" dot={{ r: isMobileScreen ? 2.5 : 3.5, fill: '#ea580c' }} activeDot={{ r: isMobileScreen ? 4 : 5 }} connectNulls />
+                        <Line yAxisId="right" type="monotone" dataKey="production" stroke="#7c3aed" strokeWidth={2.5} name="Actual Egg Production (%)" dot={{ r: isMobileScreen ? 2.5 : 3.5, fill: '#7c3aed' }} activeDot={{ r: isMobileScreen ? 4 : 6 }} connectNulls />
+                      </ComposedChart>
                     </ResponsiveContainer>
                   </div>
                 );

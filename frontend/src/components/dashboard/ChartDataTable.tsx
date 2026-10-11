@@ -105,6 +105,7 @@ export function ChartDataTable({ chartType, chartData, farmFilter, flockFilter, 
                 <th>Flock Scope</th>
                 <th>Total Feed (Kg)</th>
                 <th>Feed / Bird (g/day)</th>
+                <th>Actual Production %</th>
               </tr>
             </thead>
             <tbody>
@@ -113,8 +114,11 @@ export function ChartDataTable({ chartType, chartData, farmFilter, flockFilter, 
                   <td className="td-bold">{formatDisplayDate(d.fullDate)}</td>
                   <td>{farmLabel}</td>
                   <td>{flockLabel}</td>
-                  <td style={{ fontWeight: 600, color: '#d97706' }}>{d.feedKg !== null ? `${d.feedKg.toLocaleString()} Kg` : '--'}</td>
-                  <td>{d.feedPerBirdG !== null ? `${d.feedPerBirdG.toFixed(0)} g` : 'No Data'}</td>
+                  <td style={{ fontWeight: 600, color: '#2563eb' }}>{d.feedKg !== null ? `${d.feedKg.toLocaleString()} Kg` : '--'}</td>
+                  <td style={{ fontWeight: 500, color: '#0d9488' }}>{d.feedPerBirdG !== null ? `${d.feedPerBirdG.toFixed(0)} g` : 'No Data'}</td>
+                  <td style={{ fontWeight: 600, color: '#7c3aed' }}>
+                    {d.production !== null ? `${d.production}%` : 'No Data'}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -221,6 +225,7 @@ export function ChartDataTable({ chartType, chartData, farmFilter, flockFilter, 
                 <th>Avg Temperature (°C)</th>
                 <th>Max Temperature (°C)</th>
                 <th>Comfort Status</th>
+                <th>Actual Production %</th>
               </tr>
             </thead>
             <tbody>
@@ -245,12 +250,15 @@ export function ChartDataTable({ chartType, chartData, farmFilter, flockFilter, 
                 return (
                   <tr key={d.fullDate}>
                     <td className="td-bold">{formatDisplayDate(d.fullDate)}</td>
-                    <td style={{ fontWeight: 600 }}>{d.tempAvg !== null ? `${d.tempAvg.toFixed(1)}°C` : 'No Data'}</td>
-                    <td>{d.tempMax !== null ? `${d.tempMax.toFixed(1)}°C` : '--'}</td>
+                    <td style={{ fontWeight: 600, color: '#ea580c' }}>{d.tempAvg !== null ? `${d.tempAvg.toFixed(1)}°C` : 'No Data'}</td>
+                    <td style={{ color: '#f59e0b' }}>{d.tempMax !== null ? `${d.tempMax.toFixed(1)}°C` : '--'}</td>
                     <td>
                       <span className="ent-status-tag" style={{ background: `${color}15`, color, border: `1px solid ${color}40` }}>
                         {temp !== null ? status : 'No Data'}
                       </span>
+                    </td>
+                    <td style={{ fontWeight: 600, color: '#7c3aed' }}>
+                      {d.production !== null ? `${d.production}%` : 'No Data'}
                     </td>
                   </tr>
                 );
