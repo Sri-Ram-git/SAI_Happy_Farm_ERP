@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { getFirestore, getAuth } from '../config/firebase';
 import { AuditService } from './audit.service';
 import { DuplicateError, NotFoundError, ValidationError } from '../utils/errors';
@@ -331,7 +332,7 @@ export class UserService {
     // 3. Last Admin Protection
     if (role === 'admin') {
       const allAdminsSnap = await this.db.collection('users').where('role', '==', 'admin').get();
-      const activeAdmins = allAdminsSnap.docs.filter((d) => d.data()['active'] !== false);
+      const activeAdmins = allAdminsSnap.docs.filter((d: QueryDocumentSnapshot) => d.data()['active'] !== false);
       if (activeAdmins.length <= 1) {
         throw new ValidationError('Cannot delete the last remaining active administrator.');
       }
@@ -356,7 +357,7 @@ export class UserService {
       for (const farmId of rawFarmIds) {
         if (!farmId || typeof farmId !== 'string') continue;
 
-        const otherOwner = otherFarmersSnap.docs.some((doc) => {
+        const otherOwner = otherFarmersSnap.docs.some((doc: QueryDocumentSnapshot) => {
           if (doc.id === targetUid) return false;
           const otherData = doc.data();
           const otherFarms = Array.isArray(otherData['farmIds'])
@@ -384,7 +385,7 @@ export class UserService {
             const feedTxSnap = await farmRef.collection('feedTransactions').get();
             if (!feedTxSnap.empty) {
               const feedBatch = this.db.batch();
-              feedTxSnap.docs.forEach((d) => feedBatch.delete(d.ref));
+              feedTxSnap.docs.forEach((d: QueryDocumentSnapshot) => feedBatch.delete(d.ref));
               await feedBatch.commit();
             }
           } catch (feedErr: any) {
@@ -395,7 +396,7 @@ export class UserService {
             const birdTxSnap = await farmRef.collection('birdTransactions').get();
             if (!birdTxSnap.empty) {
               const birdBatch = this.db.batch();
-              birdTxSnap.docs.forEach((d) => birdBatch.delete(d.ref));
+              birdTxSnap.docs.forEach((d: QueryDocumentSnapshot) => birdBatch.delete(d.ref));
               await birdBatch.commit();
             }
           } catch (birdErr: any) {
@@ -407,7 +408,7 @@ export class UserService {
             const flocksSnap = await this.db.collection('flocks').where('farmId', '==', farmId).get();
             if (!flocksSnap.empty) {
               const flockBatch = this.db.batch();
-              flocksSnap.docs.forEach((d) => flockBatch.delete(d.ref));
+              flocksSnap.docs.forEach((d: QueryDocumentSnapshot) => flockBatch.delete(d.ref));
               await flockBatch.commit();
             }
           } catch (flockErr: any) {
@@ -419,7 +420,7 @@ export class UserService {
             const locksSnap = await this.db.collection('dailyReportLocks').where('farmId', '==', farmId).get();
             if (!locksSnap.empty) {
               const lockBatch = this.db.batch();
-              locksSnap.docs.forEach((d) => lockBatch.delete(d.ref));
+              locksSnap.docs.forEach((d: QueryDocumentSnapshot) => lockBatch.delete(d.ref));
               await lockBatch.commit();
             }
           } catch (lockErr: any) {
@@ -431,7 +432,7 @@ export class UserService {
             const reportsSnap = await this.db.collection('dailyReports').where('farmId', '==', farmId).get();
             if (!reportsSnap.empty) {
               const reportBatch = this.db.batch();
-              reportsSnap.docs.forEach((d) => reportBatch.delete(d.ref));
+              reportsSnap.docs.forEach((d: QueryDocumentSnapshot) => reportBatch.delete(d.ref));
               await reportBatch.commit();
             }
           } catch (reportErr: any) {
@@ -471,7 +472,7 @@ export class UserService {
           .get();
         if (!userDailyLogsSnap.empty) {
           const logsBatch = this.db.batch();
-          userDailyLogsSnap.docs.forEach((d) => logsBatch.delete(d.ref));
+          userDailyLogsSnap.docs.forEach((d: QueryDocumentSnapshot) => logsBatch.delete(d.ref));
           await logsBatch.commit();
         }
 

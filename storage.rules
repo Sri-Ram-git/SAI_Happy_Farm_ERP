@@ -1,0 +1,42 @@
+rules_version = '2';
+
+// Production Firebase Storage Rules for SAI Happy Farms ERP
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Default Deny: All paths are blocked by default unless explicitly permitted
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Farm-scoped documents, receipts, and attachments
+    // Requires authenticated session
+    match /farms/{farmId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && request.resource.size < 10 * 1024 * 1024; // 10MB limit
+    }
+
+    // User profile documents and personal receipts
+    // Enforces user ownership isolation
+    match /users/{userId}/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId) && request.resource.size < 5 * 1024 * 1024; // 5MB limit
+    }
+
+    // System-generated exports (Excel, CSV, PDF reports)
+    // Read-only for authenticated users, writes restricted to backend service account
+    match /exports/{allPaths=**} {
+      allow read: if isAuthenticated();
+      allow write: if false;
+    }
+  }
+}

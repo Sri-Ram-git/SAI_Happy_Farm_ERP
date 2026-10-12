@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import type { DocumentReference, QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { getFirestore } from '../config/firebase';
 import { AuthenticatedUser } from '../types/auth';
 import {
@@ -48,7 +49,7 @@ export class ImportService {
           .collection('dailyReportLocks')
           .where('farmId', '==', farmId)
           .get();
-        snap.docs.forEach((doc) => {
+        snap.docs.forEach((doc: QueryDocumentSnapshot) => {
           const d = doc.data();
           const key = `${d['farmId']}_${d['submissionDate']}`;
           locksMap.set(key, d);
@@ -62,7 +63,7 @@ export class ImportService {
           .collection('dailyReports')
           .where('farmId', '==', farmId)
           .get();
-        snap.docs.forEach((doc) => {
+        snap.docs.forEach((doc: QueryDocumentSnapshot) => {
           const d = doc.data();
           const dateStr = d['submissionDate'] || d['reportDate'];
           if (dateStr) {
@@ -75,7 +76,7 @@ export class ImportService {
       // Also pre-fetch dailyLogs subcollections if needed
       try {
         const dailyLogsSnap = await this.db.collectionGroup('dailyLogs').get();
-        dailyLogsSnap.docs.forEach((doc) => {
+        dailyLogsSnap.docs.forEach((doc: QueryDocumentSnapshot) => {
           const d = doc.data();
           const fId = d['farmId'];
           const dateStr = d['submissionDate'] || d['reportDate'];
@@ -210,7 +211,7 @@ export class ImportService {
       // 2. Fetch existing farmers to map assigned userId
       const farmToUsersMap = new Map<string, Set<string>>();
       const usersSnap = await this.db.collection('users').where('role', '==', 'farmer').get();
-      usersSnap.docs.forEach((u) => {
+      usersSnap.docs.forEach((u: QueryDocumentSnapshot) => {
         const udata = u.data();
         if (udata['active'] === false) return;
         const rawFarmIds: string[] = Array.isArray(udata['farmIds'])
@@ -235,7 +236,7 @@ export class ImportService {
           .collection('dailyReportLocks')
           .where('farmId', '==', farmId)
           .get();
-        lockSnap.docs.forEach((d) => {
+        lockSnap.docs.forEach((d: QueryDocumentSnapshot) => {
           const lData = d.data();
           existingLocksMap.set(`${lData['farmId']}_${lData['submissionDate']}`, lData);
         });
@@ -247,7 +248,7 @@ export class ImportService {
           .collection('dailyReports')
           .where('farmId', '==', farmId)
           .get();
-        repSnap.docs.forEach((d) => {
+        repSnap.docs.forEach((d: QueryDocumentSnapshot) => {
           const rData = d.data();
           const dStr = rData['submissionDate'] || rData['reportDate'];
           if (dStr) {
@@ -258,7 +259,7 @@ export class ImportService {
 
       try {
         const dailyLogsSnap = await this.db.collectionGroup('dailyLogs').get();
-        dailyLogsSnap.docs.forEach((doc) => {
+        dailyLogsSnap.docs.forEach((doc: QueryDocumentSnapshot) => {
           const d = doc.data();
           const fId = d['farmId'];
           const dateStr = d['submissionDate'] || d['reportDate'];
@@ -744,7 +745,7 @@ export class ImportService {
         .limit(50)
         .get();
 
-      return snap.docs.map((doc) => doc.data() as ImportBatchRecord);
+      return snap.docs.map((doc: QueryDocumentSnapshot) => doc.data() as ImportBatchRecord);
     } catch (error) {
       logger.error('Failed to get import batches', { error });
       throw new InternalError('Failed to fetch import history');
@@ -1033,7 +1034,7 @@ export class ImportService {
         try {
           if (item.action === 'CREATED') {
             let canDelete = true;
-            const refsToDelete: FirebaseFirestore.DocumentReference[] = [];
+            const refsToDelete: DocumentReference[] = [];
 
             for (const tDoc of item.targetDocs) {
               const docRef = this.db.doc(`${tDoc.collectionPath}/${tDoc.docId}`);

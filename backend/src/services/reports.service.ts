@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { AuthenticatedUser } from '../types/auth';
 import { DailyReportInput, DailyReport, DailyReportResponse } from '../types/reports';
 import { ReportsRepository } from '../repositories/reports.repository';
@@ -92,7 +93,7 @@ export class ReportsService {
     const db = getFirestore();
     const farmsSnap = await db.collection('farms').get();
     const farmMap = new Map<string, { farmId: string; name: string; initialBirds?: number }>();
-    farmsSnap.docs.forEach((d) => {
+    farmsSnap.docs.forEach((d: QueryDocumentSnapshot) => {
       const data = d.data();
       farmMap.set(d.id, {
         farmId: d.id,
@@ -103,7 +104,7 @@ export class ReportsService {
 
     const flocksSnap = await db.collection('flocks').get();
     const flockMap = new Map<string, { farmId: string; productionCurve: 'CF_STD' | 'FR_STD'; initialBirds: number; startDate: string }>();
-    flocksSnap.docs.forEach((d) => {
+    flocksSnap.docs.forEach((d: QueryDocumentSnapshot) => {
       const data = d.data();
       if (data['farmId']) {
         flockMap.set(data['farmId'], {
@@ -179,8 +180,8 @@ export class ReportsService {
 
     const payload = { farms: farmsPayload };
 
-    // Resolve project root: __dirname = backend/src/services → go up 3 levels to project root
-    const projectRoot = path.resolve(__dirname, '..', '..', '..');
+    // Resolve the backend root from the compiled service directory (backend/dist/services).
+    const projectRoot = path.resolve(__dirname, '..', '..');
     const tmpDir = path.join(projectRoot, 'scratch');
     if (!fs.existsSync(tmpDir)) {
       fs.mkdirSync(tmpDir, { recursive: true });

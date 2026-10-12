@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import type { Transaction } from 'firebase-admin/firestore';
 import { getFirestore } from '../config/firebase';
 import { CreateFlockDTO } from '../types/flock';
 
@@ -31,7 +32,7 @@ export class FlockController {
       const farmRef = db.collection('farms').doc(data.farmId);
       const birdTxRef = farmRef.collection('birdTransactions').doc();
 
-      await db.runTransaction(async (transaction) => {
+      await db.runTransaction(async (transaction: Transaction) => {
         const farmSnap = await transaction.get(farmRef);
         const farmData = farmSnap.exists ? farmSnap.data() : null;
 
