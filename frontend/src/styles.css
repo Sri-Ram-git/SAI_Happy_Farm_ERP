@@ -6842,3 +6842,125 @@ textarea {
   animation: notif-pulse 1.5s ease-in-out infinite;
 }
 
+/* ─── Farmer Remarks & Report Detail Drawer ─── */
+.report-detail-drawer-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.report-detail-header-card {
+  background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.report-remarks-card {
+  transition: border-color var(--transition);
+}
+
+.report-remarks-text {
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--gray-800);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.report-remarks-empty {
+  font-size: 14px;
+  font-style: italic;
+  color: var(--gray-400);
+}
+
+.report-detail-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.report-metric-tile {
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.report-metric-tile-label {
+  font-size: 11px;
+  color: var(--gray-500);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.report-metric-tile-val {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--gray-900);
+}
+
+.report-metric-tile-sub {
+  font-size: 11px;
+  color: var(--gray-500);
+}
+
+.remarks-cell-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-line;
+  font-size: 12px;
+  color: var(--gray-700);
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.remarks-cell-empty {
+  font-style: italic;
+  color: var(--gray-400);
+  font-size: 12px;
+}
+
+.btn-row-action {
+  background: var(--white);
+  border: 1px solid var(--gray-300);
+  color: var(--gray-700);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all var(--transition);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.btn-row-action:hover {
+  background: var(--gray-50);
+  border-color: var(--green-600);
+  color: var(--green-700);
+}
+
+.table-row-clickable {
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.table-row-clickable:hover td {
+  background: #f8fafc !important;
+}
+

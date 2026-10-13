@@ -134,7 +134,10 @@ export function normalizeReport(
     tempMax: toNumOrNull(data.tempMax),
     eggWeight: toWeightObj(data.eggWeight, data),
     bodyWeight: toWeightObj(data.bodyWeight),
-    remarks: String(data.remarks ?? ''),
+    remarks: (() => {
+      const val = data.remarks ?? data.notes ?? data.comment ?? data.observations ?? '';
+      return typeof val === 'string' ? val : String(val ?? '');
+    })(),
     ammoniaPpm: toNumOrNull(data.ammoniaPpm),
     submittedBy: String(data.submittedBy ?? ''),
     submissionDate: (() => {

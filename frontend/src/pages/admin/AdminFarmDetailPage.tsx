@@ -14,7 +14,8 @@ import { calcProductionRate, calcMortalityRate, calcFeedPerBird, aggregateReport
 import { useDailyReportsByFarms } from '../../hooks/useDailyReports';
 import { KPI_THRESHOLDS } from '../../config/kpiThresholds';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { ArrowLeft, AlertTriangle, Activity, HeartPulse, Package, Thermometer, Egg, FileText } from 'lucide-react';
+import { ArrowLeft, AlertTriangle, Activity, HeartPulse, Package, Thermometer, Egg, FileText, Eye } from 'lucide-react';
+import { ReportDetailDrawer } from '../../components/dashboard/ReportDetailDrawer';
 
 export function AdminFarmDetailPage() {
   const { farmId } = useParams<{ farmId: string }>();
@@ -24,6 +25,7 @@ export function AdminFarmDetailPage() {
   const [farm, setFarm] = useState<FarmDoc | null>(null);
   const [farmer, setFarmer] = useState<UserDoc | null>(null);
   const [farmLoading, setFarmLoading] = useState(true);
+  const [selectedReport, setSelectedReport] = useState<ReportDoc | null>(null);
   const farmIdArray = farmId ? [farmId] : [];
   const { reports, loading: reportsLoading, error } = useDailyReportsByFarms(farmIdArray, getDaysAgo(days), getIstDate());
   const loading = farmLoading || reportsLoading;
@@ -171,6 +173,8 @@ export function AdminFarmDetailPage() {
                   <th>Feed</th>
                   <th>Temp</th>
                   <th>Time</th>
+                  <th>Remarks</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -178,6 +182,7 @@ export function AdminFarmDetailPage() {
                   const eligible = getEligibleBirdCount(r);
                   const mortRate = eligible > 0 ? calcMortalityRate(r.mortality ?? 0, eligible) : 0;
                   const isCriticalMort = mortRate >= (KPI_THRESHOLDS.mortalityRateCritical ?? 10) || (eligible > 0 && (r.mortality ?? 0) >= eligible);
+                  const hasRemarks = Boolean(r.remarks && r.remarks.trim().length > 0);
                   return (
                     <tr key={r.reportId}>
                       <td>{formatDisplayDate(r.submissionDate)}</td>
@@ -190,6 +195,26 @@ export function AdminFarmDetailPage() {
                       <td>{eligible > 0 ? calcFeedPerBird(r.feedKg ?? 0, eligible) : 0}g</td>
                       <td>{r.temperature}°C</td>
                       <td>{formatTime(r.createdAt)}</td>
+                      <td style={{ maxWidth: 220 }}>
+                        {hasRemarks ? (
+                          <div className="remarks-cell-preview" title={r.remarks}>
+                            {r.remarks}
+                          </div>
+                        ) : (
+                          <span className="remarks-cell-empty">No remarks provided</span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn-row-action"
+                          onClick={() => setSelectedReport(r)}
+                          title="View full report and farmer remarks"
+                        >
+                          <Eye size={13} />
+                          <span>View</span>
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -198,6 +223,15 @@ export function AdminFarmDetailPage() {
           </div>
           {reports.length === 0 && <EmptyState message="No reports found for this period." />}
         </div>
+
+        <ReportDetailDrawer
+          open={Boolean(selectedReport)}
+          onClose={() => setSelectedReport(null)}
+          report={selectedReport}
+          farm={farm}
+          farmer={farmer}
+          role="admin"
+        />
       </div>
     </DashboardLayout>
   );

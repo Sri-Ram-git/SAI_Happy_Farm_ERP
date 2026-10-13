@@ -233,6 +233,7 @@ export function DashboardMetricDetailModal({
                     <th>Farm Name</th>
                     <th>Farm ID</th>
                     <th>Status</th>
+                    <th>Remarks</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -244,10 +245,17 @@ export function DashboardMetricDetailModal({
                       <td>{s.farm.name || '--'}</td>
                       <td className="td-bold">{s.farm.farmId}</td>
                       <td><span className="ent-status-tag" style={{ background: '#dcfce7', color: '#15803d' }}>Submitted</span></td>
+                      <td style={{ maxWidth: 220, fontSize: 13 }}>
+                        {s.report.remarks?.trim() ? (
+                          <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{s.report.remarks}</span>
+                        ) : (
+                          <span style={{ fontStyle: 'italic', color: '#94a3b8' }}>No remarks provided</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {submissionMatrix.submitted.length === 0 && (
-                    <tr><td colSpan={6} style={{ textAlign: 'center', padding: 30, color: '#64748b' }}>No submitted reports found for this period.</td></tr>
+                    <tr><td colSpan={7} style={{ textAlign: 'center', padding: 30, color: '#64748b' }}>No submitted reports found for this period.</td></tr>
                   )}
                 </tbody>
               </table>

@@ -9,7 +9,8 @@ import { getAllFarms, type FarmDoc } from '../../services/farmDataService';
 import { getAllUsers, type UserDoc } from '../../services/userDataService';
 import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils';
 import { useDailyReportsByDate } from '../../hooks/useDailyReports';
-import { UploadCloud } from 'lucide-react';
+import { UploadCloud, Eye } from 'lucide-react';
+import { ReportDetailDrawer } from '../../components/dashboard/ReportDetailDrawer';
 
 import { ExportReportsCard } from '../../components/dashboard/ExportReportsCard';
 
@@ -20,6 +21,7 @@ export function AdminSubmissionsPage() {
   const [farmers, setFarmers] = useState<UserDoc[]>([]);
   const [farmLoading, setFarmLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [selectedReportRow, setSelectedReportRow] = useState<{ report: ReportDoc; farm: FarmDoc; farmer?: UserDoc } | null>(null);
   const { reports, loading: reportsLoading, error } = useDailyReportsByDate(date);
   const loading = farmLoading || reportsLoading;
 
@@ -101,28 +103,68 @@ export function AdminSubmissionsPage() {
                 <th>Birds</th>
                 <th>Production</th>
                 <th>Submitted At</th>
+                <th>Remarks</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ farm, report, farmer }) => (
-                <tr key={farm.farmId}>
-                  <td className="td-bold">{farm.farmId}</td>
-                  <td>{farmer?.name || 'Unknown'}</td>
-                  <td>
-                    <span className={`status-badge ${report ? 'status-badge--ok' : 'status-badge--warn'}`}>
-                      {report ? 'Submitted' : 'Not Submitted'}
-                    </span>
-                  </td>
-                  <td>{report?.birdCount ?? '--'}</td>
-                  <td>{report ? `${((report.eggsProduced ?? 0) / (report.birdCount ?? 1) * 100).toFixed(1)}%` : '--'}</td>
-                  <td>{report ? formatTime(report.createdAt) : '--'}</td>
-                </tr>
-              ))}
+              {rows.map(({ farm, report, farmer }) => {
+                const hasRemarks = Boolean(report?.remarks && report.remarks.trim().length > 0);
+                return (
+                  <tr key={farm.farmId}>
+                    <td className="td-bold">{farm.farmId}</td>
+                    <td>{farmer?.name || 'Unknown'}</td>
+                    <td>
+                      <span className={`status-badge ${report ? 'status-badge--ok' : 'status-badge--warn'}`}>
+                        {report ? 'Submitted' : 'Not Submitted'}
+                      </span>
+                    </td>
+                    <td>{report?.birdCount ?? '--'}</td>
+                    <td>{report ? `${((report.eggsProduced ?? 0) / (report.birdCount ?? 1) * 100).toFixed(1)}%` : '--'}</td>
+                    <td>{report ? formatTime(report.createdAt) : '--'}</td>
+                    <td style={{ maxWidth: 220 }}>
+                      {report ? (
+                        hasRemarks ? (
+                          <div className="remarks-cell-preview" title={report.remarks}>
+                            {report.remarks}
+                          </div>
+                        ) : (
+                          <span className="remarks-cell-empty">No remarks provided</span>
+                        )
+                      ) : (
+                        '--'
+                      )}
+                    </td>
+                    <td>
+                      {report && (
+                        <button
+                          type="button"
+                          className="btn-row-action"
+                          onClick={() => setSelectedReportRow({ report, farm, farmer })}
+                          title="View full report and farmer remarks"
+                        >
+                          <Eye size={13} />
+                          <span>View</span>
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
 
         {rows.length === 0 && <EmptyState message="No farms found." />}
+
+        <ReportDetailDrawer
+          open={Boolean(selectedReportRow)}
+          onClose={() => setSelectedReportRow(null)}
+          report={selectedReportRow?.report ?? null}
+          farm={selectedReportRow?.farm}
+          farmer={selectedReportRow?.farmer}
+          role="admin"
+        />
       </div>
     </DashboardLayout>
   );
