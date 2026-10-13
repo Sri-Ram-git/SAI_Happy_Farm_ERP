@@ -417,6 +417,16 @@ describe('ImportService', () => {
       expect(parentCalls).toHaveLength(1);
       expect(parentCalls[0][2]).toEqual({ merge: true });
 
+      // Every dailyReports write must be either the validated user's parent
+      // document or its canonical dailyLogs document.
+      const dailyReportsWrites = mockBatch.set.mock.calls
+        .map((call: any) => call[0]?.path)
+        .filter((path: any) => typeof path === 'string' && path.startsWith('dailyReports/'));
+      expect(dailyReportsWrites).toEqual([
+        'dailyReports/farmer-12',
+        'dailyReports/farmer-12/dailyLogs/2025-10-01',
+      ]);
+
       // Verify lock write
       const lockCalls = mockBatch.set.mock.calls.filter((call: any) =>
         call[0]?.path === 'dailyReportLocks/AP12_2025-10-01',
