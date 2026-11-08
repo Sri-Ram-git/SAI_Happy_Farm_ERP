@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { KpiCard } from './KpiCard';
 import { LoadingState } from './LoadingState';
@@ -36,11 +37,17 @@ import {
 import {
   Home, Users, UserCheck, CheckCircle2, TrendingUp, AlertTriangle,
   Layers, Activity, HeartPulse, FileText, Egg, Package, Thermometer,
-  Award, ShieldAlert, Sliders, Flame, ArrowUpRight, ArrowDownRight, Check, Maximize2
+  Award, ShieldAlert, Sliders, Flame, ArrowUpRight, ArrowDownRight, Check, Maximize2,
+  ArrowUpDown, ArrowUp, ArrowDown, HelpCircle, Info, ExternalLink, ChevronDown, ChevronUp, Filter
 } from 'lucide-react';
 
 function normalizeRole(role: string | undefined | null): string {
   return (role ?? '').trim().toLowerCase();
+}
+
+function averageOrNull(values: (number | undefined | null)[]): number | null {
+  const valid = values.filter((value): value is number => value != null && Number.isFinite(Number(value)));
+  return valid.length > 0 ? calcAverage(valid) : null;
 }
 
 function FeedChartCustomTooltip({ active, payload, label }: any) {
@@ -198,10 +205,19 @@ interface EnterpriseAnalyticsDashboardProps {
 
 export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: EnterpriseAnalyticsDashboardProps) {
   const { userProfile } = useAuth();
+  const navigate = useNavigate();
   const [days, setDays] = useState(7);
   const [selectedFarmId, setSelectedFarmId] = useState('');
   const [selectedFlockId, setSelectedFlockId] = useState('');
   const [standardCurveType, setStandardCurveType] = useState<'CF_STD' | 'FR_STD'>('CF_STD');
+
+  // Interactive sorting, filtering, and methodology state for Farm Performance Comparison
+  const [rankingSortField, setRankingSortField] = useState<
+    'rank' | 'farmId' | 'name' | 'liveBirds' | 'score' | 'pRate' | 'mRate' | 'fGrams' | 'sRate' | 'compliance' | 'statusLabel'
+  >('rank');
+  const [rankingSortAsc, setRankingSortAsc] = useState<boolean>(true);
+  const [rankingStatusFilter, setRankingStatusFilter] = useState<string>('ALL');
+  const [showMethodology, setShowMethodology] = useState<boolean>(false);
 
   const [farms, setFarms] = useState<FarmDoc[]>([]);
   const [users, setUsers] = useState<UserDoc[]>([]);
@@ -386,7 +402,10 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
 
   const avgProd = useMemo(() => {
     if (reports.length === 0) return null;
-    return calcAverage(reports.map((r) => {
+    return averageOrNull(reports.map((r) => {
+      if (r.actualProductionPct != null && Number.isFinite(Number(r.actualProductionPct))) {
+        return Number(r.actualProductionPct);
+      }
       const base = r.openingBirdCount || r.birdCount;
       return base > 0 ? calcProductionRate(r.eggsProduced ?? 0, base) : null;
     }));
@@ -394,7 +413,7 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
 
   const avgMort = useMemo(() => {
     if (reports.length === 0) return null;
-    return calcAverage(reports.map((r) => {
+    return averageOrNull(reports.map((r) => {
       const base = r.openingBirdCount || r.birdCount;
       return base > 0 ? calcMortalityRate(r.mortality ?? 0, base) : null;
     }));
@@ -407,7 +426,10 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
 
   const avgFeedPerBirdGrams = useMemo(() => {
     if (reports.length === 0) return null;
-    return calcAverage(reports.map((r) => {
+    return averageOrNull(reports.map((r) => {
+      if (r.feedGramsPerBird != null && Number.isFinite(Number(r.feedGramsPerBird)) && Number(r.feedGramsPerBird) > 0) {
+        return Number(r.feedGramsPerBird);
+      }
       const base = r.openingBirdCount || r.birdCount;
       return base > 0 ? (r.feedKg * 1000) / base : null;
     }));
@@ -421,22 +443,27 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
 
   const avgEggWeight = useMemo(() => {
     if (reports.length === 0) return null;
-    return calcAverage(reports.map((r) => r.eggWeight?.avg));
+    return calcAverage(reports.map((r) => {
+      const avg = r.eggWeight?.avg;
+      return avg != null && avg > 0 ? avg : null;
+    }));
   }, [reports]);
 
   const avgBodyWeight = useMemo(() => {
     if (reports.length === 0) return null;
-    return calcAverage(reports.map((r) => r.bodyWeight?.avg));
+    return averageOrNull(reports.map((r) => r.bodyWeight?.avg));
   }, [reports]);
 
   const avgSelectionPct = useMemo(() => {
     if (reports.length === 0) return null;
-    return calcAverage(reports.map((r) => calcSelectionRate(r.selectionEggs ?? 0, r.eggsProduced ?? 0)));
+    return averageOrNull(reports.map((r) => r.eggsProduced && r.eggsProduced > 0
+      ? calcSelectionRate(r.selectionEggs ?? 0, r.eggsProduced)
+      : null));
   }, [reports]);
 
   const avgTemp = useMemo(() => {
     if (reports.length === 0) return null;
-    return calcAverage(reports.map((r) => r.temperature));
+    return averageOrNull(reports.map((r) => r.temperature));
   }, [reports]);
 
   // Baseline standard curve calculation (averaging across active flock age)
@@ -457,38 +484,196 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
 
 
 
-  // Farm Ranking & Multi-KPI Comparison
-  const farmRankings = useMemo(() => {
-    return activeFarms.map((farm) => {
+  // Farm Ranking & Multi-KPI Comparison with strict Missing-Data Exclusion & Disaster Overrides
+  const { rankedFarms, unrankedFarms, allEvaluatedFarms } = useMemo(() => {
+    const targetFarms = selectedFarmId ? activeFarms.filter(f => f.farmId === selectedFarmId) : activeFarms;
+
+    // 1. Evaluate operational health and KPIs for all active target farms
+    const evaluated = targetFarms.map((farm) => {
       const farmReps = reports.filter((r) => r.farmId === farm.farmId);
       const farmTodayRep = todayReports.find((r) => r.farmId === farm.farmId);
-      const liveBirds = farmInventories.get(farm.farmId)?.currentBirdCount || farmTodayRep?.closingBirdCount || (farm as any).currentBirds || 0;
+      const liveBirds =
+        farmInventories.get(farm.farmId)?.currentBirdCount ||
+        farmTodayRep?.closingBirdCount ||
+        (farm as any).currentBirdCount ||
+        farm.currentBirds ||
+        farm.totalBirds ||
+        (farm as any).initialBirdCount ||
+        0;
 
       const health = evaluateFarmHealth({
         reports: farmReps,
         days,
         liveBirds,
+        farmId: farm.farmId,
       });
 
       return {
         farmId: farm.farmId,
-        name: farm.name || `Farm ${farm.farmId}`,
+        name: farm.name || (farm as any).farmName || `Farm ${farm.farmId}`,
         liveBirds,
+        reportsCount: farmReps.length,
         pRate: health.productionRate,
         mRate: health.mortalityRate,
         fGrams: health.feedGramsPerBird,
         sRate: health.selectionRate,
         compliance: health.compliance,
         score: health.score,
+        scoreBreakdown: health.scoreBreakdown,
         statusLabel: health.statusLabel,
         statusColor: health.statusColor,
         isCritical: health.isCritical,
         isInvalid: health.isInvalid,
         hasTotalFlockLoss: health.hasTotalFlockLoss,
+        isEligibleForRanking: health.isEligibleForRanking,
+        totalLossDate: health.totalLossDate,
+        totalLossBirds: health.totalLossBirds,
         reason: health.reason,
       };
-    }).sort((a, b) => b.score - a.score);
-  }, [activeFarms, reports, todayReports, farmInventories, days]);
+    });
+
+    // 2. Strict Partition: Eligible (has valid submissions in period) vs Ineligible (Insufficient Data)
+    const eligible = evaluated.filter((f) => f.isEligibleForRanking);
+    const unranked = evaluated.filter((f) => !f.isEligibleForRanking);
+
+    // 3. Multi-KPI Composite Ranking for Eligible Farms:
+    //    Rule A: Viable operational farms outrank total-flock-loss disasters.
+    //    Rule B: Higher composite score (0-100) first.
+    //    Rule C: Deterministic tie-breakers: lower mortality rate -> higher production rate -> higher compliance -> alphabetical farmId.
+    eligible.sort((a, b) => {
+      // Rule A: Viable operational flocks strictly outrank total flock loss disasters
+      if (a.hasTotalFlockLoss !== b.hasTotalFlockLoss) {
+        return a.hasTotalFlockLoss ? 1 : -1;
+      }
+      // Rule B: Higher composite performance score
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      // Rule C: Tie-breakers
+      if (a.mRate !== b.mRate) {
+        return a.mRate - b.mRate; // Lower mortality is better
+      }
+      if (b.pRate !== a.pRate) {
+        return b.pRate - a.pRate; // Higher production is better
+      }
+      if (b.compliance !== a.compliance) {
+        return b.compliance - a.compliance; // Higher compliance is better
+      }
+      return a.farmId.localeCompare(b.farmId);
+    });
+
+    // 4. Assign sequential official ranks to eligible farms (#1, #2, ...)
+    const rankedWithRank = eligible.map((farm, idx) => ({
+      ...farm,
+      rank: idx + 1,
+      rankDisplay: `#${idx + 1}`,
+    }));
+
+    const unrankedFormatted = unranked.map((farm) => ({
+      ...farm,
+      rank: null as number | null,
+      rankDisplay: '—',
+    }));
+
+    return {
+      rankedFarms: rankedWithRank,
+      unrankedFarms: unrankedFormatted,
+      allEvaluatedFarms: [...rankedWithRank, ...unrankedFormatted],
+    };
+  }, [activeFarms, reports, todayReports, farmInventories, days, selectedFarmId]);
+
+  // Status counts for filtering pills
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      ALL: allEvaluatedFarms.length,
+      EXCELLENT: 0,
+      HEALTHY: 0,
+      'NEEDS ATTENTION': 0,
+      CRITICAL: 0,
+      INSUFFICIENT_DATA: unrankedFarms.length,
+    };
+    rankedFarms.forEach((f) => {
+      if (counts[f.statusLabel] !== undefined) {
+        counts[f.statusLabel]++;
+      }
+    });
+    return counts;
+  }, [allEvaluatedFarms, rankedFarms, unrankedFarms]);
+
+  // Filter and interactive sorting for Ranked Farms table
+  const displayedRankedFarms = useMemo(() => {
+    let list = [...rankedFarms];
+
+    if (rankingStatusFilter !== 'ALL' && rankingStatusFilter !== 'INSUFFICIENT_DATA') {
+      list = list.filter((f) => f.statusLabel === rankingStatusFilter);
+    }
+
+    list.sort((a, b) => {
+      let comparison = 0;
+      switch (rankingSortField) {
+        case 'rank':
+          comparison = (a.rank ?? 999) - (b.rank ?? 999);
+          break;
+        case 'farmId':
+          comparison = a.farmId.localeCompare(b.farmId);
+          break;
+        case 'name':
+          comparison = a.name.localeCompare(b.name);
+          break;
+        case 'liveBirds':
+          comparison = a.liveBirds - b.liveBirds;
+          break;
+        case 'score':
+          comparison = a.score - b.score;
+          break;
+        case 'pRate':
+          comparison = a.pRate - b.pRate;
+          break;
+        case 'mRate':
+          comparison = a.mRate - b.mRate;
+          break;
+        case 'fGrams':
+          comparison = a.fGrams - b.fGrams;
+          break;
+        case 'sRate':
+          comparison = a.sRate - b.sRate;
+          break;
+        case 'compliance':
+          comparison = a.compliance - b.compliance;
+          break;
+        case 'statusLabel':
+          comparison = a.statusLabel.localeCompare(b.statusLabel);
+          break;
+        default:
+          comparison = (a.rank ?? 999) - (b.rank ?? 999);
+      }
+      return rankingSortAsc ? comparison : -comparison;
+    });
+
+    return list;
+  }, [rankedFarms, rankingStatusFilter, rankingSortField, rankingSortAsc]);
+
+  const handleSortClick = (field: typeof rankingSortField) => {
+    if (rankingSortField === field) {
+      setRankingSortAsc(!rankingSortAsc);
+    } else {
+      setRankingSortField(field);
+      if (['score', 'pRate', 'liveBirds', 'compliance', 'sRate'].includes(field)) {
+        setRankingSortAsc(false);
+      } else {
+        setRankingSortAsc(true);
+      }
+    }
+  };
+
+  const renderSortIndicator = (field: typeof rankingSortField) => {
+    if (rankingSortField !== field) {
+      return <ArrowUpDown size={12} style={{ opacity: 0.35, marginLeft: 4, verticalAlign: 'middle' }} />;
+    }
+    return rankingSortAsc
+      ? <ArrowUp size={12} style={{ color: '#047857', marginLeft: 4, verticalAlign: 'middle' }} />
+      : <ArrowDown size={12} style={{ color: '#047857', marginLeft: 4, verticalAlign: 'middle' }} />;
+  };
 
   // Contiguous Time Series Chart Data for Recharts
   const chartData = useMemo(() => {
@@ -580,22 +765,24 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
         </div>
       )}
 
-      {/* CLEAN APP PAGE HEADER & GLOBAL FILTERS */}
-      <div className="mgmt-page-header">
-        <div>
+      {/* FIELD LEDGER MASTHEAD & GLOBAL FILTERS */}
+      <div className="analytics-masthead">
+        <div className="analytics-masthead__copy">
+          <div className="analytics-eyebrow"><span className="analytics-eyebrow__mark" />Operations intelligence <span className="analytics-eyebrow__rule" /> {days}-day view</div>
           <h2>
             {variant === 'analytics'
               ? (role === 'admin' ? 'Admin Analytics' : 'Supervisor Analytics')
               : (role === 'admin' ? 'Admin Overview' : 'Supervisor Overview')}
           </h2>
-          <p className="welcome-subtitle">
+          <p className="analytics-masthead__subtitle">
             {variant === 'analytics'
               ? 'Deep-dive operational metrics, trends, and performance analytics'
               : 'Real-time farm operations and performance analytics'}
           </p>
+          <div className="analytics-masthead__signal"><span className="analytics-signal-dot" />Live reporting window <strong>{formatDisplayDate(startDate)} — {formatDisplayDate(endDate)}</strong></div>
         </div>
 
-        <div className="mgmt-header-actions">
+        <div className="analytics-masthead__actions">
           {variant === 'overview' && <NotificationBell role={role} />}
           <select
             className="form-input form-input--sm mgmt-filter-select"
@@ -636,7 +823,8 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
       {/* LEVEL 1: EXECUTIVE KPI SUMMARY GRID */}
       {(variant === 'overview' || variant === 'full') && (
         <>
-          <div className="kpi-grid" style={{ marginBottom: 20 }}>
+          <div className="analytics-section-heading"><span>01 / Decision frame</span><strong>What needs attention now</strong><small>Current operating position across the selected reporting window</small></div>
+          <div className="kpi-grid analytics-kpi-grid" style={{ marginBottom: 20 }}>
             <KpiCard
               title="Total Bird Population"
               value={totalBirdsLive.toLocaleString()}
@@ -681,87 +869,507 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
 
 
           {/* LEVEL 3: FARM PERFORMANCE RANKING & COMPARISON TABLE */}
-          <div className="section-card" style={{ marginBottom: 24 }}>
-            <div className="ent-card-header">
+          <div className="section-card analytics-ledger" style={{ marginBottom: 24 }}>
+            <div className="ent-card-header" style={{ flexWrap: 'wrap', gap: '12px', alignItems: 'flex-start' }}>
               <div>
-                <h3>Farm Performance Comparison</h3>
-                <p className="ent-card-sub">Ranked operational performance for the selected period</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h3 style={{ margin: 0 }}>Farm Performance Comparison</h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowMethodology(!showMethodology)}
+                    className="btn btn--sm"
+                    style={{
+                      background: showMethodology ? '#ecfdf5' : '#f8fafc',
+                      border: `1px solid ${showMethodology ? '#a7f3d0' : '#e2e8f0'}`,
+                      color: showMethodology ? '#047857' : '#64748b',
+                      fontSize: '11px',
+                      padding: '3px 8px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      cursor: 'pointer',
+                      borderRadius: '6px',
+                      fontWeight: 500,
+                    }}
+                    title="Click to view ranking methodology, weights, eligibility criteria, and disaster overrides"
+                  >
+                    <HelpCircle size={13} />
+                    <span>Methodology & Scoring</span>
+                    {showMethodology ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  </button>
+                </div>
+                <p className="ent-card-sub" style={{ marginTop: '4px', marginBottom: 0 }}>
+                  Ranked operational performance for the selected {days}-day period ({formatDisplayDate(startDate)} to {formatDisplayDate(endDate)})
+                </p>
               </div>
-              <div className="ent-legend-bar">
-                <span className="ent-status-tag" style={{ background: '#dcfce7', color: '#15803d' }}>EXCELLENT</span>
-                <span className="ent-status-tag" style={{ background: '#ecfdf5', color: '#059669' }}>HEALTHY</span>
-                <span className="ent-status-tag" style={{ background: '#fffbeb', color: '#d97706' }}>NEEDS ATTENTION</span>
-                <span className="ent-status-tag" style={{ background: '#fef2f2', color: '#dc2626' }}>CRITICAL</span>
+
+              {/* Status legend indicators */}
+              <div className="ent-legend-bar" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                <span className="ent-status-tag" style={{ background: '#dcfce7', color: '#15803d' }}>EXCELLENT (≥80)</span>
+                <span className="ent-status-tag" style={{ background: '#ecfdf5', color: '#059669' }}>HEALTHY (65-79)</span>
+                <span className="ent-status-tag" style={{ background: '#fffbeb', color: '#d97706' }}>NEEDS ATTENTION (50-64)</span>
+                <span className="ent-status-tag" style={{ background: '#fef2f2', color: '#dc2626' }}>CRITICAL (&lt;50 / LOSS)</span>
+                <span className="ent-status-tag" style={{ background: '#f1f5f9', color: '#64748b' }}>INSUFFICIENT DATA</span>
               </div>
             </div>
 
-            <div className="table-responsive">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Rank</th>
-                    <th>Farm ID</th>
-                    <th>Name</th>
-                    <th>Birds</th>
-                    <th>Avg Production %</th>
-                    <th>Avg Mortality %</th>
-                    <th>Avg Feed (g/bird)</th>
-                    <th>Selection %</th>
-                    <th>Compliance %</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {farmRankings.map((fr, i) => (
-                    <tr key={fr.farmId}>
-                      <td style={{ fontWeight: 700, color: i === 0 ? '#d97706' : '#64748b' }}>#{i + 1}</td>
-                      <td className="td-bold">{fr.farmId}</td>
-                      <td>{fr.name}</td>
-                      <td>{fr.liveBirds.toLocaleString()}</td>
-                      <td style={{ fontWeight: 600, color: fr.pRate >= 70 ? '#15803d' : '#d97706' }}>{fr.pRate}%</td>
-                      <td style={{ color: fr.mRate >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5) ? '#dc2626' : '#15803d', fontWeight: fr.mRate >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5) ? 700 : 400 }}>
-                        {fr.mRate}% {fr.hasTotalFlockLoss ? '(100% LOSS)' : ''}
-                      </td>
-                      <td>{fr.fGrams > 0 ? `${fr.fGrams.toFixed(0)} g` : '--'}</td>
-                      <td>{fr.sRate > 0 ? `${fr.sRate}%` : '--'}</td>
-                      <td>{fr.compliance}%</td>
-                      <td>
-                        <span
-                          className="ent-status-tag"
-                          style={{
-                            background: `${fr.statusColor}15`,
-                            color: fr.statusColor,
-                            border: `1px solid ${fr.statusColor}40`,
-                            fontWeight: 700,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                          }}
-                          title={fr.reason}
-                        >
-                          {fr.isCritical && <AlertTriangle size={12} />}
-                          {fr.statusLabel}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                  {farmRankings.length === 0 && (
-                    <tr>
-                      <td colSpan={10} style={{ textAlign: 'center', color: '#94a3b8', padding: '1.5rem' }}>
-                        No farm ranking data available for the selected period.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+            {/* COLLAPSIBLE METHODOLOGY & SCORING BANNER */}
+            {showMethodology && (
+              <div
+                style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  padding: '16px',
+                  margin: '12px 0 16px 0',
+                  fontSize: '13px',
+                  color: '#334155',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                  <strong style={{ fontSize: '13px', color: '#0f172a', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Info size={15} color="#047857" />
+                    Operational Ranking Methodology & Score Composition (0–100 Points)
+                  </strong>
+                  <button
+                    onClick={() => setShowMethodology(false)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', fontSize: '12px' }}
+                  >
+                    ✕ Close
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '10px', marginTop: '10px' }}>
+                  <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontWeight: 600, color: '#15803d', fontSize: '12px' }}>1. Egg Production (40%)</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
+                      Linear scale: <code>(Production % / 100) × 40 pts</code>. Up to 40 points for commercial output.
+                    </div>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontWeight: 600, color: '#b91c1c', fontSize: '12px' }}>2. Mortality Control (25%)</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
+                      Flock preservation: <code>25 - (Mortality % / 20 × 25) pts</code>. Zero mortality earns max 25 pts.
+                    </div>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontWeight: 600, color: '#0284c7', fontSize: '12px' }}>3. Feed Efficiency (15%)</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
+                      Standard benchmark 120 g/bird/day. Deviation proportionately penalizes: up to 15 pts.
+                    </div>
+                  </div>
+                  <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontWeight: 600, color: '#7c3aed', fontSize: '12px' }}>4. Submission Compliance (20%)</div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '3px' }}>
+                      Reporting discipline: <code>(Submitted Days / Expected Days) × 20 pts</code>. Consistent daily logging earns 20 pts.
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: '10px', padding: '8px 12px', background: '#fef2f2', borderRadius: '6px', border: '1px solid #fecaca', fontSize: '11px', color: '#991b1b', lineHeight: 1.5 }}>
+                  <strong>🚨 Disaster Overrides & Missing-Data Eligibility Rules:</strong>
+                  <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                    <li><strong>Viability Rule:</strong> All viable operational farms strictly outrank farms that suffered catastrophic flock losses.</li>
+                    <li><strong>Catastrophic Flock Loss:</strong> Any single-day 100% flock loss or cumulative flock wipeout immediately caps composite score at 0.0 pts and forces CRITICAL status.</li>
+                    <li><strong>Missing Data Exclusion:</strong> Farms with 0 daily submissions during the selected date window are excluded from competitive ranking to prevent arbitrary ranks (#3) or zero-score pollution. Total bird population remains tracked independently.</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* FILTER TOOLBAR BY STATUS */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '12px', borderBottom: '1px solid #f1f5f9', paddingBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: '#64748b', display: 'inline-flex', alignItems: 'center', gap: '4px', marginRight: '4px' }}>
+                  <Filter size={13} /> Filter:
+                </span>
+                {[
+                  { key: 'ALL', label: `All Farms (${statusCounts.ALL})` },
+                  { key: 'HEALTHY', label: `Healthy (${statusCounts.HEALTHY})` },
+                  { key: 'EXCELLENT', label: `Excellent (${statusCounts.EXCELLENT})` },
+                  { key: 'NEEDS ATTENTION', label: `Needs Attention (${statusCounts['NEEDS ATTENTION']})` },
+                  { key: 'CRITICAL', label: `Critical (${statusCounts.CRITICAL})` },
+                  { key: 'INSUFFICIENT_DATA', label: `Insufficient Data (${statusCounts.INSUFFICIENT_DATA})` },
+                ].map(({ key, label }) => {
+                  const isActive = rankingStatusFilter === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setRankingStatusFilter(key)}
+                      style={{
+                        background: isActive ? '#047857' : '#f8fafc',
+                        color: isActive ? '#ffffff' : '#475569',
+                        border: `1px solid ${isActive ? '#047857' : '#e2e8f0'}`,
+                        borderRadius: '20px',
+                        padding: '3px 10px',
+                        fontSize: '11px',
+                        fontWeight: isActive ? 600 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div style={{ fontSize: '11px', color: '#64748b' }}>
+                Showing <strong>{rankingStatusFilter === 'INSUFFICIENT_DATA' ? 0 : displayedRankedFarms.length}</strong> ranked of <strong>{rankedFarms.length}</strong> eligible
+              </div>
             </div>
+
+            {/* PRIMARY RANKED PERFORMANCE TABLE */}
+            {rankingStatusFilter !== 'INSUFFICIENT_DATA' && (
+              <div className="table-responsive">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th onClick={() => handleSortClick('rank')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} title="Sort by official operational rank">
+                        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                          Rank {renderSortIndicator('rank')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('farmId')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} title="Sort by Farm ID">
+                        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                          Farm ID {renderSortIndicator('farmId')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('name')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} title="Sort by Farm Name">
+                        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                          Name {renderSortIndicator('name')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('liveBirds')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', textAlign: 'right' }} title="Sort by Live Bird Population">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%' }}>
+                          Birds {renderSortIndicator('liveBirds')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('score')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', textAlign: 'center' }} title="Sort by Composite Performance Score (0-100)">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                          Score {renderSortIndicator('score')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('pRate')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', textAlign: 'right' }} title="Sort by Average Production Rate">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%' }}>
+                          Avg Prod % {renderSortIndicator('pRate')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('mRate')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} title="Sort by Average Mortality Rate">
+                        <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                          Avg Mort % {renderSortIndicator('mRate')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('fGrams')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', textAlign: 'right' }} title="Sort by Average Daily Feed Intake per Bird">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%' }}>
+                          Avg Feed {renderSortIndicator('fGrams')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('sRate')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', textAlign: 'right' }} title="Sort by Egg Selection Rate">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%' }}>
+                          Selection % {renderSortIndicator('sRate')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('compliance')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', textAlign: 'right' }} title="Sort by Daily Report Submission Compliance">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', width: '100%' }}>
+                          Compliance % {renderSortIndicator('compliance')}
+                        </span>
+                      </th>
+                      <th onClick={() => handleSortClick('statusLabel')} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', textAlign: 'center' }} title="Sort by Operational Health Status">
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
+                          Status {renderSortIndicator('statusLabel')}
+                        </span>
+                      </th>
+                      <th style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayedRankedFarms.map((fr) => (
+                      <tr key={fr.farmId}>
+                        {/* Official Rank Badge */}
+                        <td>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              minWidth: '32px',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              fontWeight: 800,
+                              fontSize: '12px',
+                              background: fr.rank === 1 ? '#fef3c7' : fr.rank === 2 ? '#f1f5f9' : fr.rank === 3 ? '#ffedd5' : '#f8fafc',
+                              color: fr.rank === 1 ? '#b45309' : fr.rank === 2 ? '#475569' : fr.rank === 3 ? '#c2410c' : '#64748b',
+                              border: `1px solid ${fr.rank === 1 ? '#fde68a' : fr.rank === 2 ? '#cbd5e1' : fr.rank === 3 ? '#fed7aa' : '#e2e8f0'}`,
+                            }}
+                            title={`Official operational rank #${fr.rank} based on composite multi-KPI performance score (${fr.score.toFixed(1)}/100).`}
+                          >
+                            {fr.rankDisplay}
+                          </span>
+                        </td>
+
+                        {/* Farm ID with direct link */}
+                        <td className="td-bold">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/${role === 'supervisor' ? 'supervisor' : 'admin'}/farms/${fr.farmId}`)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              color: '#047857',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              fontSize: '13px',
+                            }}
+                            title={`Click to open full dashboard for Farm ${fr.farmId}`}
+                          >
+                            {fr.farmId}
+                          </button>
+                        </td>
+
+                        {/* Name */}
+                        <td>{fr.name}</td>
+
+                        {/* Birds Population */}
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {fr.liveBirds.toLocaleString()}
+                        </td>
+
+                        {/* Composite Performance Score with breakdown tooltip */}
+                        <td style={{ textAlign: 'center' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '3px 8px',
+                              borderRadius: '12px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              background: fr.score >= 75 ? '#dcfce7' : fr.score >= 50 ? '#fef3c7' : '#fee2e2',
+                              color: fr.score >= 75 ? '#15803d' : fr.score >= 50 ? '#b45309' : '#b91c1c',
+                              border: `1px solid ${fr.score >= 75 ? '#bbf7d0' : fr.score >= 50 ? '#fde68a' : '#fecaca'}`,
+                              cursor: 'help',
+                            }}
+                            title={`Operational Composite Score: ${fr.score.toFixed(1)} / 100 pts\n\nPillar Breakdown:\n• Production: ${fr.scoreBreakdown?.production ?? 0} / 40 pts (40% weight)\n• Mortality Control: ${fr.scoreBreakdown?.mortality ?? 0} / 25 pts (25% weight)\n• Feed Efficiency: ${fr.scoreBreakdown?.feedEfficiency ?? 0} / 15 pts (15% weight)\n• Submission Compliance: ${fr.scoreBreakdown?.compliance ?? 0} / 20 pts (20% weight)${fr.hasTotalFlockLoss ? '\n\n⚠️ DISASTER OVERRIDE: 100% flock loss catastrophe caps score at 0.0 pts.' : ''}`}
+                          >
+                            <span>{fr.score.toFixed(1)}</span>
+                            <span style={{ fontSize: '10px', opacity: 0.75, fontWeight: 500 }}>/ 100</span>
+                          </span>
+                        </td>
+
+                        {/* Avg Production % */}
+                        <td style={{ textAlign: 'right', fontWeight: 600, color: fr.pRate >= 70 ? '#15803d' : '#d97706', fontVariantNumeric: 'tabular-nums' }}>
+                          {fr.pRate.toFixed(1)}%
+                        </td>
+
+                        {/* Avg Mortality % with Disaster Event Context */}
+                        <td style={{ color: fr.mRate >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5) || fr.hasTotalFlockLoss ? '#dc2626' : '#15803d', fontWeight: fr.mRate >= (KPI_THRESHOLDS.mortalityRateWarning ?? 5) || fr.hasTotalFlockLoss ? 700 : 400 }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fr.mRate.toFixed(1)}%</span>
+                            {fr.hasTotalFlockLoss && (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px',
+                                  fontSize: '10px',
+                                  background: '#fef2f2',
+                                  color: '#b91c1c',
+                                  border: '1px solid #fecaca',
+                                  borderRadius: '4px',
+                                  padding: '1px 6px',
+                                  fontWeight: 600,
+                                  cursor: 'help',
+                                  width: 'fit-content',
+                                }}
+                                title={fr.totalLossDate
+                                  ? `Disaster Event: 100% single-day flock loss on ${formatDisplayDate(fr.totalLossDate)} (${fr.totalLossBirds?.toLocaleString() ?? 'all'} birds died). 53 other days had normal low mortality (avg 0.05%), bringing the 54-day average to ${fr.mRate.toFixed(1)}%. Disaster rule forces CRITICAL status and caps score at 0.0.`
+                                  : 'Catastrophic total flock loss reported across reporting period.'}
+                              >
+                                <AlertTriangle size={10} />
+                                {fr.totalLossDate ? `100% Loss on ${getShortDate(fr.totalLossDate)} (${fr.totalLossBirds?.toLocaleString()} birds)` : '100% Flock Loss'}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Feed per bird */}
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {fr.fGrams > 0 ? `${fr.fGrams.toFixed(0)} g` : '--'}
+                        </td>
+
+                        {/* Selection % */}
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {fr.sRate > 0 ? `${fr.sRate.toFixed(1)}%` : '--'}
+                        </td>
+
+                        {/* Compliance % */}
+                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          <span title={`${fr.reportsCount} daily submissions recorded out of ${days} expected days`}>
+                            {fr.compliance}%
+                          </span>
+                        </td>
+
+                        {/* Status Tag */}
+                        <td style={{ textAlign: 'center' }}>
+                          <span
+                            className="ent-status-tag"
+                            style={{
+                              background: `${fr.statusColor}15`,
+                              color: fr.statusColor,
+                              border: `1px solid ${fr.statusColor}40`,
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                            title={fr.reason}
+                          >
+                            {fr.isCritical && <AlertTriangle size={12} />}
+                            {fr.statusLabel}
+                          </span>
+                        </td>
+
+                        {/* Action Column */}
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--outline"
+                            onClick={() => navigate(`/${role === 'supervisor' ? 'supervisor' : 'admin'}/farms/${fr.farmId}`)}
+                            style={{ fontSize: '11px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                            title={`Navigate to farm details for ${fr.farmId}`}
+                          >
+                            <span>View Farm</span>
+                            <ExternalLink size={11} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {displayedRankedFarms.length === 0 && (
+                      <tr>
+                        <td colSpan={12} style={{ textAlign: 'center', color: '#94a3b8', padding: '1.5rem' }}>
+                          No ranked farms match the selected filter ({rankingStatusFilter}).
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* DEDICATED INSUFFICIENT DATA (UNRANKED FARMS) SECTION */}
+            {unrankedFarms.length > 0 && (rankingStatusFilter === 'ALL' || rankingStatusFilter === 'INSUFFICIENT_DATA') && (
+              <div style={{ marginTop: '20px', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Info size={16} color="#64748b" />
+                    <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 600, color: '#334155' }}>
+                      Farms with Insufficient Data for this Period ({unrankedFarms.length})
+                    </h4>
+                  </div>
+                  <span style={{ fontSize: '11px', color: '#64748b', background: '#f1f5f9', padding: '2px 8px', borderRadius: '4px' }}>
+                    Excluded from competitive ranking to prevent misleading zero/tie ranks
+                  </span>
+                </div>
+                <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 10px 0' }}>
+                  Farms must record at least one daily operational submission during the selected {days}-day window ({formatDisplayDate(startDate)} to {formatDisplayDate(endDate)}) to receive a performance score. Total bird population remains tracked independently.
+                </p>
+
+                <div className="table-responsive">
+                  <table className="data-table" style={{ background: '#f8fafc' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ width: '60px' }}>Rank</th>
+                        <th>Farm ID</th>
+                        <th>Name</th>
+                        <th style={{ textAlign: 'right' }}>Registered Birds</th>
+                        <th style={{ textAlign: 'right' }}>Submissions</th>
+                        <th>Reason / Missing Data</th>
+                        <th style={{ textAlign: 'center' }}>Status</th>
+                        <th style={{ textAlign: 'right' }}>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unrankedFarms.map((uf) => (
+                        <tr key={uf.farmId} style={{ opacity: 0.9 }}>
+                          <td style={{ color: '#94a3b8', fontWeight: 700 }}>—</td>
+                          <td className="td-bold">
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/${role === 'supervisor' ? 'supervisor' : 'admin'}/farms/${uf.farmId}`)}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                padding: 0,
+                                color: '#047857',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                textDecoration: 'underline',
+                                fontSize: '13px',
+                              }}
+                              title={`Click to open farm profile for ${uf.farmId}`}
+                            >
+                              {uf.farmId}
+                            </button>
+                          </td>
+                          <td>{uf.name}</td>
+                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                            {uf.liveBirds > 0 ? uf.liveBirds.toLocaleString() : '0'}
+                          </td>
+                          <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                            <span style={{ color: '#dc2626', fontWeight: 600 }}>
+                              0 / {days} days (0%)
+                            </span>
+                          </td>
+                          <td style={{ color: '#64748b', fontSize: '12px' }}>
+                            {uf.reason || `No daily reports submitted in selected ${days}-day window`}
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <span
+                              className="ent-status-tag"
+                              style={{
+                                background: '#f1f5f9',
+                                color: '#64748b',
+                                border: '1px solid #cbd5e1',
+                                fontWeight: 600,
+                              }}
+                            >
+                              INSUFFICIENT DATA
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              className="btn btn--sm btn--outline"
+                              onClick={() => navigate(`/${role === 'supervisor' ? 'supervisor' : 'admin'}/farms/${uf.farmId}`)}
+                              style={{ fontSize: '11px', padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              title={`Navigate to farm details for ${uf.farmId}`}
+                            >
+                              <span>View Farm</span>
+                              <ExternalLink size={11} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}
 
       {/* LEVEL 4: MULTI-DIMENSIONAL RECHARTS ANALYTICS GRID */}
       {(variant === 'analytics' || variant === 'full') && (
-        <div className="ent-charts-grid">
+        <>
+        <div className="analytics-section-heading analytics-section-heading--workbench"><span>02 / Analytical workbench</span><strong>Read the operation in motion</strong><small>Tap any surface to open its fullscreen analytical view</small></div>
+        <div className="ent-charts-grid analytics-workbench">
         {/* GRAPH 1: PRODUCTION TREND VS STANDARD BASELINE */}
         <div
           className="ent-chart-card ent-chart-card--clickable"
@@ -1086,7 +1694,8 @@ export function EnterpriseAnalyticsDashboard({ role, variant = 'full' }: Enterpr
             </BarChart>
           </ResponsiveContainer>
         </div>
-      </div>
+        </div>
+        </>
       )}
 
       {/* UNIFIED METRIC & CHART DRILL-DOWN MODAL */}
