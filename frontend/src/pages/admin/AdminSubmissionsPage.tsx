@@ -11,7 +11,6 @@ import { getIstDate, formatDisplayDate, formatTime } from '../../utils/dateUtils
 import { useDailyReportsByDate } from '../../hooks/useDailyReports';
 import { UploadCloud, Eye } from 'lucide-react';
 import { ReportDetailDrawer } from '../../components/dashboard/ReportDetailDrawer';
-
 import { ExportReportsCard } from '../../components/dashboard/ExportReportsCard';
 
 export function AdminSubmissionsPage() {
@@ -70,11 +69,11 @@ export function AdminSubmissionsPage() {
           </Link>
         </div>
         <div className="mgmt-page-header">
-
           <h2>Submissions - {formatDisplayDate(date)}</h2>
           <div className="header-controls">
             <input
               type="text"
+              maxLength={100}
               className="search-input"
               placeholder="Search farm or farmer..."
               value={search}
@@ -84,7 +83,9 @@ export function AdminSubmissionsPage() {
               type="date"
               className="date-input"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => {
+                if (e.target.value) setDate(e.target.value);
+              }}
             />
           </div>
         </div>

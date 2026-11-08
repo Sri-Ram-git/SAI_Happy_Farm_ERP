@@ -125,4 +125,42 @@ describe('CreateFarmerSchema Validation Suite', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it('should reject bird count exceeding 10,000,000 birds', () => {
+    const result = CreateFarmerSchema.safeParse({
+      ...validPayload,
+      initialBirdCount: 10000001,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toContain('10,000,000');
+    }
+  });
+
+  it('should reject initial feed exceeding 9,999,999.99 Kg', () => {
+    const result = CreateFarmerSchema.safeParse({
+      ...validPayload,
+      initialFeedKg: 10000000,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].message).toContain('9,999,999.99');
+    }
+  });
+
+  it('should reject invalid phone format or letters in phone_no', () => {
+    const result = CreateFarmerSchema.safeParse({
+      ...validPayload,
+      phone_no: '98765abcde',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('should reject invalid characters in farmId', () => {
+    const result = CreateFarmerSchema.safeParse({
+      ...validPayload,
+      farmId: 'AP 17!',
+    });
+    expect(result.success).toBe(false);
+  });
 });

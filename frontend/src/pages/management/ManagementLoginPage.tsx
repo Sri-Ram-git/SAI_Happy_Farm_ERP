@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import { getUserByUid } from '../../services/userDataService';
 import { normalizeRole } from '../../utils/normalizeRole';
+import { validateEmail } from '../../utils/validationRules';
 import { auth } from '../../config/firebase';
 
 export function ManagementLoginPage() {
@@ -17,10 +18,22 @@ export function ManagementLoginPage() {
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.valid) {
+      setError(emailValidation.error || 'Enter a valid email address.');
+      return;
+    }
+
+    if (!password) {
+      setError('Password is required.');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const result = await auth.signInWithEmailAndPassword(email, password);
+      const result = await auth.signInWithEmailAndPassword(email.trim().toLowerCase(), password);
       const uid = result.user.uid;
 
       let profile;
@@ -121,8 +134,13 @@ export function ManagementLoginPage() {
               <input
                 id="mgmt-email"
                 type="email"
+                maxLength={254}
+                className={error && (error.includes('email') || error.includes('Email')) ? 'input--error' : ''}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  if (error) setError('');
+                }}
                 placeholder="you@example.com"
                 required
                 disabled={loading}
@@ -135,8 +153,13 @@ export function ManagementLoginPage() {
                 <input
                   id="mgmt-password"
                   type={showPassword ? 'text' : 'password'}
+                  maxLength={128}
+                  className={error && (error.includes('Password') || error.includes('password')) ? 'input--error' : ''}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    if (error) setError('');
+                  }}
                   placeholder="Enter password"
                   required
                   disabled={loading}

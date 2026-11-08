@@ -837,6 +837,7 @@ export function AdminUsersPage() {
                     </label>
                     <input
                       type="text"
+                      maxLength={50}
                       disabled={deleteLoading}
                       value={deleteInput}
                       onChange={(e) => setDeleteInput(e.target.value)}
@@ -1068,6 +1069,7 @@ export function AdminUsersPage() {
                     </label>
                     <input
                       type="text"
+                      maxLength={50}
                       disabled={deactivateLoading}
                       value={deactivateInput}
                       onChange={(e) => setDeactivateInput(e.target.value)}
@@ -1240,6 +1242,7 @@ export function AdminUsersPage() {
                   />
                   <input
                     type="text"
+                    maxLength={100}
                     value={reassignSearch}
                     onChange={(e) => setReassignSearch(e.target.value)}
                     placeholder="Search farms by ID or name..."

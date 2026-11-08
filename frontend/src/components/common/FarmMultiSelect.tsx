@@ -208,6 +208,7 @@ export const FarmMultiSelect: React.FC<FarmMultiSelectProps> = ({
           <div style={{ padding: '8px 12px', borderBottom: '1px solid #f3f4f6', backgroundColor: '#ffffff' }}>
             <input
               type="text"
+              maxLength={100}
               placeholder="🔍 Search farms..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}

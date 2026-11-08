@@ -4,6 +4,14 @@ import { useAuth } from '../../context/AuthContext';
 import { DashboardLayout } from '../../components/dashboard/DashboardLayout';
 import { createAdmin, type CreateAdminPayload } from '../../services/userDataService';
 import { FormLoadingOverlay } from '../../components/common/FormLoadingOverlay';
+import {
+  validateName,
+  validateEmail,
+  validatePhone,
+  validatePassword,
+  validateConfirmPassword,
+  isValidPhoneInput,
+} from '../../utils/validationRules';
 
 export function AdminCreateAdminPage() {
   const { userProfile } = useAuth();
@@ -20,20 +28,75 @@ export function AdminCreateAdminPage() {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  const clearFieldError = (field: string) => {
+    if (errors[field]) {
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+    }
+  };
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setName(e.target.value);
+    clearFieldError('name');
+  };
+
+  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setEmail(e.target.value);
+    clearFieldError('email');
+  };
+
+  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (isValidPhoneInput(val)) {
+      setPhoneNo(val);
+      clearFieldError('phone_no');
+    }
+  };
+
+  const handlePhonePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text');
+    const input = e.currentTarget;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const prospective = input.value.slice(0, start) + pasted + input.value.slice(end);
+    if (!isValidPhoneInput(prospective)) {
+      e.preventDefault();
+    }
+  };
+
+  const handlePasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setPassword(e.target.value);
+    clearFieldError('password');
+    if (confirmPassword && e.target.value === confirmPassword) {
+      clearFieldError('confirmPassword');
+    }
+  };
+
+  const handleConfirmPasswordChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setConfirmPassword(e.target.value);
+    clearFieldError('confirmPassword');
+  };
+
   const validate = (): boolean => {
     const errs: Record<string, string> = {};
 
-    if (!name.trim()) errs.name = 'Full name is required';
-    if (!email.trim()) errs.email = 'Email address is required';
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.email = 'Invalid email format';
+    const nameRes = validateName(name, 'Full Name');
+    if (!nameRes.valid) errs.name = nameRes.error!;
 
-    if (!phoneNo.trim()) errs.phone_no = 'Phone number is required';
+    const emailRes = validateEmail(email);
+    if (!emailRes.valid) errs.email = emailRes.error!;
 
-    if (!password) errs.password = 'Password is required';
-    else if (password.length < 8) errs.password = 'Password must be at least 8 characters';
+    const phoneRes = validatePhone(phoneNo);
+    if (!phoneRes.valid) errs.phone_no = phoneRes.error!;
 
-    if (!confirmPassword) errs.confirmPassword = 'Please confirm password';
-    else if (password !== confirmPassword) errs.confirmPassword = 'Passwords do not match';
+    const passRes = validatePassword(password);
+    if (!passRes.valid) errs.password = passRes.error!;
+
+    const confRes = validateConfirmPassword(password, confirmPassword);
+    if (!confRes.valid) errs.confirmPassword = confRes.error!;
 
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -41,7 +104,8 @@ export function AdminCreateAdminPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (submitting || !validate()) return;
+    if (submitting) return;
+    if (!validate()) return;
 
     setSubmitting(true);
     setGeneralError(null);
@@ -50,7 +114,7 @@ export function AdminCreateAdminPage() {
     try {
       const payload: CreateAdminPayload = {
         name: name.trim(),
-        email: email.trim(),
+        email: email.trim().toLowerCase(),
         phone_no: phoneNo.trim(),
         password,
       };
@@ -98,19 +162,20 @@ export function AdminCreateAdminPage() {
           {generalError && <div className="alert alert--error" style={{ marginBottom: 16 }}>{generalError}</div>}
           {successMessage && <div className="alert alert--success" style={{ marginBottom: 16 }}>{successMessage}</div>}
 
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} noValidate>
             <div className="field" style={{ marginBottom: 16 }}>
               <label htmlFor="admin-name" style={{ display: 'block', fontWeight: 500, marginBottom: 6 }}>Full Name *</label>
               <input
                 id="admin-name"
                 type="text"
+                maxLength={100}
                 placeholder="Enter administrator full name"
-                className="form-input"
+                className={`form-input ${errors.name ? 'input--error' : ''}`}
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={handleNameChange}
                 disabled={submitting}
               />
-              {errors.name && <div className="field-error" style={{ color: '#dc2626', fontSize: 13, marginTop: 4 }}>{errors.name}</div>}
+              {errors.name && <div className="field-error">{errors.name}</div>}
             </div>
 
             <div className="field" style={{ marginBottom: 16 }}>
@@ -118,13 +183,14 @@ export function AdminCreateAdminPage() {
               <input
                 id="admin-email"
                 type="email"
+                maxLength={254}
                 placeholder="admin@example.com"
-                className="form-input"
+                className={`form-input ${errors.email ? 'input--error' : ''}`}
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={handleEmailChange}
                 disabled={submitting}
               />
-              {errors.email && <div className="field-error" style={{ color: '#dc2626', fontSize: 13, marginTop: 4 }}>{errors.email}</div>}
+              {errors.email && <div className="field-error">{errors.email}</div>}
             </div>
 
             <div className="field" style={{ marginBottom: 16 }}>
@@ -132,13 +198,15 @@ export function AdminCreateAdminPage() {
               <input
                 id="admin-phone"
                 type="tel"
-                placeholder="Enter phone number"
-                className="form-input"
+                maxLength={20}
+                placeholder="+91 9876543210"
+                className={`form-input ${errors.phone_no ? 'input--error' : ''}`}
                 value={phoneNo}
-                onChange={(e) => setPhoneNo(e.target.value)}
+                onChange={handlePhoneChange}
+                onPaste={handlePhonePaste}
                 disabled={submitting}
               />
-              {errors.phone_no && <div className="field-error" style={{ color: '#dc2626', fontSize: 13, marginTop: 4 }}>{errors.phone_no}</div>}
+              {errors.phone_no && <div className="field-error">{errors.phone_no}</div>}
             </div>
 
             <div className="field" style={{ marginBottom: 16 }}>
@@ -146,13 +214,14 @@ export function AdminCreateAdminPage() {
               <input
                 id="admin-password"
                 type="password"
-                placeholder="Minimum 6 characters"
-                className="form-input"
+                maxLength={128}
+                placeholder="Minimum 8 characters"
+                className={`form-input ${errors.password ? 'input--error' : ''}`}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={handlePasswordChange}
                 disabled={submitting}
               />
-              {errors.password && <div className="field-error" style={{ color: '#dc2626', fontSize: 13, marginTop: 4 }}>{errors.password}</div>}
+              {errors.password && <div className="field-error">{errors.password}</div>}
             </div>
 
             <div className="field" style={{ marginBottom: 24 }}>
@@ -160,13 +229,14 @@ export function AdminCreateAdminPage() {
               <input
                 id="admin-confirm"
                 type="password"
+                maxLength={128}
                 placeholder="Re-enter password"
-                className="form-input"
+                className={`form-input ${errors.confirmPassword ? 'input--error' : ''}`}
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={handleConfirmPasswordChange}
                 disabled={submitting}
               />
-              {errors.confirmPassword && <div className="field-error" style={{ color: '#dc2626', fontSize: 13, marginTop: 4 }}>{errors.confirmPassword}</div>}
+              {errors.confirmPassword && <div className="field-error">{errors.confirmPassword}</div>}
             </div>
 
             <div style={{ display: 'flex', gap: 12, marginTop: 24 }}>

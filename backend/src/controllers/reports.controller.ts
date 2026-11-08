@@ -76,6 +76,28 @@ export async function exportProductionCurveReport(
     const requestId = req.requestId!;
     const user = req.user;
 
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Start date and end date must be in YYYY-MM-DD format',
+        },
+      });
+      return;
+    }
+
+    if (startDate > endDate) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'End date must be on or after the start date',
+        },
+      });
+      return;
+    }
+
     const farmIdParam = req.query['farmId'] as string | undefined;
     let targetFarmIds: string[] | undefined = undefined;
 

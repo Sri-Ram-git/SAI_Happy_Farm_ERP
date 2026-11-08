@@ -27,6 +27,16 @@ import {
   Info,
   Check,
 } from 'lucide-react';
+import {
+  validateFlockName,
+  validateBreedType,
+  validateNotes,
+  validateBirdCount,
+  validateDate,
+  isValidIntegerInput,
+  handleIntegerKeyDown,
+  MAX_BIRD_COUNT,
+} from '../../utils/validationRules';
 
 export function AdminFlocksPage() {
   const { t } = useTranslation();
@@ -48,7 +58,18 @@ export function AdminFlocksPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [modalErrors, setModalErrors] = useState<Record<string, string>>({});
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const clearModalError = (field: string) => {
+    if (modalErrors[field]) {
+      setModalErrors((prev) => {
+        const next = { ...prev };
+        delete next[field];
+        return next;
+      });
+    }
+  };
 
   // Form Fields
   const [formFarmId, setFormFarmId] = useState('');
@@ -179,6 +200,7 @@ export function AdminFlocksPage() {
     setFormProductionCurve('CF_STD');
     setFormNotes('');
     setFormError(null);
+    setModalErrors({});
     handleSelectFarmInModal(targetFarmId);
     setIsModalOpen(true);
   };
@@ -209,30 +231,55 @@ export function AdminFlocksPage() {
     if (submitting) return;
 
     setFormError(null);
+    const mErrors: Record<string, string> = {};
 
     if (!formFarmId) {
-      setFormError('Please select a farm.');
-      return;
+      mErrors.farm = 'Please select a farm.';
     }
 
     let birdCount: number;
     if (isModalInitialFlock) {
       // Authoritative rule: Initial flock initialBirds comes directly from farm document's initialBirdCount
-      birdCount = targetFarmInitialBirds > 0 ? targetFarmInitialBirds : parseInt(formInitialBirds, 10);
-      if (isNaN(birdCount) || birdCount <= 0) {
-        setFormError('Please enter a valid initial bird count.');
-        return;
+      if (targetFarmInitialBirds > 0) {
+        birdCount = targetFarmInitialBirds;
+      } else {
+        const birdValidation = validateBirdCount(formInitialBirds, true, 1, MAX_BIRD_COUNT);
+        if (!birdValidation.valid) {
+          mErrors.birds = birdValidation.error || 'Please enter a valid initial bird count.';
+        }
+        birdCount = birdValidation.value ?? 0;
       }
     } else {
-      birdCount = parseInt(formInitialBirds, 10);
-      if (isNaN(birdCount) || birdCount <= 0) {
-        setFormError('Please enter a valid positive number for new batch bird count.');
-        return;
+      const birdValidation = validateBirdCount(formInitialBirds, true, 1, MAX_BIRD_COUNT);
+      if (!birdValidation.valid) {
+        mErrors.birds = birdValidation.error || 'Please enter a valid positive number for new batch bird count.';
       }
+      birdCount = birdValidation.value ?? 0;
     }
 
-    if (!formStartDate) {
-      setFormError('Please select the arrival/start date.');
+    const dateValidation = validateDate(formStartDate, 'Flock placement / start date');
+    if (!dateValidation.valid) {
+      mErrors.startDate = dateValidation.error!;
+    }
+
+    const flockNameValidation = validateFlockName(formFlockName);
+    if (!flockNameValidation.valid) {
+      mErrors.flockName = flockNameValidation.error!;
+    }
+
+    const breedValidation = validateBreedType(formBreedType);
+    if (!breedValidation.valid) {
+      mErrors.breedType = breedValidation.error!;
+    }
+
+    const notesValidation = validateNotes(formNotes, 1000, 'Batch notes');
+    if (!notesValidation.valid) {
+      mErrors.notes = notesValidation.error!;
+    }
+
+    if (Object.keys(mErrors).length > 0) {
+      setModalErrors(mErrors);
+      setFormError('Please resolve the errors highlighted below.');
       return;
     }
 
@@ -384,6 +431,7 @@ export function AdminFlocksPage() {
               <Search size={15} className="flock-search-icon" />
               <input
                 type="text"
+                maxLength={100}
                 className="form-input flock-filter-input"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -822,12 +870,17 @@ export function AdminFlocksPage() {
                   </label>
                   <input
                     type="text"
-                    className="form-input"
+                    maxLength={100}
+                    className={`form-input ${modalErrors.flockName ? 'input--error' : ''}`}
                     value={formFlockName}
-                    onChange={(e) => setFormFlockName(e.target.value)}
+                    onChange={(e) => {
+                      setFormFlockName(e.target.value);
+                      clearModalError('flockName');
+                    }}
                     placeholder={isModalInitialFlock ? 'Flock 1 (Default)' : `Flock ${nextBatchNumber}`}
                     style={{ width: '100%', padding: '9px 12px', fontSize: '14px' }}
                   />
+                  {modalErrors.flockName && <div className="field-error">{modalErrors.flockName}</div>}
                 </div>
 
                 {/* Bird Count & Date Added */}
@@ -884,15 +937,22 @@ export function AdminFlocksPage() {
                           Initial Bird Count *
                         </label>
                         <input
-                          type="number"
-                          className="form-input"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={8}
+                          className={`form-input ${modalErrors.birds ? 'input--error' : ''}`}
                           value={formInitialBirds}
-                          onChange={(e) => setFormInitialBirds(e.target.value)}
+                          onChange={(e) => {
+                            if (isValidIntegerInput(e.target.value, MAX_BIRD_COUNT)) {
+                              setFormInitialBirds(e.target.value);
+                              clearModalError('birds');
+                            }
+                          }}
+                          onKeyDown={handleIntegerKeyDown}
                           placeholder="e.g. 2000"
-                          min="1"
-                          required
                           style={{ width: '100%', padding: '9px 12px', fontSize: '14px' }}
                         />
+                        {modalErrors.birds && <div className="field-error">{modalErrors.birds}</div>}
                       </div>
                     )}
 
@@ -902,12 +962,15 @@ export function AdminFlocksPage() {
                       </label>
                       <input
                         type="date"
-                        className="form-input"
+                        className={`form-input ${modalErrors.startDate ? 'input--error' : ''}`}
                         value={formStartDate}
-                        onChange={(e) => setFormStartDate(e.target.value)}
-                        required
+                        onChange={(e) => {
+                          setFormStartDate(e.target.value);
+                          clearModalError('startDate');
+                        }}
                         style={{ width: '100%', padding: '9px 12px', fontSize: '14px' }}
                       />
+                      {modalErrors.startDate && <div className="field-error">{modalErrors.startDate}</div>}
                     </div>
                   </div>
                 ) : (
@@ -917,13 +980,19 @@ export function AdminFlocksPage() {
                         New Batch Bird Count *
                       </label>
                       <input
-                        type="number"
-                        className="form-input"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={8}
+                        className={`form-input ${modalErrors.birds ? 'input--error' : ''}`}
                         value={formInitialBirds}
-                        onChange={(e) => setFormInitialBirds(e.target.value)}
+                        onChange={(e) => {
+                          if (isValidIntegerInput(e.target.value, MAX_BIRD_COUNT)) {
+                            setFormInitialBirds(e.target.value);
+                            clearModalError('birds');
+                          }
+                        }}
+                        onKeyDown={handleIntegerKeyDown}
                         placeholder="e.g. 300"
-                        min="1"
-                        required
                         style={{ width: '100%', padding: '9px 12px', fontSize: '14px' }}
                       />
                       <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
@@ -935,6 +1004,7 @@ export function AdminFlocksPage() {
                           birds
                         </strong>
                       </div>
+                      {modalErrors.birds && <div className="field-error">{modalErrors.birds}</div>}
                     </div>
 
                     <div className="form-group">
@@ -943,12 +1013,15 @@ export function AdminFlocksPage() {
                       </label>
                       <input
                         type="date"
-                        className="form-input"
+                        className={`form-input ${modalErrors.startDate ? 'input--error' : ''}`}
                         value={formStartDate}
-                        onChange={(e) => setFormStartDate(e.target.value)}
-                        required
+                        onChange={(e) => {
+                          setFormStartDate(e.target.value);
+                          clearModalError('startDate');
+                        }}
                         style={{ width: '100%', padding: '9px 12px', fontSize: '14px' }}
                       />
+                      {modalErrors.startDate && <div className="field-error">{modalErrors.startDate}</div>}
                     </div>
                   </div>
                 )}
@@ -961,12 +1034,17 @@ export function AdminFlocksPage() {
                     </label>
                     <input
                       type="text"
-                      className="form-input"
+                      maxLength={50}
+                      className={`form-input ${modalErrors.breedType ? 'input--error' : ''}`}
                       value={formBreedType}
-                      onChange={(e) => setFormBreedType(e.target.value)}
+                      onChange={(e) => {
+                        setFormBreedType(e.target.value);
+                        clearModalError('breedType');
+                      }}
                       placeholder="e.g. BV-300, Cobb"
                       style={{ width: '100%', padding: '9px 12px', fontSize: '14px' }}
                     />
+                    {modalErrors.breedType && <div className="field-error">{modalErrors.breedType}</div>}
                   </div>
 
                   <div className="form-group">
@@ -990,13 +1068,18 @@ export function AdminFlocksPage() {
                     Notes / Batch Remarks <span style={{ color: '#64748b', fontWeight: 400 }}>(Optional)</span>
                   </label>
                   <textarea
-                    className="form-input"
+                    maxLength={1000}
+                    className={`form-input ${modalErrors.notes ? 'input--error' : ''}`}
                     value={formNotes}
-                    onChange={(e) => setFormNotes(e.target.value)}
+                    onChange={(e) => {
+                      setFormNotes(e.target.value);
+                      clearModalError('notes');
+                    }}
                     placeholder="e.g. Initial flock placement, supplier details..."
                     rows={2}
                     style={{ width: '100%', padding: '8px 12px', fontSize: '14px', resize: 'vertical' }}
                   />
+                  {modalErrors.notes && <div className="field-error">{modalErrors.notes}</div>}
                 </div>
 
                 {/* Action Buttons */}

@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { getIstDate, getDaysAgo, formatDisplayDate } from '../../utils/dateUtils';
+import { validateDate, validateDateRange } from '../../utils/validationRules';
 import { 
   exportDailyReportsToExcel, 
   getWeekDates, 
@@ -54,17 +55,9 @@ export function ExportReportsCard() {
     setStatusMessage(null);
     setErrorMessage(null);
 
-    // Validation
-    if (!startDate) {
-      setErrorMessage('Start date is required.');
-      return;
-    }
-    if (!endDate) {
-      setErrorMessage('End date is required.');
-      return;
-    }
-    if (startDate > endDate) {
-      setErrorMessage('Start date cannot be after end date.');
+    const rangeVal = validateDateRange(startDate, endDate);
+    if (!rangeVal.valid) {
+      setErrorMessage(rangeVal.error || 'Invalid date range.');
       return;
     }
 
@@ -86,6 +79,12 @@ export function ExportReportsCard() {
   const handleExportWeekly = async () => {
     setStatusMessage(null);
     setErrorMessage(null);
+
+    const dateVal = validateDate(selectedWeekDate, 'Week date');
+    if (!dateVal.valid) {
+      setErrorMessage(dateVal.error || 'Please enter a valid week date.');
+      return;
+    }
 
     const weekInfo = getWeekDates(selectedWeekDate);
     setLoading(true);
@@ -110,6 +109,11 @@ export function ExportReportsCard() {
   const handleExportMonthly = async () => {
     setStatusMessage(null);
     setErrorMessage(null);
+
+    if (!selectedMonth || !/^\d{4}-\d{2}$/.test(selectedMonth.trim())) {
+      setErrorMessage('Please select a valid month (YYYY-MM).');
+      return;
+    }
 
     const monthInfo = getMonthDates(selectedMonth);
     setLoading(true);
@@ -200,9 +204,12 @@ export function ExportReportsCard() {
                 <label>Start Date</label>
                 <input
                   type="date"
-                  className="form-input"
+                  className={`form-input ${errorMessage && errorMessage.includes('start') ? 'input--error' : ''}`}
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  onChange={(e) => {
+                    setStartDate(e.target.value);
+                    setErrorMessage(null);
+                  }}
                 />
               </div>
 
@@ -210,9 +217,12 @@ export function ExportReportsCard() {
                 <label>End Date</label>
                 <input
                   type="date"
-                  className="form-input"
+                  className={`form-input ${errorMessage && errorMessage.includes('date') ? 'input--error' : ''}`}
                   value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
+                  onChange={(e) => {
+                    setEndDate(e.target.value);
+                    setErrorMessage(null);
+                  }}
                 />
               </div>
             </div>

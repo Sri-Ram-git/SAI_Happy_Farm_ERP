@@ -47,7 +47,6 @@ export function SupervisorSubmissionsPage() {
     <DashboardLayout role="supervisor" userName={userProfile?.name}>
       <div className="mgmt-page">
         <div className="mgmt-page-header">
-
           <h2>Submissions - {formatDisplayDate(date)}</h2>
           <div className="header-controls">
             <span className="submission-count">{submittedCount} / {farms.length} submitted</span>
@@ -55,7 +54,9 @@ export function SupervisorSubmissionsPage() {
               type="date"
               className="date-input"
               value={date}
-              onChange={(e) => setDate(e.target.value)}
+              onChange={(e) => {
+                if (e.target.value) setDate(e.target.value);
+              }}
             />
           </div>
         </div>
