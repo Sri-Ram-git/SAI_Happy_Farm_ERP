@@ -6964,3 +6964,385 @@ textarea {
   background: #f8fafc !important;
 }
 
+
+/* ==========================================================================
+   ISSUE #02: FARM DETAILS INTERACTIVE KPI CARDS & ANALYTICS
+   ========================================================================== */
+.kpi-card--selected {
+  border-color: var(--green-700, #15803d) !important;
+  background-color: #f0fdf4 !important;
+  box-shadow: 0 4px 14px rgba(21, 128, 61, 0.16) !important;
+  transform: translateY(-2px);
+}
+
+.kpi-card--selected::after {
+  content: '\25BC' !important;
+  color: var(--green-700, #15803d) !important;
+  font-size: 11px !important;
+}
+
+.farm-analytics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.farm-analytics-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--gray-900, #0f172a);
+}
+
+.farm-analytics-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--gray-600, #475569);
+}
+
+.farm-analytics-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.farm-analytics-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--gray-100, #f1f5f9);
+  color: var(--gray-700, #334155);
+  border: 1px solid var(--gray-200, #e2e8f0);
+}
+
+.farm-analytics-badge--primary {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #bbf7d0;
+  font-weight: 600;
+}
+
+.farm-analytics-close-btn {
+  background: none;
+  border: 1px solid var(--gray-200, #e2e8f0);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--gray-600, #475569);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.farm-analytics-close-btn:hover {
+  background: var(--gray-100, #f1f5f9);
+  color: var(--gray-900, #0f172a);
+}
+
+/* Farm Details Polished Chart Layout */
+.chart-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chart-card-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--gray-800, #1e293b);
+}
+
+.chart-card-sub {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--gray-500, #64748b);
+}
+
+.farm-kpi-analytics-card {
+  border: 1px solid #bbf7d0 !important;
+  background: #ffffff !important;
+  border-radius: var(--radius) !important;
+  padding: 20px !important;
+  box-shadow: 0 4px 16px rgba(21, 128, 61, 0.08) !important;
+  margin-bottom: 24px !important;
+}
+
+.farm-reports-highlight {
+  border: 2px solid #15803d !important;
+  box-shadow: 0 0 0 4px rgba(21, 128, 61, 0.12) !important;
+  transition: all 0.3s ease;
+}
+
+.chart-empty-state {
+  height: 230px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-400, #94a3b8);
+  font-size: 13px;
+  text-align: center;
+  gap: 8px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px dashed #e2e8f0;
+}
+
+/* ==========================================================================
+   FARM DETAILS FULLSCREEN CHART MODAL STYLES
+   ========================================================================== */
+.farm-fullscreen-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(4px);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  animation: modalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.farm-fullscreen-dialog {
+  background: var(--white);
+  border-radius: 14px;
+  width: 95vw;
+  max-width: 1400px;
+  height: 90vh;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.35);
+  overflow: hidden;
+  animation: modalZoomIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.farm-fullscreen-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--gray-200);
+  background: var(--white);
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.farm-fullscreen-body {
+  flex: 1;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #ffffff;
+}
+
+.farm-fullscreen-chart-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 480px;
+  height: 100%;
+}
+
+.farm-chart-expand-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--white);
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--gray-600);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.farm-chart-expand-btn:hover {
+  background: var(--gray-50);
+  border-color: var(--gray-300);
+  color: var(--gray-900);
+}
+
+.farm-chart-card--interactive {
+  cursor: pointer;
+  transition: box-shadow var(--transition), border-color var(--transition);
+}
+
+.farm-chart-card--interactive:hover {
+  border-color: #cbd5e1;
+}
+
+.farm-chart-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Farm Details analytics visual system */
+.mgmt-page .chart-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.mgmt-page .chart-card,
+.mgmt-page .farm-kpi-analytics-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.055);
+}
+
+.mgmt-page .chart-card {
+  min-width: 0;
+  padding: 22px 22px 18px;
+}
+
+.mgmt-page .chart-card:hover,
+.mgmt-page .farm-kpi-analytics-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.09);
+}
+
+.mgmt-page .chart-card-header,
+.mgmt-page .farm-analytics-header {
+  margin-bottom: 12px;
+}
+
+.mgmt-page .chart-card-header h3,
+.mgmt-page .farm-analytics-header h3 {
+  color: #0f172a;
+  font-size: 16px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+
+.mgmt-page .chart-card-sub,
+.mgmt-page .farm-analytics-sub {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.farm-chart-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.farm-chart-summary__item {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #edf2f7;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.farm-chart-summary__item span {
+  display: block;
+  margin-bottom: 3px;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.farm-chart-summary__item strong {
+  display: block;
+  overflow: hidden;
+  color: #334155;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.farm-chart-summary__item--positive {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.farm-chart-summary__item--positive strong {
+  color: #15803d;
+}
+
+.mgmt-page .recharts-cartesian-axis-tick text {
+  fill: #64748b;
+  font-size: 11px;
+}
+
+.mgmt-page .recharts-cartesian-grid-horizontal line {
+  stroke: #e9eef5;
+}
+
+.mgmt-page .recharts-default-tooltip {
+  border: 0 !important;
+  border-radius: 12px !important;
+}
+
+@media (max-width: 900px) {
+  .mgmt-page .chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .mgmt-page .chart-card,
+  .mgmt-page .farm-kpi-analytics-card {
+    border-radius: 13px;
+    padding: 16px 14px 14px;
+  }
+
+  .farm-chart-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chart-card-header,
+  .farm-analytics-header {
+    align-items: stretch;
+  }
+
+  .farm-chart-header-actions {
+    justify-content: space-between;
+  }
+}
+
+.farm-fullscreen-dialog {
+  border: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.farm-fullscreen-header {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
+.farm-fullscreen-body {
+  background: #f8fafc;
+}
+
+.farm-fullscreen-chart-frame {
+  padding: 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
