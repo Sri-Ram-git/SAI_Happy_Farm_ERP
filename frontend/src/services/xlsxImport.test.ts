@@ -1326,12 +1326,12 @@ describe('XLSX Historical Import Suite', () => {
         expect(mappingMap.get('ACT %')?.mappedField).toBe('actualProductionPct');
         expect(mappingMap.get('ACT %')?.confidence).toBe('HIGH');
 
-        // Ambiguous generic statistic (AVG) must require manual user selection
-        expect(mappingMap.get('AVG')?.mappedField).toBe('ignore');
-        expect(mappingMap.get('AVG')?.confidence).toBe('AMBIGUOUS');
+        // Generic summary statistic (AVG) is automatically recognized as worksheet summary
+        expect(mappingMap.get('AVG')?.mappedField).toBe('worksheetSummary');
+        expect(mappingMap.get('AVG')?.confidence).toBe('HIGH');
+        expect(mappingMap.get('AVG')?.isSummary).toBe(true);
 
-        // Calculated formula percentages must default to ignore
-        expect(mappingMap.get('SELECTION %')?.mappedField).toBe('ignore');
+        expect(mappingMap.get('SELECTION %')?.mappedField).toBe('selectionPct');
       });
     });
 

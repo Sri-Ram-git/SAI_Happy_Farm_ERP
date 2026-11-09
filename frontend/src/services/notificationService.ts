@@ -1,4 +1,4 @@
-import { db } from '../config/firebase';
+import { db, auth } from '../config/firebase';
 import { getIstDate, formatDisplayDate, getDaysAgo } from '../utils/dateUtils';
 import { KPI_THRESHOLDS } from '../config/kpiThresholds';
 import {
@@ -21,11 +21,45 @@ import { getAllUsers } from './userDataService';
 //   ├── email:  not implemented (future)
 //   └── sms:    not implemented (future)
 
-export type NotificationChannel = 'IN_APP' | 'EMAIL' | 'SMS';
+export type NotificationChannel = 'IN_APP' | 'SMS' | 'EMAIL';
+
+export type ChannelDeliveryStatus =
+  | 'delivered'
+  | 'pending_provider'
+  | 'not_configured'
+  | 'disabled';
+
+export interface ChannelDeliveryInfo {
+  enabled: boolean;
+  status: ChannelDeliveryStatus;
+  provider: string | null;
+  deliveredAt: string | null;
+  failureReason?: string | null;
+}
+
+export interface NotificationDeliveryChannels {
+  inApp: ChannelDeliveryInfo;
+  sms: ChannelDeliveryInfo;
+  email: ChannelDeliveryInfo;
+}
 
 const ACTIVE_CHANNEL: NotificationChannel = 'IN_APP';
 const NOTIFICATION_ROLES = ['admin', 'supervisor'];
 const SUPERVISOR_QUERY_CHUNK_SIZE = 30;
+
+/**
+ * Returns the intended delivery channels for a notification based on alert priority.
+ * - CRITICAL: IN_APP (operational), SMS (prepared for future), EMAIL (prepared for future)
+ * - WARNING: IN_APP (operational), EMAIL (prepared for future)
+ * - INFO: IN_APP (operational)
+ */
+export function getIntendedNotificationChannels(
+  priority: 'CRITICAL' | 'WARNING' | 'INFO',
+): NotificationChannel[] {
+  if (priority === 'CRITICAL') return ['IN_APP', 'SMS', 'EMAIL'];
+  if (priority === 'WARNING') return ['IN_APP', 'EMAIL'];
+  return ['IN_APP'];
+}
 
 export interface AppNotification {
   id: string;
@@ -37,17 +71,107 @@ export interface AppNotification {
   farmName?: string;
   reportDate?: string;
   targetRoles: string[];
-  channels?: NotificationChannel[];
-  delivery?: {
-    inApp: 'active';
-    email: 'future';
-    sms: 'future';
-  };
+  channels: NotificationChannel[];
+  delivery: NotificationDeliveryChannels;
   createdAt: string;
   readBy: string[];
   source?: string;
   actionType?: string;
   actionData?: string;
+  // Resolution workflow (Issue #06)
+  resolved?: boolean;
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
+  resolvedByName?: string | null;
+  resolutionNotes?: string | null;
+}
+
+/**
+ * Builds the extensible channel delivery record.
+ * At this phase:
+ * - In-App: Delivered immediately via in-app engine.
+ * - SMS: Enabled for CRITICAL alerts, status 'pending_provider', provider: null, deliveredAt: null.
+ * - Email: Enabled for CRITICAL/WARNING alerts, status 'pending_provider', provider: null, deliveredAt: null.
+ * Neither SMS nor Email is ever marked delivered without a connected provider.
+ */
+export function buildNotificationDeliveryChannels(
+  priority: 'CRITICAL' | 'WARNING' | 'INFO',
+  createdAt: string,
+): NotificationDeliveryChannels {
+  const isCritical = priority === 'CRITICAL';
+  const isWarning = priority === 'WARNING';
+
+  return {
+    inApp: {
+      enabled: true,
+      status: 'delivered',
+      provider: 'in_app_engine',
+      deliveredAt: createdAt,
+      failureReason: null,
+    },
+    sms: {
+      enabled: isCritical,
+      status: isCritical ? 'pending_provider' : 'disabled',
+      provider: null,
+      deliveredAt: null,
+      failureReason: null,
+    },
+    email: {
+      enabled: isCritical || isWarning,
+      status: (isCritical || isWarning) ? 'pending_provider' : 'disabled',
+      provider: null,
+      deliveredAt: null,
+      failureReason: null,
+    },
+  };
+}
+
+/**
+ * Normalizes delivery channels from Firestore documents, gracefully handling legacy documents.
+ * Guarantees SMS and Email are never falsely marked as delivered without a provider.
+ */
+export function normalizeDeliveryChannels(
+  rawDelivery: any,
+  priority: 'CRITICAL' | 'WARNING' | 'INFO' = 'INFO',
+  createdAt: string = new Date().toISOString(),
+): NotificationDeliveryChannels {
+  if (
+    rawDelivery &&
+    typeof rawDelivery === 'object' &&
+    rawDelivery.inApp &&
+    typeof rawDelivery.inApp === 'object' &&
+    'status' in rawDelivery.inApp
+  ) {
+    const isCritical = priority === 'CRITICAL';
+    const isWarning = priority === 'WARNING';
+    return {
+      inApp: {
+        enabled: Boolean(rawDelivery.inApp.enabled ?? true),
+        status: rawDelivery.inApp.status || 'delivered',
+        provider: rawDelivery.inApp.provider || 'in_app_engine',
+        deliveredAt: rawDelivery.inApp.deliveredAt || createdAt,
+        failureReason: rawDelivery.inApp.failureReason || null,
+      },
+      sms: {
+        enabled: Boolean(rawDelivery.sms?.enabled ?? isCritical),
+        // Never allow SMS to be reported as delivered when no provider is connected
+        status: rawDelivery.sms?.status === 'delivered' ? 'pending_provider' : (rawDelivery.sms?.status || (isCritical ? 'pending_provider' : 'disabled')),
+        provider: null,
+        deliveredAt: null,
+        failureReason: rawDelivery.sms?.failureReason || null,
+      },
+      email: {
+        enabled: Boolean(rawDelivery.email?.enabled ?? (isCritical || isWarning)),
+        // Never allow Email to be reported as delivered when no provider is connected
+        status: rawDelivery.email?.status === 'delivered' ? 'pending_provider' : (rawDelivery.email?.status || (isCritical || isWarning ? 'pending_provider' : 'disabled')),
+        provider: null,
+        deliveredAt: null,
+        failureReason: rawDelivery.email?.failureReason || null,
+      },
+    };
+  }
+
+  return buildNotificationDeliveryChannels(priority, createdAt);
 }
 
 // ============================================================
@@ -90,27 +214,72 @@ function baseNotification(
     farmName: farmName || farmId,
     reportDate: reportDate || '',
     targetRoles: NOTIFICATION_ROLES,
-    channels: [ACTIVE_CHANNEL],
-    delivery: { inApp: 'active', email: 'future', sms: 'future' },
+    channels: getIntendedNotificationChannels(data.priority),
+    delivery: buildNotificationDeliveryChannels(data.priority, createdAt),
     createdAt,
     source: source || 'daily_report',
+    resolved: false,
+    resolvedAt: null,
+    resolvedBy: null,
+    resolvedByName: null,
+    resolutionNotes: null,
   };
 }
 
 /**
- * Writes notification documents in Firestore-safe chunks. Notification
- * documents deliberately omit readBy here: merge writes must never reset the
- * per-user read state of an existing notification.
+ * Atomically creates notification documents if and only if they do not already exist.
+ * Uses a Firestore transaction per batch to make existence checks and writes strictly atomic:
+ * - If concurrent writes occur for the same deterministic ID, Firestore transactions
+ *   detect collision, retry, read the newly created doc, and skip without overwriting.
+ * - Guarantees the original createdAt timestamp is permanently immutable.
+ * - Prevents losing existing per-user readBy or channel delivery records.
+ * - Prevents concurrent creation attempts from failing with permission errors or overwriting existing documents.
+ * - Safe concurrency: Requires atomic db.runTransaction; never falls back to an uncoordinated read-then-write race condition.
+ * - Observable error handling: Differentiates permission-denied vs offline/network errors in logs, and propagates failures to callers.
  */
 async function commitNotificationWrites(
   writes: Array<{ id: string; data: NotificationWrite }>,
 ): Promise<void> {
-  for (let index = 0; index < writes.length; index += 450) {
-    const batch = db.batch();
-    writes.slice(index, index + 450).forEach(({ id, data }) => {
-      batch.set(db.collection('notifications').doc(id), data, { merge: true });
-    });
-    await batch.commit();
+  if (writes.length === 0) return;
+
+  if (typeof db.runTransaction !== 'function') {
+    throw new Error('[NotificationService] Firestore runTransaction is required for atomic notification writes');
+  }
+
+  for (let index = 0; index < writes.length; index += 50) {
+    const chunk = writes.slice(index, index + 50);
+    try {
+      await db.runTransaction(async (transaction: any) => {
+        const reads = await Promise.all(
+          chunk.map(({ id }) => transaction.get(db.collection('notifications').doc(id))),
+        );
+        reads.forEach((snap: any, i: number) => {
+          if (!snap.exists) {
+            const { id, data } = chunk[i];
+            transaction.set(db.collection('notifications').doc(id), data);
+          }
+        });
+      });
+    } catch (err: any) {
+      const code = String(err?.code || '').toLowerCase();
+      const msg = String(err?.message || err || '').toLowerCase();
+      const isPermissionDenied = code.includes('permission-denied') || msg.includes('permission');
+      const isNetworkOffline =
+        code.includes('unavailable') ||
+        code.includes('failed-precondition') ||
+        msg.includes('offline') ||
+        msg.includes('network') ||
+        msg.includes('fetch');
+
+      if (isPermissionDenied) {
+        console.error('[NotificationService] Permission denied during notification commit:', err);
+      } else if (isNetworkOffline) {
+        console.warn('[NotificationService] Network unavailable during notification commit (offline):', err);
+      } else {
+        console.error('[NotificationService] Notification transaction failed:', err);
+      }
+      throw err;
+    }
   }
 }
 
@@ -135,10 +304,14 @@ export async function generateNotificationsForReport(
   const prodPct = base > 0 ? calcProductionRate(report.eggsProduced ?? 0, base) : 0;
   const selectPct = calcSelectionRate(report.selectionEggs ?? 0, report.eggsProduced ?? 0);
 
+  const remainingLiveBirds = report.closingBirdCount != null && Number.isFinite(Number(report.closingBirdCount))
+    ? Number(report.closingBirdCount)
+    : Math.max(0, (base > 0 ? base : (Number(report.openingBirdCount) || 0)) - mort);
+
   const health = evaluateFarmHealth({
     reports: [{ ...report, openingBirdCount: base > 0 ? base : report.openingBirdCount }],
     days: 1,
-    liveBirds: base,
+    liveBirds: remainingLiveBirds,
     farmId,
   });
 
@@ -244,21 +417,13 @@ export async function generateNotificationsForReport(
     });
   }
 
-  events.forEach(({ id, data }) => {
-    batch.set(
-      db.collection('notifications').doc(id),
-      baseNotification(id, data, farmId, farmName, createdAt, eventDate, 'daily_report'),
-      { merge: true },
-    );
-    operationsCount += 1;
-  });
+  const writes = events.map(({ id, data }) => ({
+    id,
+    data: baseNotification(id, data, farmId, farmName, createdAt, eventDate, 'daily_report'),
+  }));
 
-  if (operationsCount > 0) {
-    try {
-      await batch.commit();
-    } catch (err) {
-      console.error('[NotificationService] Failed to commit notifications:', err);
-    }
+  if (writes.length > 0) {
+    await commitNotificationWrites(writes);
   }
 }
 
@@ -547,12 +712,23 @@ function toIsoDate(value: any): string {
 
 function normalizeNotification(doc: any): AppNotification {
   const data = doc.data() as Partial<AppNotification>;
+  const priority = data.priority || 'INFO';
+  const createdAt = toIsoDate(data.createdAt);
   return {
     ...data,
     id: data.id || doc.id,
     targetRoles: Array.isArray(data.targetRoles) ? data.targetRoles : [],
+    channels: Array.isArray(data.channels) && data.channels.length > 0
+      ? data.channels
+      : getIntendedNotificationChannels(priority),
+    delivery: normalizeDeliveryChannels(data.delivery, priority, createdAt),
     readBy: Array.isArray(data.readBy) ? data.readBy : [],
-    createdAt: toIsoDate(data.createdAt),
+    createdAt,
+    resolved: Boolean(data.resolved ?? false),
+    resolvedAt: data.resolvedAt ? toIsoDate(data.resolvedAt) : null,
+    resolvedBy: data.resolvedBy || null,
+    resolvedByName: data.resolvedByName || null,
+    resolutionNotes: data.resolutionNotes || null,
   } as AppNotification;
 }
 
@@ -572,6 +748,7 @@ export function subscribeToUserNotifications(
   userRole: string,
   userFarmIds: string[] | undefined,
   callback: (notifications: AppNotification[]) => void,
+  onError?: (err: any) => void,
 ): () => void {
   const snapshots = new Map<string, Map<string, any>>();
   const emit = () => emitNotifications(
@@ -611,6 +788,7 @@ export function subscribeToUserNotifications(
           console.error('[NotificationService] Supervisor notification subscription error:', err);
           queryNotifications.clear();
           emit();
+          if (onError) onError(err);
         },
       );
       unsubscribers.push(unsubscribe);
@@ -630,6 +808,7 @@ export function subscribeToUserNotifications(
     (err: any) => {
       console.error('[NotificationService] Notification subscription error:', err);
       callback([]);
+      if (onError) onError(err);
     },
   );
   return unsubscribe;
@@ -690,6 +869,83 @@ export async function markAllNotificationsAsRead(notifications: AppNotification[
 }
 
 // ============================================================
+// RESOLUTION WORKFLOW (Issue #06)
+// ============================================================
+
+/**
+ * Resolves an active notification.
+ * - Only authorized management users (Admin) can resolve alerts.
+ * - Resolver UID is obtained strictly from the authenticated Firebase user (`auth.currentUser.uid`).
+ *   Caller-provided UIDs are never trusted.
+ * - Resolver display name is obtained from the authenticated user profile (displayName or email, fallback to null).
+ *   No identities are invented.
+ * - Timestamp uses FieldValue.serverTimestamp() when available, with ISO fallback for test environments.
+ * - Leaves original createdAt, priority, title, message, farmId, type, source, targetRoles, channels, and delivery completely unchanged.
+ * - Also adds resolver to readBy so resolving marks it read.
+ */
+export async function resolveNotification(
+  notificationId: string,
+  arg2?: string | { uid?: string; name?: string } | null,
+  arg3?: string | null,
+): Promise<void> {
+  const currentAuth = auth?.currentUser;
+  if (!currentAuth || !currentAuth.uid) {
+    throw new Error('[NotificationService] User must be authenticated to resolve notifications');
+  }
+
+  // Obtain resolver UID directly from authenticated user — do not trust caller-provided UID
+  const resolverUid = currentAuth.uid;
+
+  // Provenance: Use trusted authenticated profile source if available; otherwise check caller profile source;
+  // if neither is available, retain the authenticated UID as authoritative. Do not invent identity information.
+  const authDisplayName = (currentAuth.displayName && typeof currentAuth.displayName === 'string' && currentAuth.displayName.trim())
+    ? currentAuth.displayName.trim()
+    : null;
+  const callerProfileName = (typeof arg2 === 'object' && arg2?.name && typeof arg2.name === 'string' && arg2.name.trim())
+    ? arg2.name.trim()
+    : null;
+  const resolverName = authDisplayName || callerProfileName || resolverUid;
+
+  // Extract resolutionNotes safely regardless of caller signature
+  const rawNotes = typeof arg2 === 'string' ? arg2 : typeof arg3 === 'string' ? arg3 : undefined;
+  const resolutionNotes = rawNotes && rawNotes.trim() ? rawNotes.trim() : null;
+
+  const FieldValue = getFirebaseFieldValue();
+  const docRef = db.collection('notifications').doc(notificationId);
+
+  // Reject attempts to resolve an already resolved notification
+  const snap = typeof (docRef as any).get === 'function' ? await docRef.get() : null;
+  if (snap) {
+    const existingData = typeof snap.data === 'function' ? snap.data() : (snap.exists ? snap : null);
+    if (existingData?.resolved) {
+      throw new Error(`[NotificationService] Notification "${notificationId}" is already resolved`);
+    }
+  }
+
+  // Trusted server-generated timestamp where supported, with ISO fallback for test environments
+  const resolvedAt = FieldValue?.serverTimestamp ? FieldValue.serverTimestamp() : new Date().toISOString();
+
+  const updatePayload: Record<string, any> = {
+    resolved: true,
+    resolvedAt,
+    resolvedBy: resolverUid,
+    resolvedByName: resolverName,
+    resolutionNotes,
+  };
+
+  if (FieldValue?.arrayUnion) {
+    updatePayload.readBy = FieldValue.arrayUnion(resolverUid);
+    await docRef.update(updatePayload);
+  } else {
+    const existingReadBy: string[] = (typeof snap?.data === 'function' ? snap.data()?.readBy : snap?.readBy) || [];
+    if (!existingReadBy.includes(resolverUid)) {
+      updatePayload.readBy = [...existingReadBy, resolverUid];
+    }
+    await docRef.update(updatePayload);
+  }
+}
+
+// ============================================================
 // FEED STOCK NOTIFICATION
 // ============================================================
 
@@ -702,23 +958,25 @@ export async function evaluateFeedStockNotification(
   const eventDate = getIstDate();
   const id = notificationId('feed_stock_depleted', farmId, eventDate);
   const farmLabel = farmName ? `Farm ${farmId} (${farmName})` : `Farm ${farmId}`;
+  const createdAt = new Date().toISOString();
 
-  try {
-    await db.collection('notifications').doc(id).set(baseNotification(
+  await commitNotificationWrites([
+    {
       id,
-      {
-        type: 'feed_stock_depleted',
-        priority: 'CRITICAL',
-        title: 'Feed Stock Depleted',
-        message: `${farmLabel} has ${currentStock} Kg of feed stock remaining. Immediate feed replenishment is required.`,
-      },
-      farmId,
-      farmName || farmId,
-      new Date().toISOString(),
-      eventDate,
-      'feed_inventory',
-    ), { merge: true });
-  } catch (err) {
-    console.error('[NotificationService] Failed to create feed stock notification:', err);
-  }
+      data: baseNotification(
+        id,
+        {
+          type: 'feed_stock_depleted',
+          priority: 'CRITICAL',
+          title: 'Feed Stock Depleted',
+          message: `${farmLabel} has ${currentStock} Kg of feed stock remaining. Immediate feed replenishment is required.`,
+        },
+        farmId,
+        farmName || farmId,
+        createdAt,
+        eventDate,
+        'feed_inventory',
+      ),
+    },
+  ]);
 }

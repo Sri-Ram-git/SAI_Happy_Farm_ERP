@@ -330,11 +330,22 @@
     "mae": "MAE",
     "rmse": "RMSE",
     "mape": "MAPE",
+    "wape": "WAPE",
     "generateForecast": "पूर्वानुमान तैयार करें",
     "noFlockSelected": "पूर्वानुमान लगाने के लिए कृपया एक झुंड चुनें।",
     "noFarmSelected": "पूर्वानुमान लगाने के लिए कृपया एक फ़ार्म चुनें।",
     "currentBirdPopulation": "वर्तमान पक्षी संख्या",
-    "birdCountUnavailable": "इस फ़ार्म के लिए वर्तमान पक्षी संख्या उपलब्ध नहीं है।"
+    "birdCountUnavailable": "इस फ़ार्म के लिए वर्तमान पक्षी संख्या उपलब्ध नहीं है।",
+    "missingDaysWarning": "⚠️ ऐतिहासिक विंडो में {{count}} छूटे हुए सबमिशन दिन पाए गए (घनत्व: {{density}}%)। पूर्वानुमान सटीकता कम हो सकती है।",
+    "daysSinceLastReportWarning": "⚠️ अंतिम सबमिशन {{days}} दिन पहले था। पूर्वानुमान नवीनतम वास्तविक रिकॉर्ड से आगे बढ़ता है।",
+    "populationProjected": "ऐतिहासिक नुकसान के साथ पक्षी संख्या का अनुमान (मृत्यु दर: {{mortality}}%/दिन, छंटाई: {{culling}}%/दिन)",
+    "populationConstant": "पक्षी संख्या को स्थिर माना गया (अपर्याप्त ऐतिहासिक डेटा)",
+    "horizonAccuracyTitle": "क्षितिज अनुसार बैकटेस्टेड पूर्वानुमान सटीकता",
+    "horizon": "क्षितिज",
+    "originsEvaluations": "उत्पत्ति (बिंदु)",
+    "baselineMae": "आधार रेखा MAE",
+    "improvement": "सुधार",
+    "horizonAccuracyFooter": "नाइव दृढ़ता आधार रेखा के विरुद्ध कैलेंडर-संरेखित रोलिंग-उत्पत्ति बैकटेस्टिंग द्वारा गणना की गई।"
   },
   "feed": {
     "title": "दाना प्रबंधन",

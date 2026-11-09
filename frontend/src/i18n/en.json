@@ -330,11 +330,22 @@
     "mae": "MAE",
     "rmse": "RMSE",
     "mape": "MAPE",
+    "wape": "WAPE",
     "generateForecast": "Generate Forecast",
     "noFlockSelected": "Please select a flock to generate predictions.",
     "noFarmSelected": "Please select a farm to generate predictions.",
     "currentBirdPopulation": "Current Bird Population",
-    "birdCountUnavailable": "Current bird count is unavailable for this farm."
+    "birdCountUnavailable": "Current bird count is unavailable for this farm.",
+    "missingDaysWarning": "⚠️ {{count}} missing submission day(s) detected in the historical window (density: {{density}}%). Forecast accuracy may be reduced.",
+    "daysSinceLastReportWarning": "⚠️ Latest submission was {{days}} days ago. Predictions project forward from latest actual record.",
+    "populationProjected": "Bird population projected with historical attrition (Mortality: {{mortality}}%/day, Culling: {{culling}}%/day)",
+    "populationConstant": "Bird population assumed constant (insufficient historical attrition data)",
+    "horizonAccuracyTitle": "Backtested Forecast Accuracy by Horizon",
+    "horizon": "Horizon",
+    "originsEvaluations": "Origins (Points)",
+    "baselineMae": "Baseline MAE",
+    "improvement": "Improvement",
+    "horizonAccuracyFooter": "Computed via calendar-aligned rolling-origin backtesting against a naive persistence baseline."
   },
   "feed": {
     "title": "Feed Management",

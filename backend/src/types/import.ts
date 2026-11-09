@@ -29,6 +29,8 @@ export interface HistoricalImportRecord {
   feedGramsPerBird?: number;
   actualProductionPct?: number;
   standardProductionPct?: number;
+  preservedAvg?: number | null;
+  preservedAvgByDate?: Record<string, number>;
   // Specific to Feed Loads
   feedLoadQuantityKg?: number;
   feedLoadNotes?: string;
@@ -68,6 +70,14 @@ export interface ExecuteImportRequest {
   conflictAction: 'skip' | 'replace';
   sourceFiles: string[];
   dryRun?: boolean;
+  worksheets?: Array<{
+    worksheetKey: string;
+    fileName?: string;
+    sheetName?: string | null;
+    farmId?: string;
+    preservedAvg?: number | null;
+    preservedAvgByDate?: Record<string, number>;
+  }>;
 }
 
 export interface ImportBatchError {
@@ -155,6 +165,8 @@ export interface WorksheetImportContribution {
     failedCount: number;
     conflictsCount: number;
   };
+  preservedAvg?: number | null;
+  preservedAvgByDate?: Record<string, number>;
 }
 
 export interface RevertAuditRecord {

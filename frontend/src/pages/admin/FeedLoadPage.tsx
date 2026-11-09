@@ -56,6 +56,15 @@ export function FeedLoadPage() {
 
   // Edit and Delete state
   const [editingLog, setEditingLog] = useState<FeedLogDoc | null>(null);
+  const [confirmingEdit, setConfirmingEdit] = useState<{
+    log: FeedLogDoc;
+    newQuantityKg: number;
+    notes: string;
+    oldQuantityKg: number;
+    diff: number;
+    currentStock: number;
+    resultingStock: number;
+  } | null>(null);
   const [logToDelete, setLogToDelete] = useState<FeedLogDoc | null>(null);
   const [deleting, setDeleting] = useState(false);
   const formSectionRef = useRef<HTMLDivElement>(null);
@@ -187,6 +196,17 @@ export function FeedLoadPage() {
   const handleStartEdit = (log: FeedLogDoc) => {
     setError('');
     setSuccess('');
+
+    const currentUid = userProfile?.uid;
+    if (!log.createdByUid) {
+      setError('Action blocked: Record has unverified ownership and cannot be modified.');
+      return;
+    }
+    if (!currentUid || log.createdByUid !== currentUid) {
+      setError('Permission denied: You can only edit feed-load records that you originally created.');
+      return;
+    }
+
     setEditingLog(log);
     setFeedKg(String(log.quantityKg));
     setNotes(log.notes || '');
@@ -203,6 +223,17 @@ export function FeedLoadPage() {
   const handleRequestDelete = (log: FeedLogDoc) => {
     setError('');
     setSuccess('');
+
+    const currentUid = userProfile?.uid;
+    if (!log.createdByUid) {
+      setError('Action blocked: Record has unverified ownership and cannot be deleted.');
+      return;
+    }
+    if (!currentUid || log.createdByUid !== currentUid) {
+      setError('Permission denied: You can only delete feed-load records that you originally created.');
+      return;
+    }
+
     setLogToDelete(log);
   };
 
@@ -233,41 +264,25 @@ export function FeedLoadPage() {
 
     const kg = validation.quantity;
 
+    if (editingLog) {
+      // Edit mode: Open confirmation modal before saving
+      const diff = Number((kg - oldQty).toFixed(2));
+      const resultingStock = Number((currentStock + diff).toFixed(2));
+      setConfirmingEdit({
+        log: editingLog,
+        newQuantityKg: kg,
+        notes: notes.trim(),
+        oldQuantityKg: oldQty,
+        diff,
+        currentStock,
+        resultingStock,
+      });
+      return;
+    }
+
     setSubmitting(true);
     try {
-      if (editingLog) {
-        // Edit mode
-        const result = await updateFeedLoad(
-          selectedFarmId,
-          editingLog.logId,
-          kg,
-          notes,
-          userProfile!.uid,
-          role,
-          userProfile?.farmIds,
-        );
-
-        const farmName = selectedFarm?.name || selectedFarmId;
-        const diff = kg - oldQty;
-        setSuccess(`Feed load updated to ${kg} Kg for ${farmName}. New stock: ${result.newStockKg.toLocaleString()} Kg.`);
-        setEditingLog(null);
-        setFeedKg('');
-        setNotes('');
-
-        setFarms((prev) =>
-          prev.map((f) =>
-            f.farmId === selectedFarmId
-              ? {
-                  ...f,
-                  currentFeedStockKg: result.newStockKg,
-                  totalFeedLoadedKg: Math.max(0, Number((f.totalFeedLoadedKg + diff).toFixed(2))),
-                  lastTransactionDate: getIstDate(),
-                }
-              : f
-          )
-        );
-      } else {
-        // Add mode
+      // Add mode
         await addFeedLoad(
           selectedFarmId,
           kg,
@@ -294,7 +309,6 @@ export function FeedLoadPage() {
               : f
           )
         );
-      }
     } catch (err: any) {
       console.error('[FeedLoadPage] Submit error:', err);
       const msg = err?.message || '';
@@ -304,12 +318,76 @@ export function FeedLoadPage() {
         setError('Cannot reduce feed quantity: farm stock would fall below zero.');
       } else if (msg === 'FEED_QUANTITY_EXCEEDS_LIMIT') {
         setError('Feed quantity cannot exceed 9,999,999.99 Kg.');
+      } else if (msg === 'PERMISSION_DENIED_NOT_CREATOR') {
+        setError('Permission denied: Only the user who created this feed-load record can edit it.');
+      } else if (msg === 'UNVERIFIED_RECORD_OWNERSHIP') {
+        setError('Action blocked: Record has unverified ownership and cannot be modified.');
       } else if (msg === 'PERMISSION_DENIED') {
         setError('You do not have permission to perform this action.');
       } else if (msg === 'FEED_INVENTORY_NOT_FOUND') {
         setError('Feed inventory not found for this farm. Initialize it first.');
       } else {
         setError(editingLog ? 'Failed to update feed load record. Please try again.' : 'Failed to record feed load. Please try again.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConfirmEdit = async () => {
+    if (!confirmingEdit || !selectedFarmId) return;
+
+    setSubmitting(true);
+    setError('');
+    setSuccess('');
+
+    const { log, newQuantityKg, notes: editNotes, diff } = confirmingEdit;
+
+    try {
+      const result = await updateFeedLoad(
+        selectedFarmId,
+        log.logId,
+        newQuantityKg,
+        editNotes,
+        userProfile!.uid,
+        role,
+        userProfile?.farmIds,
+      );
+
+      const farmName = selectedFarm?.name || selectedFarmId;
+      setSuccess(`Feed load record updated to ${newQuantityKg.toLocaleString()} Kg for ${farmName}. Farm stock reconciled to ${result.newStockKg.toLocaleString()} Kg.`);
+      setConfirmingEdit(null);
+      setEditingLog(null);
+      setFeedKg('');
+      setNotes('');
+
+      setFarms((prev) =>
+        prev.map((f) =>
+          f.farmId === selectedFarmId
+            ? {
+                ...f,
+                currentFeedStockKg: result.newStockKg,
+                totalFeedLoadedKg: Math.max(0, Number((f.totalFeedLoadedKg + diff).toFixed(2))),
+                lastTransactionDate: getIstDate(),
+              }
+            : f
+        )
+      );
+    } catch (err: any) {
+      console.error('[FeedLoadPage] Edit submit error:', err);
+      const msg = err?.message || '';
+      if (msg === 'RESULTING_STOCK_EXCEEDS_LIMIT') {
+        setError('Resulting feed stock cannot exceed 9,999,999.99 Kg.');
+      } else if (msg === 'INSUFFICIENT_STOCK_FOR_UPDATE') {
+        setError('Cannot reduce feed quantity: farm stock would fall below zero. Feed has already been consumed.');
+      } else if (msg === 'FEED_QUANTITY_EXCEEDS_LIMIT') {
+        setError('Feed quantity cannot exceed 9,999,999.99 Kg.');
+      } else if (msg === 'PERMISSION_DENIED') {
+        setError('You do not have permission to perform this action.');
+      } else if (msg === 'FEED_INVENTORY_NOT_FOUND') {
+        setError('Feed inventory not found for this farm. Initialize it first.');
+      } else {
+        setError('Failed to update feed load record. Please try again.');
       }
     } finally {
       setSubmitting(false);
@@ -357,6 +435,10 @@ export function FeedLoadPage() {
       const msg = err?.message || '';
       if (msg === 'INSUFFICIENT_STOCK_FOR_DELETION') {
         setError('Cannot delete this feed load: doing so would reduce farm stock below zero. Feed has already been consumed.');
+      } else if (msg === 'PERMISSION_DENIED_NOT_CREATOR') {
+        setError('Permission denied: Only the user who created this feed-load record can delete it.');
+      } else if (msg === 'UNVERIFIED_RECORD_OWNERSHIP') {
+        setError('Action blocked: Record has unverified ownership and cannot be deleted.');
       } else if (msg === 'PERMISSION_DENIED') {
         setError('You do not have permission to delete this record.');
       } else {
@@ -687,32 +769,92 @@ export function FeedLoadPage() {
                           {log.notes || <span style={{ color: 'var(--gray-400)' }}>--</span>}
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--gray-500)', marginTop: 2 }}>
-                          By: {usersMap[log.recordedBy] || log.recordedBy || 'Admin'}
+                          By: {usersMap[log.createdByUid || log.recordedBy] || log.recordedBy || 'Admin'}
+                          {log.createdByUid && userProfile?.uid && log.createdByUid === userProfile.uid && (
+                            <span style={{
+                              marginLeft: 6,
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              color: 'var(--green-700)',
+                              background: '#ecfdf5',
+                              padding: '1px 5px',
+                              borderRadius: 4,
+                              border: '1px solid #a7f3d0'
+                            }}>
+                              You
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'inline-flex', gap: 6 }}>
-                          <button
-                            type="button"
-                            className="btn btn--outline btn--sm"
-                            style={{ padding: '4px 10px', fontSize: '12px' }}
-                            onClick={() => handleStartEdit(log)}
-                            disabled={submitting || deleting}
-                            title="Edit this record"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--danger btn--sm"
-                            style={{ padding: '4px 10px', fontSize: '12px' }}
-                            onClick={() => handleRequestDelete(log)}
-                            disabled={submitting || deleting}
-                            title="Delete this record"
-                          >
-                            Delete
-                          </button>
-                        </div>
+                        {(() => {
+                          const currentUid = userProfile?.uid;
+                          const isEligibleRole = role === 'admin' || role === 'supervisor';
+                          const isCreator = Boolean(log.createdByUid && currentUid && log.createdByUid === currentUid);
+                          const isUnverified = !log.createdByUid;
+
+                          if (isUnverified) {
+                            return (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                  padding: '3px 8px',
+                                  borderRadius: 4,
+                                  background: '#fef3c7',
+                                  color: '#92400e',
+                                  border: '1px solid #fde68a',
+                                }}
+                                title="Record ownership is unverified. Modification is locked to protect historical integrity."
+                              >
+                                Locked (Unverified)
+                              </span>
+                            );
+                          }
+
+                          if (isCreator && isEligibleRole) {
+                            return (
+                              <div style={{ display: 'inline-flex', gap: 6 }}>
+                                <button
+                                  type="button"
+                                  className="btn btn--outline btn--sm"
+                                  style={{ padding: '4px 10px', fontSize: '12px' }}
+                                  onClick={() => handleStartEdit(log)}
+                                  disabled={submitting || deleting}
+                                  title="Edit this record"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn--danger btn--sm"
+                                  style={{ padding: '4px 10px', fontSize: '12px' }}
+                                  onClick={() => handleRequestDelete(log)}
+                                  disabled={submitting || deleting}
+                                  title="Delete this record"
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            );
+                          }
+
+                          const creatorName = usersMap[log.createdByUid || log.recordedBy] || log.recordedBy || 'another user';
+                          return (
+                            <span
+                              style={{
+                                display: 'inline-block',
+                                fontSize: '12px',
+                                color: 'var(--gray-500)',
+                                cursor: 'help',
+                              }}
+                              title={`Created by ${creatorName}. Only the original creator may edit or delete this record.`}
+                            >
+                              Read Only
+                            </span>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}
@@ -721,6 +863,124 @@ export function FeedLoadPage() {
             </div>
           )}
         </div>
+
+        {/* EDIT CONFIRMATION MODAL */}
+        {confirmingEdit && (
+          <div
+            className="farmer-modal-overlay"
+            onClick={() => {
+              if (!submitting) setConfirmingEdit(null);
+            }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-modal-title"
+          >
+            <div className="farmer-modal-card" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className="farmer-modal-close"
+                onClick={() => setConfirmingEdit(null)}
+                disabled={submitting}
+                aria-label="Close"
+              >
+                <X size={18} />
+              </button>
+
+              <div
+                className="farmer-modal-icon-badge"
+                style={{ background: '#eff6ff', color: '#2563eb', borderColor: '#bfdbfe' }}
+              >
+                <AlertTriangle size={26} strokeWidth={2.5} />
+              </div>
+
+              <h3 id="edit-modal-title" className="farmer-modal-title">
+                Confirm Feed Load Changes
+              </h3>
+
+              <p className="farmer-modal-desc" style={{ color: '#475569', lineHeight: 1.5, marginBottom: 16 }}>
+                Are you sure you want to update this feed load record? This will adjust the farm's current stock by{' '}
+                <strong>{confirmingEdit.diff >= 0 ? `+${confirmingEdit.diff.toLocaleString()}` : `${confirmingEdit.diff.toLocaleString()}`} Kg</strong>.
+              </p>
+
+              <div className="farmer-modal-tiles" style={{ marginBottom: 16 }}>
+                <div className="farmer-modal-tile">
+                  <span className="farmer-modal-tile-label">Farm</span>
+                  <span className="farmer-modal-tile-value">
+                    {selectedFarm?.name || selectedFarmId} ({selectedFarmId})
+                  </span>
+                </div>
+                <div className="farmer-modal-tile">
+                  <span className="farmer-modal-tile-label">Record Date & Time</span>
+                  <span className="farmer-modal-tile-value">
+                    {formatDisplayDate(confirmingEdit.log.loadedAt) || '--'}
+                    {typeof confirmingEdit.log.loadedAt === 'string' && confirmingEdit.log.loadedAt.includes('T') ? ` at ${formatTime(confirmingEdit.log.loadedAt)}` : ''}
+                  </span>
+                </div>
+                <div className="farmer-modal-tile">
+                  <span className="farmer-modal-tile-label">Original Load</span>
+                  <span className="farmer-modal-tile-value">
+                    {confirmingEdit.oldQuantityKg.toLocaleString()} Kg
+                  </span>
+                </div>
+                <div className="farmer-modal-tile">
+                  <span className="farmer-modal-tile-label">New Load</span>
+                  <span className="farmer-modal-tile-value" style={{ color: '#2563eb', fontWeight: 700 }}>
+                    {confirmingEdit.newQuantityKg.toLocaleString()} Kg
+                  </span>
+                </div>
+                <div className="farmer-modal-tile">
+                  <span className="farmer-modal-tile-label">Current Feed Stock</span>
+                  <span className="farmer-modal-tile-value">
+                    {confirmingEdit.currentStock.toLocaleString()} Kg
+                  </span>
+                </div>
+                <div className="farmer-modal-tile">
+                  <span className="farmer-modal-tile-label">Stock After Update</span>
+                  <span className="farmer-modal-tile-value" style={{
+                    color: confirmingEdit.resultingStock < 0 ? '#dc2626' : '#15803d',
+                    fontWeight: 700,
+                  }}>
+                    {confirmingEdit.resultingStock.toLocaleString()} Kg
+                  </span>
+                </div>
+              </div>
+
+              {confirmingEdit.resultingStock < 0 && (
+                <div style={{
+                  padding: '8px 12px',
+                  marginBottom: 16,
+                  background: '#fef2f2',
+                  borderRadius: 8,
+                  border: '1px solid #fecaca',
+                  fontSize: '13px',
+                  color: '#991b1b',
+                  textAlign: 'left',
+                }}>
+                  Cannot update: Resulting stock would fall below zero ({confirmingEdit.resultingStock.toLocaleString()} Kg). Feed has already been consumed.
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 10, width: '100%' }}>
+                <button
+                  type="button"
+                  className="btn btn--outline btn--full"
+                  onClick={() => setConfirmingEdit(null)}
+                  disabled={submitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--primary btn--full"
+                  onClick={handleConfirmEdit}
+                  disabled={submitting || confirmingEdit.resultingStock < 0}
+                >
+                  {submitting ? <span className="spinner" /> : 'Yes, Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* DELETE CONFIRMATION MODAL */}
         {logToDelete && (

@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { db, auth } from '../config/firebase';
 import { FarmDoc } from './farmDataService';
+import { deriveDailyKpis } from '../utils/dailyReportKpis';
 
 export type RecordType = 'DAILY_REPORT' | 'FEED_LOAD' | 'FLOCK_RECORD';
 
@@ -17,6 +18,7 @@ export type StandardFieldKey =
   | 'culling'
   | 'eggsProduced'
   | 'selectionEggs'
+  | 'selectionPct'
   | 'damagedEggs'
   | 'floorEggs'
   | 'actualProductionPct'
@@ -38,6 +40,7 @@ export type StandardFieldKey =
   | 'initialBirds'
   | 'startDate'
   | 'breedType'
+  | 'worksheetSummary'
   | 'ignore';
 
 export interface FieldDefinition {
@@ -154,6 +157,16 @@ export const STANDARD_FIELDS: FieldDefinition[] = [
     ],
   },
   {
+    key: 'selectionPct',
+    label: 'Selection %',
+    category: 'production',
+    type: 'number',
+    synonyms: [
+      'selection %', 'selection%', 'selection pct', 'selection percentage',
+      'sel %', 'selected %', 'selection percent'
+    ],
+  },
+  {
     key: 'damagedEggs',
     label: 'Damaged / Rejected Eggs',
     category: 'production',
@@ -233,6 +246,13 @@ export const STANDARD_FIELDS: FieldDefinition[] = [
     type: 'string',
     synonyms: ['delivery notes', 'invoice no', 'feed supplier', 'feed type', 'truck no'],
   },
+  {
+    key: 'worksheetSummary',
+    label: 'Preserve Existing AVG Row',
+    category: 'other',
+    type: 'number',
+    synonyms: ['avg', 'average'],
+  },
 ];
 
 export interface ColumnMapping {
@@ -240,6 +260,7 @@ export interface ColumnMapping {
   mappedField: StandardFieldKey;
   confidence: 'HIGH' | 'MEDIUM' | 'AMBIGUOUS' | 'UNMAPPED';
   sampleValues: string[];
+  isSummary?: boolean;
 }
 
 export interface ParsedRawRow {
@@ -277,6 +298,48 @@ export interface ParsedFile {
   detectedFarmFromSheet?: string;
   detectedFarmFromFilename?: string;
   farmConflict?: { sheetFarm?: string; filenameFarm?: string; reason: string };
+  preservedAvg?: number | null;
+  preservedAvgByDate?: Record<string, number>;
+}
+
+/**
+ * Extracts worksheet-level preserved AVG row values from parsed raw rows based on column mappings.
+ * Does not import AVG as daily production records.
+ */
+export function extractPreservedAvgFromMappings(
+  mappings: ColumnMapping[],
+  rows: ParsedRawRow[],
+): { preservedAvg: number | null; preservedAvgByDate: Record<string, number> } {
+  let preservedAvg: number | null = null;
+  const preservedAvgByDate: Record<string, number> = {};
+
+  const summaryMapping = mappings.find((m) => m.mappedField === 'worksheetSummary' || m.isSummary);
+  if (!summaryMapping) {
+    return { preservedAvg: null, preservedAvgByDate: {} };
+  }
+
+  const avgHeader = summaryMapping.fileHeader;
+  const dateMapping = mappings.find((m) => m.mappedField === 'submissionDate');
+  const dateHeader = dateMapping?.fileHeader;
+
+  for (const row of rows) {
+    const rawVal = row.data[avgHeader];
+    if (rawVal !== undefined && rawVal !== null && String(rawVal).trim() !== '') {
+      const cleanStr = String(rawVal).replace('%', '').trim();
+      const num = Number.parseFloat(cleanStr);
+      if (Number.isFinite(num)) {
+        if (preservedAvg === null) {
+          preservedAvg = num;
+        }
+        const rowDate = dateHeader ? row.data[dateHeader] : undefined;
+        if (rowDate) {
+          preservedAvgByDate[rowDate] = num;
+        }
+      }
+    }
+  }
+
+  return { preservedAvg, preservedAvgByDate };
 }
 
 export interface ValidatedRow {
@@ -301,8 +364,10 @@ export interface ValidatedRow {
   selectionEggs?: number;
   damagedEggs?: number;
   floorEggs?: number;
+  selectionPct?: number;
   actualProductionPct?: number;
   standardProductionPct?: number;
+  mortalityPct?: number;
   temperature?: number | null;
   ammoniaPpm?: number | null;
   eggWeight?: { min: number; max: number; avg: number };
@@ -311,6 +376,8 @@ export interface ValidatedRow {
   flockId?: string;
   feedLoadQuantityKg?: number;
   feedLoadNotes?: string;
+  preservedAvg?: number | null;
+  preservedAvgByDate?: Record<string, number>;
   isValid: boolean;
   errors: Array<{ field: string; value: any; reason: string }>;
   warnings?: Array<{ field: string; message: string }>;
@@ -343,6 +410,7 @@ function normalizeHeaderStr(str: string): string {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
 
 /**
  * Detects CSV delimiter (, ; \t |)
@@ -715,6 +783,8 @@ export interface XlsxWorksheetInfo {
   detectedFarmFromSheet?: string;
   detectedFarmFromFilename?: string;
   farmConflict?: { sheetFarm?: string; filenameFarm?: string; reason: string };
+  preservedAvg?: number | null;
+  preservedAvgByDate?: Record<string, number>;
 }
 
 /**
@@ -1025,6 +1095,7 @@ export function parseXlsxWorkbook(
       }
 
       const { mappings, detectedType } = detectColumnMappings(headers, rows);
+      const { preservedAvg, preservedAvgByDate } = extractPreservedAvgFromMappings(mappings, rows);
 
       results.push({
         sheetName,
@@ -1048,6 +1119,8 @@ export function parseXlsxWorkbook(
         detectedFarmFromSheet,
         detectedFarmFromFilename,
         farmConflict,
+        preservedAvg,
+        preservedAvgByDate: Object.keys(preservedAvgByDate).length > 0 ? preservedAvgByDate : undefined,
       });
 
       continue;
@@ -1197,6 +1270,7 @@ export function parseXlsxWorkbook(
     }
 
     const { mappings, detectedType } = detectColumnMappings(headerNames, dataRows);
+    const { preservedAvg, preservedAvgByDate } = extractPreservedAvgFromMappings(mappings, dataRows);
 
     results.push({
       sheetName,
@@ -1219,6 +1293,8 @@ export function parseXlsxWorkbook(
       detectedFarmFromSheet,
       detectedFarmFromFilename,
       farmConflict,
+      preservedAvg,
+      preservedAvgByDate: Object.keys(preservedAvgByDate).length > 0 ? preservedAvgByDate : undefined,
     });
   }
 
@@ -1297,15 +1373,22 @@ export function detectColumnMappings(
       .filter((v) => v.length > 0);
 
     const isPercentage = normalized.includes('%') || normalized.includes('pct') || normalized.includes('percent');
-    const isGenericStat = /^(?:avg|average|min|max|total|sum|std|diff)$/i.test(normalized);
+    const isAvgHeader = /^(?:avg|average)$/i.test(normalized);
+    const isOtherGenericStat = /^(?:min|max|total|sum|std|diff)$/i.test(normalized);
 
     let bestMatch: StandardFieldKey = 'ignore';
     let highestConfidence: 'HIGH' | 'MEDIUM' | 'AMBIGUOUS' | 'UNMAPPED' = 'UNMAPPED';
+    let isSummary = false;
 
-    if (isGenericStat) {
-      highestConfidence = 'AMBIGUOUS';
+    if (isAvgHeader) {
+      bestMatch = 'worksheetSummary';
+      highestConfidence = 'HIGH';
+      isSummary = true;
+    } else if (isOtherGenericStat) {
+      highestConfidence = 'UNMAPPED';
     } else {
       for (const field of STANDARD_FIELDS) {
+        if (field.key === 'worksheetSummary') continue;
         // Prevent percentage columns from mapping to count/mass fields
         const isFieldPercentage = field.key.toLowerCase().includes('pct');
         if (isPercentage && !isFieldPercentage) {
@@ -1335,6 +1418,7 @@ export function detectColumnMappings(
       if (assignedKeys.has(bestMatch)) {
         bestMatch = 'ignore';
         highestConfidence = 'AMBIGUOUS';
+        isSummary = false;
       } else {
         assignedKeys.add(bestMatch);
       }
@@ -1348,6 +1432,7 @@ export function detectColumnMappings(
       mappedField: bestMatch,
       confidence: highestConfidence,
       sampleValues,
+      isSummary,
     };
   });
 
@@ -1498,7 +1583,7 @@ export function validateParsedFile(
   // Create lookup of header to mapped field
   const headerMap = new Map<string, StandardFieldKey>();
   parsedFile.mappings.forEach((m) => {
-    if (m.mappedField !== 'ignore') {
+    if (m.mappedField !== 'ignore' && m.mappedField !== 'worksheetSummary') {
       headerMap.set(m.fileHeader, m.mappedField);
     }
   });
@@ -1591,21 +1676,30 @@ export function validateParsedFile(
     };
 
     // 3. Parse & Validate Numeric Fields
+    // Mapped blanks stay missing (undefined). Unmapped count fields default to 0 so
+    // formats that omit optional columns (culling, floor eggs) keep existing behaviour.
+    const mappedFields = new Set(headerMap.values());
+    const optionalCountDefault = (field: StandardFieldKey, parsed: number | undefined): number | undefined => {
+      if (parsed !== undefined) return parsed;
+      return mappedFields.has(field) ? undefined : 0;
+    };
+
     const birdCount = checkNumericField('birdCount', rowValues.birdCount, false);
     let feedKg = checkNumericField('feedKg', rowValues.feedKg, false);
     const feedGrams = checkNumericField('feedGrams', rowValues.feedGrams, false);
-    const mortality = checkNumericField('mortality', rowValues.mortality, false) ?? 0;
-    const culling = checkNumericField('culling', rowValues.culling, false) ?? 0;
-    const eggsProduced = checkNumericField('eggsProduced', rowValues.eggsProduced, false) ?? 0;
-    const selectionEggs = checkNumericField('selectionEggs', rowValues.selectionEggs, false) ?? 0;
-    const damagedEggs = checkNumericField('damagedEggs', rowValues.damagedEggs, false) ?? 0;
-    const floorEggs = checkNumericField('floorEggs', rowValues.floorEggs, false) ?? 0;
+    const mortality = optionalCountDefault('mortality', checkNumericField('mortality', rowValues.mortality, false));
+    const culling = optionalCountDefault('culling', checkNumericField('culling', rowValues.culling, false));
+    const eggsProduced = optionalCountDefault('eggsProduced', checkNumericField('eggsProduced', rowValues.eggsProduced, false));
+    const selectionEggs = optionalCountDefault('selectionEggs', checkNumericField('selectionEggs', rowValues.selectionEggs, false));
+    const damagedEggs = optionalCountDefault('damagedEggs', checkNumericField('damagedEggs', rowValues.damagedEggs, false));
+    const floorEggs = optionalCountDefault('floorEggs', checkNumericField('floorEggs', rowValues.floorEggs, false));
     const temperature = checkNumericField('temperature', rowValues.temperature, true) ?? null;
     const ammoniaPpm = checkNumericField('ammoniaPpm', rowValues.ammoniaPpm, false) ?? null;
     const eggWeightAvg = checkNumericField('eggWeightAvg', rowValues.eggWeightAvg, false);
     const bodyWeightAvg = checkNumericField('bodyWeightAvg', rowValues.bodyWeightAvg, false);
     const actualProductionPct = checkNumericField('actualProductionPct', rowValues.actualProductionPct, false, true);
     const standardProductionPct = checkNumericField('standardProductionPct', rowValues.standardProductionPct, false, true);
+    const selectionPct = checkNumericField('selectionPct', rowValues.selectionPct, false, true);
 
     const mappedFeedGmsPerBird = checkNumericField('feedGramsPerBird', rowValues.feedGramsPerBird, false);
 
@@ -1627,30 +1721,38 @@ export function validateParsedFile(
     if (feedKg === undefined && feedGrams !== undefined && feedGrams > 0) {
       feedKg = parseFloat((feedGrams / 1000).toFixed(2));
     }
-    const feedGramsPerBird =
-      mappedFeedGmsPerBird !== undefined
-        ? mappedFeedGmsPerBird
-        : feedKg !== undefined && birdCount && birdCount > 0
-        ? Math.round((feedKg * 1000) / birdCount)
-        : feedGrams;
+    const derivedKpis = deriveDailyKpis(
+      {
+        eggsProduced,
+        selectionEggs,
+        birdCount: birdCount ?? null,
+        mortality: mortality ?? null,
+        feedKg: feedKg ?? null,
+        selectionPct,
+        actualProductionPct,
+        feedGramsPerBird: mappedFeedGmsPerBird,
+      },
+      true,
+    );
+    const feedGramsPerBird = derivedKpis.feedGramsPerBird ?? undefined;
 
     const openingBirdCount = birdCount;
-    const totalDeductions = (mortality || 0) + (culling || 0);
+    const totalDeductions = (mortality ?? 0) + (culling ?? 0);
     const closingBirdCount =
       openingBirdCount !== undefined ? Math.max(0, openingBirdCount - totalDeductions) : undefined;
 
     // Mortality & Culling checks
-    if (birdCount !== undefined && mortality + culling > birdCount) {
+    if (birdCount !== undefined && (mortality ?? 0) + (culling ?? 0) > birdCount) {
       rowErrors.push({
         field: 'mortality',
-        value: `${mortality} + ${culling}`,
-        reason: `Combined mortality (${mortality}) and culling (${culling}) exceeds total bird count (${birdCount})`,
+        value: `${mortality ?? 0} + ${culling ?? 0}`,
+        reason: `Combined mortality (${mortality ?? 0}) and culling (${culling ?? 0}) exceeds total bird count (${birdCount})`,
       });
     }
 
     // Customer Domain Validations:
     // Egg Production Maximum Threshold: 95%
-    if (birdCount !== undefined && birdCount > 0 && eggsProduced > 0) {
+    if (birdCount !== undefined && birdCount > 0 && eggsProduced !== undefined && eggsProduced > 0) {
       const rate = eggsProduced / birdCount;
       if (rate > 0.95) {
         rowErrors.push({
@@ -1705,13 +1807,24 @@ export function validateParsedFile(
     }
 
     // Selection & Damaged eggs checks
-    if (selectionEggs + damagedEggs > eggsProduced && eggsProduced > 0) {
+    if (
+      selectionEggs !== undefined &&
+      damagedEggs !== undefined &&
+      eggsProduced !== undefined &&
+      selectionEggs + damagedEggs > eggsProduced &&
+      eggsProduced > 0
+    ) {
       rowErrors.push({
         field: 'selectionEggs',
         value: `${selectionEggs} + ${damagedEggs}`,
         reason: `Combined selection (${selectionEggs}) and damaged (${damagedEggs}) eggs exceeds total eggs produced (${eggsProduced})`,
       });
-    } else if (selectionEggs > eggsProduced && eggsProduced > 0) {
+    } else if (
+      selectionEggs !== undefined &&
+      eggsProduced !== undefined &&
+      selectionEggs > eggsProduced &&
+      eggsProduced > 0
+    ) {
       rowErrors.push({
         field: 'selectionEggs',
         value: selectionEggs,
@@ -1740,7 +1853,7 @@ export function validateParsedFile(
         (rowValues.mortality && rowValues.mortality !== '') ||
         (rowValues.culling && rowValues.culling !== '')
       );
-      if (!hasInputs && eggsProduced === 0 && feedKg === undefined) {
+      if (!hasInputs && (eggsProduced === undefined || eggsProduced === 0) && feedKg === undefined) {
         rowWarnings.push({
           field: 'eggsProduced',
           message: 'No egg production or feed usage logged for this date (future/placeholder row)',
@@ -1770,6 +1883,7 @@ export function validateParsedFile(
       selectionEggs,
       damagedEggs,
       floorEggs,
+      selectionPct: selectionPct ?? (derivedKpis.selectionPct ?? undefined),
       actualProductionPct,
       standardProductionPct,
       temperature,
@@ -1780,6 +1894,8 @@ export function validateParsedFile(
       flockId: rowValues.flockId || '',
       feedLoadQuantityKg: feedLoadQty ?? feedKg,
       feedLoadNotes: rowValues.feedLoadNotes || rowValues.remarks || '',
+      preservedAvg: parsedFile.preservedAvg,
+      preservedAvgByDate: parsedFile.preservedAvgByDate,
       isValid: rowErrors.length === 0,
       errors: rowErrors,
       warnings: rowWarnings,
@@ -1804,7 +1920,7 @@ export async function checkServerConflicts(
   const user = auth.currentUser;
 
   // 1. Try Backend API first if user is logged in
-  if (user) {
+  if (user && typeof user.getIdToken === 'function') {
     try {
       const idToken = await user.getIdToken();
       const recordsPayload = validRows.map((r) => ({
@@ -1911,11 +2027,17 @@ export async function checkServerConflicts(
     const diff: Record<string, { existing: any; proposed: any }> = {};
     let isConflict = false;
 
-    const checkFields = ['birdCount', 'feedKg', 'mortality', 'culling', 'eggsProduced'] as const;
+    const checkFields = ['birdCount', 'feedKg', 'mortality', 'culling', 'eggsProduced', 'actualProductionPct'] as const;
     checkFields.forEach((f) => {
       const propVal = r[f];
       const exVal = existing[f];
-      if (propVal !== undefined && exVal !== undefined && Number(propVal) !== Number(exVal)) {
+      if (
+        propVal !== undefined &&
+        propVal !== null &&
+        exVal !== undefined &&
+        exVal !== null &&
+        Number(propVal) !== Number(exVal)
+      ) {
         isConflict = true;
         diff[f] = { existing: exVal, proposed: propVal };
       }
@@ -1965,6 +2087,14 @@ export function sanitizeFirestoreData<T>(data: T): T {
 
 export interface ImportExecutionOptions {
   dryRun?: boolean;
+  worksheets?: Array<{
+    worksheetKey: string;
+    fileName?: string;
+    sheetName?: string | null;
+    farmId?: string;
+    preservedAvg?: number | null;
+    preservedAvgByDate?: Record<string, number>;
+  }>;
 }
 
 export interface ExecuteImportClientResult {
@@ -2001,7 +2131,7 @@ export async function executeHistoricalImport(
   const batchId = `batch_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
   // 1. Try Backend API
-  if (user) {
+  if (user && typeof user.getIdToken === 'function') {
     try {
       const idToken = await user.getIdToken();
       const recordsPayload = rowsToImport.map((r) => ({
@@ -2051,6 +2181,7 @@ export async function executeHistoricalImport(
           conflictAction,
           sourceFiles,
           dryRun: options?.dryRun ?? false,
+          worksheets: options?.worksheets,
         }),
       });
 
@@ -2330,6 +2461,16 @@ export async function executeHistoricalImport(
     const countSkipped = wsRows.length - countImported - countFailed;
     const farmId = wsRows[0]?.farmId || '';
 
+    const optWs = options?.worksheets?.find(
+      (w) =>
+        w.worksheetKey === wsKey ||
+        w.fileName === wsKey ||
+        (sheetName && w.sheetName === sheetName) ||
+        (w.farmId && w.farmId === farmId)
+    );
+    const preservedAvg = optWs?.preservedAvg ?? wsRows[0]?.preservedAvg ?? null;
+    const preservedAvgByDate = optWs?.preservedAvgByDate ?? wsRows[0]?.preservedAvgByDate ?? undefined;
+
     return {
       worksheetKey: wsKey,
       fileName,
@@ -2345,8 +2486,33 @@ export async function executeHistoricalImport(
       importTimestamp: now,
       revertStatus: 'NOT_REVERTED',
       canSafelyRevert: countImported > 0,
+      preservedAvg,
+      preservedAvgByDate,
     };
   });
+
+  // If not dryRun, update farm documents with preservedAvg in direct Firestore fallback
+  if (!options?.dryRun && typeof db?.collection === 'function') {
+    for (const ws of worksheets) {
+      if (ws.farmId && ws.preservedAvg !== null && ws.preservedAvg !== undefined) {
+        try {
+          const farmRef = db.collection('farms').doc(ws.farmId);
+          if (typeof farmRef.set === 'function') {
+            await farmRef.set(
+              {
+                preservedAvg: ws.preservedAvg,
+                preservedAvgByDate: ws.preservedAvgByDate || null,
+                updatedAt: now,
+              },
+              { merge: true }
+            );
+          }
+        } catch (e) {
+          console.warn('[historicalImportService] Failed to update farm preservedAvg:', e);
+        }
+      }
+    }
+  }
 
   if (options?.dryRun) {
     return {
@@ -2445,7 +2611,7 @@ export async function fetchImportBatches(): Promise<any[]> {
   const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
   const user = auth.currentUser;
 
-  if (user) {
+  if (user && typeof user.getIdToken === 'function') {
     try {
       const idToken = await user.getIdToken();
       const res = await fetch(`${backendUrl}/api/v1/admin/import/batches`, {
@@ -2525,6 +2691,8 @@ export interface WorksheetImportContribution {
     failedCount: number;
     conflictsCount: number;
   };
+  preservedAvg?: number | null;
+  preservedAvgByDate?: Record<string, number>;
 }
 
 export interface RevertPreviewRecord {
@@ -2575,7 +2743,7 @@ export async function fetchRevertPreview(batchId: string, worksheetKey?: string)
   const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
   const user = auth.currentUser;
 
-  if (user) {
+  if (user && typeof user.getIdToken === 'function') {
     try {
       const idToken = await user.getIdToken();
       const url = `${backendUrl}/api/v1/admin/import/batches/${batchId}/revert-preview${worksheetKey ? `?worksheetKey=${encodeURIComponent(worksheetKey)}` : ''}`;
@@ -2751,7 +2919,7 @@ export async function executeRevertImportBatch(
   const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
   const user = auth.currentUser;
 
-  if (user) {
+  if (user && typeof user.getIdToken === 'function') {
     try {
       const idToken = await user.getIdToken();
       const res = await fetch(`${backendUrl}/api/v1/admin/import/batches/${batchId}/revert`, {

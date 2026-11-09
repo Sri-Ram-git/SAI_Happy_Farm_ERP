@@ -157,15 +157,6 @@ export interface FarmHealthEvaluation {
   compliance: number;
   hasTotalFlockLoss: boolean;
   isTotalFlockLoss: boolean;
-  isEligibleForRanking: boolean;
-  totalLossDate?: string | null;
-  totalLossBirds?: number;
-  scoreBreakdown?: {
-    production: number;
-    mortality: number;
-    feedEfficiency: number;
-    compliance: number;
-  };
 }
 
 export function evaluateFarmHealth(params: {
@@ -177,7 +168,7 @@ export function evaluateFarmHealth(params: {
   const { reports, days = 7 } = params;
 
   if (!reports || reports.length === 0) {
-    const reason = `No daily reports submitted in selected ${days}-day period (0 of ${days} days).`;
+    const reason = 'No daily reports submitted for selected period.';
     return {
       statusLabel: 'NO DATA',
       status: 'NO DATA',
@@ -195,15 +186,6 @@ export function evaluateFarmHealth(params: {
       compliance: 0,
       hasTotalFlockLoss: false,
       isTotalFlockLoss: false,
-      isEligibleForRanking: false,
-      totalLossDate: null,
-      totalLossBirds: 0,
-      scoreBreakdown: {
-        production: 0,
-        mortality: 0,
-        feedEfficiency: 0,
-        compliance: 0,
-      },
     };
   }
 
@@ -251,15 +233,6 @@ export function evaluateFarmHealth(params: {
       compliance: 0,
       hasTotalFlockLoss: false,
       isTotalFlockLoss: false,
-      isEligibleForRanking: false,
-      totalLossDate: null,
-      totalLossBirds: 0,
-      scoreBreakdown: {
-        production: 0,
-        mortality: 0,
-        feedEfficiency: 0,
-        compliance: 0,
-      },
     };
   }
 
@@ -288,45 +261,41 @@ export function evaluateFarmHealth(params: {
   const mRate = calcAverage(mRates);
   const fGrams = calcAverage(fGramsList);
   const sRate = calcAverage(sRates);
-  const compliance = Math.min(100, Math.round((reports.length / Math.max(1, days)) * 100));
 
-  // Check explicit fatal critical conditions:
-  // (a) Single day total flock loss (mortality == eligible)
-  // (b) Cumulative mortality across reporting days >= initial/eligible count
-  let totalLossDate: string | null = null;
-  let totalLossBirds = 0;
-  const disasterDoc = reports.find((r) => {
-    const eligible = getEligibleBirdCount(r);
-    return eligible > 0 && Number(r.mortality) >= eligible;
+  const uniqueDates = new Set(reports.map((r) => r.submissionDate).filter(Boolean));
+  const compliance = Math.min(100, Math.round(((uniqueDates.size > 0 ? uniqueDates.size : reports.length) / Math.max(1, days)) * 100));
+
+  // Determine if flock has live birds remaining
+  const currentLive = params.liveBirds != null && Number.isFinite(params.liveBirds) ? Number(params.liveBirds) : null;
+  const isFlockAlive = currentLive !== null ? currentLive > 0 : reports.some((r) => {
+    const closing = r.closingBirdCount ?? r.birdCount ?? r.currentBirdCount ?? 0;
+    return Number(closing) > 0;
   });
-  if (disasterDoc) {
-    totalLossDate = disasterDoc.submissionDate || null;
-    totalLossBirds = Number(disasterDoc.mortality) || 0;
-  }
 
   const totalMortality = reports.reduce((s, r) => s + (Number(r.mortality) || 0), 0);
   const maxEligibleFlock = reports.reduce((max, r) => Math.max(max, getEligibleBirdCount(r)), 0);
-  const hasCumulativeTotalLoss = maxEligibleFlock > 0 && totalMortality >= maxEligibleFlock;
-  const hasTotalFlockLoss = Boolean(disasterDoc) || hasCumulativeTotalLoss;
+  const baselineFlockSize = Math.max(currentLive || 0, maxEligibleFlock);
+
+  // Check explicit fatal critical conditions:
+  // (a) Single day total flock loss (mortality == eligible) - only possible if flock is not currently alive
+  // (b) Cumulative mortality across reporting days >= initial/eligible count - only possible if flock is not currently alive
+  const hasDailyTotalFlockLoss = !isFlockAlive && reports.some((r) => {
+    const eligible = getEligibleBirdCount(r);
+    return eligible > 0 && Number(r.mortality) >= eligible;
+  });
+
+  const hasCumulativeTotalLoss = !isFlockAlive && baselineFlockSize > 0 && totalMortality >= baselineFlockSize;
+  const hasTotalFlockLoss = hasDailyTotalFlockLoss || hasCumulativeTotalLoss;
 
   const isCriticalMortalityThreshold = mRate >= (KPI_THRESHOLDS.mortalityRateCritical ?? 10);
 
   // Precedence 3: Explicit Critical Condition (Good production MUST NEVER override this)
   if (hasTotalFlockLoss || isCriticalMortalityThreshold) {
     const criticalReason = hasTotalFlockLoss
-      ? (disasterDoc
-          ? `CRITICAL ALERT: Total flock loss (100% mortality) reported (${totalLossBirds.toLocaleString()} birds died on ${totalLossDate}). Operational disaster takes precedence over all other metrics.`
-          : 'CRITICAL ALERT: Total flock loss (100% cumulative mortality) reported. Operational disaster takes precedence over all other metrics.')
+      ? 'CRITICAL ALERT: Total flock loss (100% mortality) reported. Operational disaster takes precedence over all other metrics.'
       : `CRITICAL ALERT: Average mortality rate (${mRate}%) exceeds critical threshold (${KPI_THRESHOLDS.mortalityRateCritical ?? 10}%).`;
 
     const score = hasTotalFlockLoss ? 0 : Math.min(30, Math.max(0, 100 - mRate * 5));
-    const disasterScoreBreakdown = calcPerformanceScore({
-      productionRate: pRate,
-      mortalityRate: mRate,
-      feedPerBird: fGrams,
-      submissionCompliance: compliance,
-    });
-
     return {
       statusLabel: 'CRITICAL',
       status: 'CRITICAL',
@@ -344,15 +313,6 @@ export function evaluateFarmHealth(params: {
       compliance,
       hasTotalFlockLoss,
       isTotalFlockLoss: hasTotalFlockLoss,
-      isEligibleForRanking: true,
-      totalLossDate,
-      totalLossBirds,
-      scoreBreakdown: {
-        production: disasterScoreBreakdown.production,
-        mortality: hasTotalFlockLoss ? 0 : disasterScoreBreakdown.mortality,
-        feedEfficiency: disasterScoreBreakdown.feedEfficiency,
-        compliance: disasterScoreBreakdown.compliance,
-      },
     };
   }
 
@@ -386,15 +346,6 @@ export function evaluateFarmHealth(params: {
       compliance,
       hasTotalFlockLoss: false,
       isTotalFlockLoss: false,
-      isEligibleForRanking: true,
-      totalLossDate: null,
-      totalLossBirds: 0,
-      scoreBreakdown: {
-        production: rawScore.production,
-        mortality: rawScore.mortality,
-        feedEfficiency: rawScore.feedEfficiency,
-        compliance: rawScore.compliance,
-      },
     };
   }
 
@@ -424,6 +375,8 @@ export function evaluateFarmHealth(params: {
     isInvalid: false,
     score: rawScore.total,
     cappedScore: rawScore.total,
+    reason: undefined,
+    reasons: [],
     mortalityRate: mRate,
     productionRate: pRate,
     feedGramsPerBird: fGrams,
@@ -431,16 +384,6 @@ export function evaluateFarmHealth(params: {
     compliance,
     hasTotalFlockLoss: false,
     isTotalFlockLoss: false,
-    isEligibleForRanking: true,
-    totalLossDate: null,
-    totalLossBirds: 0,
-    reasons: [],
-    scoreBreakdown: {
-      production: rawScore.production,
-      mortality: rawScore.mortality,
-      feedEfficiency: rawScore.feedEfficiency,
-      compliance: rawScore.compliance,
-    },
   };
 }
 

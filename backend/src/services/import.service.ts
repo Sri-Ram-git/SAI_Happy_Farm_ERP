@@ -123,13 +123,14 @@ export class ImportService {
           'culling',
           'eggsProduced',
           'selectionEggs',
+          'actualProductionPct',
         ] as const;
 
         compareFields.forEach((field) => {
           const proposedVal = record[field];
           if (proposedVal !== undefined && proposedVal !== null) {
             const existingVal = existingData ? existingData[field] : undefined;
-            if (existingVal !== undefined && Number(proposedVal) !== Number(existingVal)) {
+            if (existingVal !== undefined && existingVal !== null && Number(proposedVal) !== Number(existingVal)) {
               hasDifferences = true;
               diff[field] = { existing: existingVal, proposed: proposedVal };
             }
@@ -342,7 +343,7 @@ export class ImportService {
           const existingData = existingReport || existingLock;
           let isConflict = false;
 
-          const checkFields = ['birdCount', 'feedKg', 'mortality', 'culling', 'eggsProduced'] as const;
+          const checkFields = ['birdCount', 'feedKg', 'mortality', 'culling', 'eggsProduced', 'actualProductionPct'] as const;
           for (const f of checkFields) {
             if (record[f] != null && existingData[f] != null && Number(record[f]) !== Number(existingData[f])) {
               isConflict = true;
@@ -620,6 +621,16 @@ export class ImportService {
 
         const farmId = wsRecords[0]?.farmId || '';
 
+        const optWs = req.worksheets?.find(
+          (w) =>
+            w.worksheetKey === wsKey ||
+            w.fileName === wsKey ||
+            (sheetName && w.sheetName === sheetName) ||
+            (w.farmId && w.farmId === farmId)
+        );
+        const preservedAvg = optWs?.preservedAvg ?? wsRecords[0]?.preservedAvg ?? null;
+        const preservedAvgByDate = optWs?.preservedAvgByDate ?? wsRecords[0]?.preservedAvgByDate ?? undefined;
+
         return {
           worksheetKey: wsKey,
           fileName,
@@ -635,8 +646,32 @@ export class ImportService {
           importTimestamp: now,
           revertStatus: 'NOT_REVERTED' as any,
           canSafelyRevert: countImported > 0,
+          preservedAvg,
+          preservedAvgByDate,
         };
       });
+
+      // Update farm document with preservedAvg if available
+      if (!req.dryRun) {
+        for (const ws of worksheets) {
+          if (ws.farmId && ws.preservedAvg !== null && ws.preservedAvg !== undefined) {
+            const farmRef = this.db.collection('farms').doc(ws.farmId);
+            currentBatch.set(
+              farmRef,
+              {
+                preservedAvg: ws.preservedAvg,
+                preservedAvgByDate: ws.preservedAvgByDate || null,
+                updatedAt: now,
+              },
+              { merge: true }
+            );
+            operationsInCurrentBatch++;
+            if (operationsInCurrentBatch >= OPERATIONS_PER_BATCH_LIMIT) {
+              await commitCurrentBatch();
+            }
+          }
+        }
+      }
 
       if (req.dryRun) {
         return {

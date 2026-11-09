@@ -5,15 +5,24 @@ import { getIstDate } from '../utils/dateUtils';
 
 vi.mock('../config/firebase', () => {
   const setMock = vi.fn();
+  const getMock = vi.fn().mockResolvedValue({ exists: false, data: () => null });
   const commitMock = vi.fn().mockResolvedValue(undefined);
+  const runTransactionMock = vi.fn(async (updateFunction: (transaction: any) => Promise<any>) => {
+    const mockTx = {
+      get: vi.fn(async (docRef: any) => ({ exists: false, data: () => null })),
+      set: setMock,
+    };
+    return updateFunction(mockTx);
+  });
   return {
     db: {
       batch: () => ({
         set: setMock,
         commit: commitMock,
       }),
+      runTransaction: runTransactionMock,
       collection: (col: string) => ({
-        doc: (id: string) => ({ id, col, set: setMock }),
+        doc: (id: string) => ({ id, col, set: setMock, get: getMock }),
       }),
     },
   };
@@ -63,9 +72,12 @@ describe('notificationService', () => {
     
     await evaluateFeedStockNotification('FARM_FEED', 'Farm Feed', 0);
     
-    const callArgs = (batchSet as any).mock.calls.find((call: any) => call[0].type === 'feed_stock_depleted');
+    const callArgs = (batchSet as any).mock.calls.find(
+      (call: any) => call[0]?.type === 'feed_stock_depleted' || call[1]?.type === 'feed_stock_depleted',
+    );
     expect(callArgs).toBeDefined();
-    expect(callArgs[0].priority).toBe('CRITICAL');
+    const payload = callArgs[1]?.type === 'feed_stock_depleted' ? callArgs[1] : callArgs[0];
+    expect(payload.priority).toBe('CRITICAL');
   });
 });
 

@@ -234,6 +234,96 @@ describe('ImportService', () => {
       expect(res.results[0]!.diff?.['birdCount']?.proposed).toBe(1000);
       expect(res.summary.conflictCount).toBe(1);
     });
+
+    it('should classify differing actualProductionPct as CONFLICT and matching as EXACT_DUPLICATE', async () => {
+      mockDb.collection.mockImplementation((name: string) => {
+        if (name === 'dailyReportLocks') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                docs: [
+                  {
+                    data: () => ({ farmId: 'AP12', submissionDate: '2026-01-10' }),
+                  },
+                ],
+              }),
+            }),
+          };
+        }
+        if (name === 'dailyReports') {
+          return {
+            where: vi.fn().mockReturnValue({
+              get: vi.fn().mockResolvedValue({
+                docs: [
+                  {
+                    data: () => ({
+                      farmId: 'AP12',
+                      submissionDate: '2026-01-10',
+                      birdCount: 1000,
+                      feedKg: 120,
+                      mortality: 2,
+                      culling: 0,
+                      eggsProduced: 950,
+                      actualProductionPct: 75.0,
+                    }),
+                  },
+                ],
+              }),
+            }),
+          };
+        }
+        return {
+          where: vi.fn().mockReturnValue({
+            get: vi.fn().mockResolvedValue({ docs: [] }),
+          }),
+        };
+      });
+
+      const resConflict = await importService.checkConflicts(
+        {
+          records: [
+            {
+              recordType: 'DAILY_REPORT',
+              farmId: 'AP12',
+              submissionDate: '2026-01-10',
+              birdCount: 1000,
+              feedKg: 120,
+              mortality: 2,
+              culling: 0,
+              eggsProduced: 950,
+              actualProductionPct: 79.74,
+            },
+          ],
+        },
+        adminUser,
+        'req-act-conflict',
+      );
+
+      expect(resConflict.results[0]!.status).toBe('CONFLICT');
+      expect(resConflict.results[0]!.diff?.['actualProductionPct']).toEqual({ existing: 75.0, proposed: 79.74 });
+
+      const resDup = await importService.checkConflicts(
+        {
+          records: [
+            {
+              recordType: 'DAILY_REPORT',
+              farmId: 'AP12',
+              submissionDate: '2026-01-10',
+              birdCount: 1000,
+              feedKg: 120,
+              mortality: 2,
+              culling: 0,
+              eggsProduced: 950,
+              actualProductionPct: 75.0,
+            },
+          ],
+        },
+        adminUser,
+        'req-act-dup',
+      );
+
+      expect(resDup.results[0]!.status).toBe('EXACT_DUPLICATE');
+    });
   });
 
   describe('executeImport', () => {

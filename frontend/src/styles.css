@@ -6758,6 +6758,88 @@ textarea {
   background: #dbeafe;
 }
 
+.notif-card-status--read {
+  color: #4b5563;
+  background: #f3f4f6;
+}
+
+.notif-card-status--active {
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+}
+
+.notif-card-status--resolved {
+  color: #15803d;
+  background: #dcfce7;
+  border: 1px solid #bbf7d0;
+}
+
+.notif-card-statuses {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.notif-resolved-box {
+  margin: 10px 0;
+  padding: 10px 14px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.notif-resolved-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #166534;
+  font-weight: 500;
+}
+
+.notif-resolved-notes {
+  margin-top: 4px;
+  color: #374151;
+  font-style: italic;
+  padding-left: 20px;
+}
+
+.notif-resolve-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.notif-resolve-input {
+  width: 100%;
+  font-size: 12px;
+}
+
+.notif-resolve-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.notif-item-resolved-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 1px 6px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
 /* Farm identity row */
 .notif-card-farm-row {
   display: flex;

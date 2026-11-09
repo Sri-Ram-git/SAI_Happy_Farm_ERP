@@ -1,20 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { DashboardLayout } from '../components/dashboard/DashboardLayout';
-import { AlertTriangle, BellRing, Check, CheckCheck, Info, ShieldCheck, Skull, Zap } from 'lucide-react';
-import {
-  AppNotification,
-  subscribeToUserNotifications,
-  markNotificationAsRead,
-  markAllNotificationsAsRead,
-  bootstrapNotificationsFromFarmReports,
-  generateMissingReportNotifications,
-} from '../services/notificationService';
+import { AlertTriangle, BellRing, Check, CheckCheck, CheckCircle, Info, ShieldCheck, Skull, Zap } from 'lucide-react';
+import { AppNotification } from '../services/notificationService';
 import { useAuth } from '../context/AuthContext';
+import { useNotifications } from '../context/NotificationContext';
 import { useNavigate } from 'react-router-dom';
-import { subscribeToFarms } from '../services/farmDataService';
-import { subscribeToAllDailyReports, subscribeToDailyReportsByFarms } from '../services/reportDataService';
-import { subscribeToAllUsers } from '../services/userDataService';
-import { getDaysAgo, getIstDate } from '../utils/dateUtils';
 
 interface NotificationsPageProps {
   role?: 'admin' | 'supervisor';
@@ -79,168 +69,73 @@ function getSourceLabel(notif: AppNotification): string {
   return 'Daily report';
 }
 
+const PAGE_SIZE = 25;
+
 export function NotificationsPage({ role }: NotificationsPageProps) {
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [filter, setFilter] = useState('ALL');
-  const [bootstrapping, setBootstrapping] = useState(false);
-  const [bootstrapDone, setBootstrapDone] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [resolutionNotesInput, setResolutionNotesInput] = useState<string>('');
+  const [isSubmittingResolution, setIsSubmittingResolution] = useState<boolean>(false);
+
   const { userProfile, role: authRole } = useAuth();
   const navigate = useNavigate();
+  const {
+    notifications,
+    unreadCount,
+    criticalCount,
+    warningCount,
+    activeCount,
+    resolvedCount,
+    readCount,
+    loading: isLoading,
+    markAsRead,
+    markAllAsRead,
+    resolveNotification,
+  } = useNotifications();
 
   const activeRole = role || authRole || 'supervisor';
-
-  const isLoading = bootstrapping || !bootstrapDone;
-
-  // Subscribe to real-time notifications
-  useEffect(() => {
-    if (!userProfile?.uid) return;
-    const assignedFarmIds = activeRole === 'supervisor' ? userProfile.farmIds : undefined;
-    const unsubscribe = subscribeToUserNotifications(activeRole, assignedFarmIds, (notifs) => {
-      setNotifications((prev) => {
-        if (notifs.length === 0 && prev.length > 0) {
-          // Prevent listener from accidentally wiping state if it temporarily evaluates to empty
-          return prev;
-        }
-        const map = new Map(prev.map(n => [n.id, n]));
-        notifs.forEach(n => map.set(n.id, n));
-        return Array.from(map.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      });
-    });
-    return () => unsubscribe();
-  }, [userProfile, activeRole]);
-
-  // Bootstrap: derive notifications from existing Firestore data when page loads
-  // Uses merge:true so existing readBy state is never overwritten
-  // The deterministic doc IDs prevent duplicates on repeated loads
-  const runBootstrap = useCallback(async () => {
-    if (bootstrapDone || bootstrapping || !userProfile?.uid) return;
-    setBootstrapping(true);
-
-    try {
-      const startDate = getDaysAgo(6); // 7-day window matching Overview default
-      const endDate = getIstDate();
-
-      await new Promise<void>((resolve) => {
-        const farmMap = new Map<string, { reports: any[]; farmName: string }>();
-        let farmsLoaded = false;
-        let reportsLoaded = false;
-        let usersLoaded = false;
-        let farms: any[] = [];
-        let allReports: any[] = [];
-        let allUsers: any[] = [];
-
-        const assignedFarmIds = activeRole === 'supervisor' ? (userProfile.farmIds || []) : undefined;
-
-        const unsubFarms = subscribeToFarms(assignedFarmIds, (loadedFarms) => {
-          farms = loadedFarms.filter((f) => f.active !== false);
-          farmsLoaded = true;
-          tryCommit();
-        });
-
-        const reportCb = (loadedReports: any[]) => {
-          allReports = loadedReports;
-          reportsLoaded = true;
-          tryCommit();
-        };
-
-        const unsubUsers = subscribeToAllUsers((loadedUsers) => {
-          allUsers = loadedUsers;
-          usersLoaded = true;
-          tryCommit();
-        });
-
-        let reportsUnsub: (() => void) | null = null;
-        if (activeRole === 'supervisor' && assignedFarmIds && assignedFarmIds.length > 0) {
-          reportsUnsub = subscribeToDailyReportsByFarms(assignedFarmIds, startDate, endDate, reportCb);
-        } else if (activeRole !== 'supervisor') {
-          reportsUnsub = subscribeToAllDailyReports(startDate, endDate, reportCb);
-        } else {
-          reportsLoaded = true;
-        }
-
-        let committed = false;
-        function tryCommit() {
-          if (committed || !farmsLoaded || !reportsLoaded || !usersLoaded) return;
-          committed = true;
-          unsubFarms();
-          unsubUsers();
-          if (reportsUnsub) reportsUnsub();
-
-          // Build farm → reports map
-          farms.forEach((farm) => {
-            const farmReports = allReports.filter((r) => r.farmId === farm.farmId);
-            farmMap.set(farm.farmId, {
-              reports: farmReports,
-              farmName: farm.name || farm.farmId,
-            });
-          });
-
-          const activeFarmers = allUsers.filter((user) =>
-            user.active !== false && String(user.role || '').trim().toLowerCase() === 'farmer'
-          );
-
-          Promise.all([
-            bootstrapNotificationsFromFarmReports(farmMap),
-            generateMissingReportNotifications(allReports, farms, activeFarmers),
-          ])
-            .then(([bootNotifs, missingNotifs]) => {
-               setNotifications(prev => {
-                  const map = new Map(prev.map(n => [n.id, n]));
-                  [...bootNotifs, ...missingNotifs].forEach(n => map.set(n.id, n));
-                  return Array.from(map.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-               });
-            })
-            .catch((err) => console.error('[NotificationsPage] Bootstrap error:', err))
-            .finally(() => resolve());
-        }
-
-        // Safety timeout: don't block UI forever
-        setTimeout(() => {
-          if (!committed) {
-            committed = true;
-            unsubFarms();
-            unsubUsers();
-            if (reportsUnsub) reportsUnsub();
-            resolve();
-          }
-        }, 15000);
-      });
-    } catch (err) {
-      console.error('[NotificationsPage] Bootstrap failed:', err);
-    } finally {
-      setBootstrapping(false);
-      setBootstrapDone(true);
-    }
-  }, [userProfile, activeRole, bootstrapDone, bootstrapping]);
-
-  useEffect(() => {
-    if (userProfile?.uid) {
-      runBootstrap();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userProfile?.uid]);
-
   const uid = userProfile?.uid || '';
-  const unreadCount = notifications.filter((n) => !(n.readBy || []).includes(uid)).length;
-  const criticalCount = notifications.filter((n) => n.priority === 'CRITICAL').length;
-  const warningCount = notifications.filter((n) => n.priority === 'WARNING').length;
 
   const handleMarkAllRead = async () => {
-    if (uid) await markAllNotificationsAsRead(notifications, uid);
+    await markAllAsRead();
   };
 
   const handleMarkRead = async (id: string) => {
-    if (uid) await markNotificationAsRead(id, uid);
+    await markAsRead(id);
+  };
+
+  const handleConfirmResolve = async (id: string) => {
+    setIsSubmittingResolution(true);
+    try {
+      await resolveNotification(id, resolutionNotesInput);
+      setResolvingId(null);
+      setResolutionNotesInput('');
+    } catch (err) {
+      console.error('[NotificationsPage] Resolve error:', err);
+    } finally {
+      setIsSubmittingResolution(false);
+    }
   };
 
   const filteredNotifications = notifications.filter((notif) => {
     const isUnread = !(notif.readBy || []).includes(uid);
+    const isResolved = Boolean(notif.resolved);
+    if (filter === 'ACTIVE') return !isResolved;
     if (filter === 'UNREAD') return isUnread;
+    if (filter === 'READ') return !isUnread;
+    if (filter === 'RESOLVED') return isResolved;
     if (filter === 'CRITICAL') return notif.priority === 'CRITICAL';
     if (filter === 'WARNING') return notif.priority === 'WARNING';
     if (filter === 'INFO') return notif.priority === 'INFO';
     return true;
   });
+
+  const totalPages = Math.ceil(filteredNotifications.length / PAGE_SIZE) || 1;
+  const paginatedNotifications = filteredNotifications.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
 
   return (
     <DashboardLayout role={activeRole as any} userName={userProfile?.name}>
@@ -257,25 +152,30 @@ export function NotificationsPage({ role }: NotificationsPageProps) {
 
         {/* SUMMARY STATS */}
         <section className="notification-stat-grid" aria-label="Notification summary">
+          <div className="notification-stat-card notification-stat-card--total">
+            <span className="notification-stat-label">All alerts</span>
+            <strong>{isLoading ? '…' : notifications.length}</strong>
+            <span>Notification history</span>
+          </div>
+          <div className="notification-stat-card notification-stat-card--active">
+            <span className="notification-stat-label">Active</span>
+            <strong>{isLoading ? '…' : activeCount}</strong>
+            <span>Pending resolution</span>
+          </div>
           <div className="notification-stat-card notification-stat-card--unread">
             <span className="notification-stat-label">Unread</span>
             <strong>{isLoading ? '…' : unreadCount}</strong>
-            <span>Needs your attention</span>
+            <span>Needs your review</span>
+          </div>
+          <div className="notification-stat-card notification-stat-card--resolved">
+            <span className="notification-stat-label">Resolved</span>
+            <strong>{isLoading ? '…' : resolvedCount}</strong>
+            <span>Addressed in history</span>
           </div>
           <div className="notification-stat-card notification-stat-card--critical">
             <span className="notification-stat-label">Critical</span>
             <strong>{isLoading ? '…' : criticalCount}</strong>
             <span>Immediate action</span>
-          </div>
-          <div className="notification-stat-card notification-stat-card--warning">
-            <span className="notification-stat-label">Warnings</span>
-            <strong>{isLoading ? '…' : warningCount}</strong>
-            <span>Operational follow-up</span>
-          </div>
-          <div className="notification-stat-card notification-stat-card--total">
-            <span className="notification-stat-label">All alerts</span>
-            <strong>{isLoading ? '…' : notifications.length}</strong>
-            <span>Notification history</span>
           </div>
         </section>
 
@@ -288,18 +188,28 @@ export function NotificationsPage({ role }: NotificationsPageProps) {
             </span>
           </div>
           <div className="notif-page-filters">
-            {(['ALL', 'UNREAD', 'CRITICAL', 'WARNING', 'INFO'] as const).map((f) => (
+            {[
+              { key: 'ALL', label: 'All', count: notifications.length },
+              { key: 'ACTIVE', label: 'Active', count: activeCount },
+              { key: 'UNREAD', label: 'Unread', count: unreadCount },
+              { key: 'READ', label: 'Read', count: readCount },
+              { key: 'RESOLVED', label: 'Resolved', count: resolvedCount },
+              { key: 'CRITICAL', label: 'Critical', count: criticalCount },
+              { key: 'WARNING', label: 'Warning', count: warningCount },
+            ].map(({ key, label, count }) => (
               <button
-                key={f}
-                className={`notif-filter-btn ${filter === f ? 'notif-filter-btn--active' : ''}`}
-                onClick={() => setFilter(f)}
+                key={key}
+                className={`notif-filter-btn ${filter === key ? 'notif-filter-btn--active' : ''}`}
+                onClick={() => {
+                  setFilter(key);
+                  setCurrentPage(1);
+                }}
               >
-                {f === 'ALL' ? 'All' : f === 'UNREAD' ? 'Unread' : f === 'CRITICAL' ? 'Critical' : f === 'WARNING' ? 'Warning' : 'Information'}
-                {f === 'ALL' && notifications.length > 0 && (
-                  <span className="notif-filter-count">{notifications.length}</span>
-                )}
-                {f === 'UNREAD' && unreadCount > 0 && (
-                  <span className="notif-filter-count notif-filter-count--unread">{unreadCount}</span>
+                {label}
+                {count > 0 && (
+                  <span className={`notif-filter-count ${key === 'UNREAD' ? 'notif-filter-count--unread' : ''}`}>
+                    {count}
+                  </span>
                 )}
               </button>
             ))}
@@ -323,17 +233,19 @@ export function NotificationsPage({ role }: NotificationsPageProps) {
 
         {/* NOTIFICATION CARDS */}
         {filteredNotifications.length > 0 ? (
-          <div className="notif-card-list">
-            {filteredNotifications.map((notif) => {
-              const isUnread = !(notif.readBy || []).includes(uid);
+          <>
+            <div className="notif-card-list">
+              {paginatedNotifications.map((notif) => {
+                const isUnread = !(notif.readBy || []).includes(uid);
+              const isResolved = Boolean(notif.resolved);
               const sev = getSeverityConfig(notif.priority);
               const SevIcon = sev.icon;
               return (
                 <div
                   key={notif.id}
-                  className={`notif-card ${sev.cardClass} ${isUnread ? 'notif-card--unread' : 'notif-card--read'}`}
+                  className={`notif-card ${sev.cardClass} ${isUnread ? 'notif-card--unread' : 'notif-card--read'} ${isResolved ? 'notif-card--resolved' : ''}`}
                 >
-                  {/* TOP ROW: icon + severity badge + title + unread dot + status pill */}
+                  {/* TOP ROW: icon + severity badge + title + unread dot + status pills */}
                   <div className="notif-card-header">
                     <div className="notif-card-title-wrap">
                       <div className={`notif-card-icon ${sev.iconClass}`}>
@@ -350,9 +262,14 @@ export function NotificationsPage({ role }: NotificationsPageProps) {
                         <h4 className="notif-card-title">{notif.title}</h4>
                       </div>
                     </div>
-                    <span className={`notif-card-status ${isUnread ? 'notif-card-status--unread' : ''}`}>
-                      {isUnread ? 'Unread' : 'Read'}
-                    </span>
+                    <div className="notif-card-statuses">
+                      <span className={`notif-card-status ${isUnread ? 'notif-card-status--unread' : 'notif-card-status--read'}`}>
+                        {isUnread ? 'Unread' : 'Read'}
+                      </span>
+                      <span className={`notif-card-status ${isResolved ? 'notif-card-status--resolved' : 'notif-card-status--active'}`}>
+                        {isResolved ? '✓ Resolved' : '● Active'}
+                      </span>
+                    </div>
                   </div>
 
                   {/* FARM IDENTITY */}
@@ -373,6 +290,56 @@ export function NotificationsPage({ role }: NotificationsPageProps) {
                   {/* MESSAGE BODY */}
                   <p className="notif-card-msg">{notif.message}</p>
 
+                  {/* RESOLUTION DETAILS (when resolved) */}
+                  {isResolved && (
+                    <div className="notif-resolved-box">
+                      <div className="notif-resolved-header">
+                        <CheckCheck size={14} />
+                        <span>
+                          <strong>Resolved</strong> by {notif.resolvedByName || notif.resolvedBy || 'Administrator'} • {formatTimestamp(notif.resolvedAt || '')}
+                        </span>
+                      </div>
+                      {notif.resolutionNotes && (
+                        <div className="notif-resolved-notes">
+                          "{notif.resolutionNotes}"
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* INLINE RESOLUTION FORM (when Admin is resolving) */}
+                  {!isResolved && activeRole === 'admin' && resolvingId === notif.id && (
+                    <div className="notif-resolve-form">
+                      <input
+                        type="text"
+                        className="form-input form-input--sm notif-resolve-input"
+                        placeholder="Optional resolution notes (e.g. inspected shed, treatment administered)..."
+                        value={resolutionNotesInput}
+                        onChange={(e) => setResolutionNotesInput(e.target.value)}
+                        autoFocus
+                      />
+                      <div className="notif-resolve-buttons">
+                        <button
+                          className="btn btn--primary btn--sm"
+                          onClick={() => handleConfirmResolve(notif.id)}
+                          disabled={isSubmittingResolution}
+                        >
+                          <Check size={13} /> {isSubmittingResolution ? 'Resolving…' : 'Confirm Resolve'}
+                        </button>
+                        <button
+                          className="btn btn--outline btn--sm"
+                          onClick={() => {
+                            setResolvingId(null);
+                            setResolutionNotesInput('');
+                          }}
+                          disabled={isSubmittingResolution}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* FOOTER: timestamp + source + actions */}
                   <div className="notif-card-footer">
                     <div className="notif-card-meta">
@@ -389,6 +356,17 @@ export function NotificationsPage({ role }: NotificationsPageProps) {
                           <Check size={14} /> Mark Read
                         </button>
                       )}
+                      {!isResolved && activeRole === 'admin' && resolvingId !== notif.id && (
+                        <button
+                          className="btn btn--outline btn--sm notif-resolve-btn"
+                          onClick={() => {
+                            setResolvingId(notif.id);
+                            setResolutionNotesInput('');
+                          }}
+                        >
+                          <CheckCircle size={14} /> Resolve Alert
+                        </button>
+                      )}
                       {notif.farmId && (
                         <button
                           className="btn btn--primary btn--sm"
@@ -403,6 +381,49 @@ export function NotificationsPage({ role }: NotificationsPageProps) {
               );
             })}
           </div>
+
+          {filteredNotifications.length > PAGE_SIZE && (
+            <div
+              className="notif-pagination-bar"
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: '1.25rem',
+                padding: '0.75rem 1rem',
+                background: '#ffffff',
+                borderRadius: '8px',
+                border: '1px solid #e2e8f0',
+              }}
+            >
+              <span style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                Showing {(currentPage - 1) * PAGE_SIZE + 1}–
+                {Math.min(currentPage * PAGE_SIZE, filteredNotifications.length)} of {filteredNotifications.length} alerts
+              </span>
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn--outline btn--sm"
+                  disabled={currentPage <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </button>
+                <span style={{ fontSize: '0.875rem', fontWeight: 600, color: '#334155', minWidth: '4.5rem', textAlign: 'center' }}>
+                  Page {currentPage} of {totalPages}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--outline btn--sm"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
         ) : (
           <div className="notification-empty-panel">
             <div className="notification-empty-icon">
@@ -423,5 +444,3 @@ export function NotificationsPage({ role }: NotificationsPageProps) {
     </DashboardLayout>
   );
 }
-
-

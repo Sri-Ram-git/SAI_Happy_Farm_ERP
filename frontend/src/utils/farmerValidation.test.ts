@@ -41,7 +41,9 @@ describe('Farmer Login Form Validation & Business Rules Suite', () => {
       const data: FarmFormData = {
         ...baseData,
         eggsProduced: '4750',
-        selectionEggs: '4500',
+        selectionEggs: '4750',
+        damagedEggs: '0',
+        floorEggs: '0',
       };
       const errors = validateStep(1, data, birdCount);
       expect(errors.eggsProduced).toBeUndefined();
@@ -52,7 +54,9 @@ describe('Farmer Login Form Validation & Business Rules Suite', () => {
       const data: FarmFormData = {
         ...baseData,
         eggsProduced: '4751',
-        selectionEggs: '4500',
+        selectionEggs: '4751',
+        damagedEggs: '0',
+        floorEggs: '0',
       };
       const errors = validateStep(1, data, birdCount);
       expect(errors.eggsProduced).toBeDefined();
@@ -64,7 +68,9 @@ describe('Farmer Login Form Validation & Business Rules Suite', () => {
       const data: FarmFormData = {
         ...baseData,
         eggsProduced: '1141',
-        selectionEggs: '1000',
+        selectionEggs: '1141',
+        damagedEggs: '0',
+        floorEggs: '0',
       };
       const errors = validateStep(1, data, 1200);
       expect(errors.eggsProduced).toBeDefined();
@@ -72,28 +78,33 @@ describe('Farmer Login Form Validation & Business Rules Suite', () => {
       const validData: FarmFormData = {
         ...baseData,
         eggsProduced: '1140',
-        selectionEggs: '1000',
+        selectionEggs: '1140',
+        damagedEggs: '0',
+        floorEggs: '0',
       };
       const validErrors = validateStep(1, validData, 1200);
       expect(validErrors.eggsProduced).toBeUndefined();
     });
 
-    it('should still reject selection eggs exceeding eggs produced', () => {
+    it('should reject selection eggs exceeding eggs produced via the equality-mismatch rule', () => {
       const data: FarmFormData = {
         ...baseData,
         eggsProduced: '4000',
         selectionEggs: '4100',
+        damagedEggs: '0',
+        floorEggs: '0',
       };
       const errors = validateStep(1, data, birdCount);
-      expect(errors.selectionEggs).toBeDefined();
+      expect(errors.eggsProduced).toContain('validation.eggProductionMismatch');
     });
 
-    it('Case 1: should accept Production 1,000; Selection 500; Damaged 100 (600 <= 1000) and calculate 50.0% selection rate', () => {
+    it('Case 1: should accept Production 1,000; Selection 500; Damaged 100; Floor 400 (1,000 total) and calculate 50.0% selection rate', () => {
       const data: FarmFormData = {
         ...baseData,
         eggsProduced: '1000',
         selectionEggs: '500',
         damagedEggs: '100',
+        floorEggs: '400',
       };
       const errors = validateStep(1, data, 2000);
       expect(errors.eggsProduced).toBeUndefined();
@@ -120,28 +131,29 @@ describe('Farmer Login Form Validation & Business Rules Suite', () => {
       expect(rate).toBe('90.0');
     });
 
-    it('Case 3: should reject Production 1,000; Selection 900; Damaged 150 (1050 > 1000)', () => {
+    it('Case 3: should reject Production 1,000; Selection 900; Damaged 150; Floor 0 (1,050 !== 1,000)', () => {
       const data: FarmFormData = {
         ...baseData,
         eggsProduced: '1000',
         selectionEggs: '900',
         damagedEggs: '150',
+        floorEggs: '0',
       };
       const errors = validateStep(1, data, 2000);
-      expect(errors.selectionEggs).toBeDefined();
-      expect(errors.damagedEggs).toBeDefined();
-      expect(errors.selectionEggs).toContain('validation.selectionDamagedExceeds');
+      expect(errors.eggsProduced).toBeDefined();
+      expect(errors.eggsProduced).toContain('validation.eggProductionMismatch');
     });
 
-    it('Case 4: should reject Production 0; Selection 1', () => {
+    it('Case 4: should reject Production 0; Selection 1 (1 !== 0)', () => {
       const data: FarmFormData = {
         ...baseData,
         eggsProduced: '0',
         selectionEggs: '1',
         damagedEggs: '0',
+        floorEggs: '0',
       };
       const errors = validateStep(1, data, 2000);
-      expect(errors.selectionEggs).toBeDefined();
+      expect(errors.eggsProduced).toContain('validation.eggProductionMismatch');
     });
 
     it('Case 5: should accept Production 0; Selection 0; Damaged 0 without division error', () => {
@@ -195,26 +207,27 @@ describe('Farmer Login Form Validation & Business Rules Suite', () => {
     });
 
     it('Case 7: should reject when production is reduced below selection + damaged sum', () => {
-      // Initially 1000 prod, 800 sel, 150 dmg -> 950 <= 1000 (valid)
+      // Initially 950 prod, 800 sel, 150 dmg -> 950 = 950 (valid)
       const validInitial: FarmFormData = {
         ...baseData,
-        eggsProduced: '1000',
+        eggsProduced: '950',
         selectionEggs: '800',
         damagedEggs: '150',
+        floorEggs: '0',
       };
       expect(validateStep(1, validInitial, 2000).selectionEggs).toBeUndefined();
 
-      // Farmer reduces production to 900 -> 800 + 150 = 950 > 900 (invalid)
+      // Farmer reduces production to 900 -> 800 + 150 = 950 !== 900 (invalid)
       const reducedProd: FarmFormData = {
         ...baseData,
         eggsProduced: '900',
         selectionEggs: '800',
         damagedEggs: '150',
+        floorEggs: '0',
       };
       const errors = validateStep(1, reducedProd, 2000);
-      expect(errors.selectionEggs).toBeDefined();
-      expect(errors.damagedEggs).toBeDefined();
-      expect(errors.selectionEggs).toContain('validation.selectionDamagedExceeds');
+      expect(errors.eggsProduced).toBeDefined();
+      expect(errors.eggsProduced).toContain('validation.eggProductionMismatch');
     });
   });
 

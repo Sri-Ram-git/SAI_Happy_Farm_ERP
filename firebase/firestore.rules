@@ -43,12 +43,17 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isSupervisor());
       allow create, delete: if isAdmin();
-      allow update: if isAdmin() || (isOwner(userId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'farmIds', 'active']));
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'role', 'farmIds', 'active', 'createdat', 'createdAt', 'created_at', 'email', 'uid'
+        ])
+      );
     }
 
     // Farms Collection
     match /farms/{farmId} {
-      allow read: if isAuthenticated() && isUserActive();
+      allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
       allow create, delete: if isAdmin();
       allow update: if isAdmin() || (isUserActive() && hasFarmAccess(farmId));
 
@@ -56,7 +61,7 @@ service cloud.firestore {
       match /feedTransactions/{txId} {
         allow read: if isAuthenticated() && hasFarmAccess(farmId);
         allow create: if isAuthenticated() && hasFarmAccess(farmId);
-        allow update, delete: if isAdmin();
+        allow update, delete: if isAdmin() || (isUserActive() && hasRole('supervisor') && hasFarmAccess(farmId));
       }
 
       match /birdTransactions/{txId} {
@@ -68,21 +73,26 @@ service cloud.firestore {
 
     // Flocks Collection
     match /flocks/{flockId} {
-      allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId);
+      allow read: if isAuthenticated() && isUserActive() && (resource == null || hasFarmAccess(resource.data.farmId));
       allow create, delete: if isAdmin();
-      allow update: if isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId);
+      allow update: if isAdmin() || (
+        isAuthenticated() && isUserActive() && hasFarmAccess(resource.data.farmId) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'farmId', 'flockId', 'initialBirds', 'startDate', 'breedType',
+          'productionCurve', 'batchNumber', 'isInitialFlock', 'status'
+        ])
+      );
     }
 
-// Daily Reports (Root Collection & Subcollections)
+    // Daily Reports (Root Collection & Subcollections)
     match /dailyReports/{reportOrUserId} {
       allow read: if isAuthenticated() && isUserActive() && (
         isOwner(reportOrUserId) ||
-        isAdmin() ||
-        (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+        (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
       );
       allow create, update: if isAuthenticated() && isUserActive() && (
-        isAdmin() ||
-        hasFarmAccess(request.resource.data.farmId)
+        isOwner(reportOrUserId) ||
+        (isAdmin() || hasFarmAccess(request.resource.data.farmId))
       );
       allow delete: if isAdmin();
 
@@ -90,14 +100,26 @@ service cloud.firestore {
       match /dailyLogs/{logDate} {
         allow read: if isAuthenticated() && isUserActive() && (
           isOwner(reportOrUserId) ||
-          isAdmin() ||
-          (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+          (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
         );
         allow create, update: if isAuthenticated() && isUserActive() && (
-          isAdmin() ||
-          hasFarmAccess(request.resource.data.farmId)
+          isOwner(reportOrUserId) ||
+          (isAdmin() || hasFarmAccess(request.resource.data.farmId))
         );
         allow delete: if isAdmin();
+
+        // Subcollection: revisions (Version History / Audit Archive for Version 2 Corrections)
+        match /revisions/{revId} {
+          allow read: if isAuthenticated() && isUserActive() && (
+            isOwner(reportOrUserId) ||
+            (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
+          );
+          allow create, update: if isAuthenticated() && isUserActive() && (
+            isOwner(reportOrUserId) ||
+            (isAdmin() || hasFarmAccess(request.resource.data.farmId))
+          );
+          allow delete: if isAdmin();
+        }
       }
     }
 
@@ -109,11 +131,22 @@ service cloud.firestore {
       );
     }
 
+    // Collection Group Queries for revisions
+    match /{path=**}/revisions/{revDoc} {
+      allow read: if isAuthenticated() && isUserActive() && (
+        isAdmin() ||
+        (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+      );
+    }
+
     // Daily Report Locks (Duplicate Prevention)
     match /dailyReportLocks/{lockId} {
-      allow read: if isAuthenticated() && isUserActive();
+      allow read: if isAuthenticated() && isUserActive() && (
+        isAdmin() ||
+        (resource.data.farmId != null && hasFarmAccess(resource.data.farmId))
+      );
       allow create, update: if isAuthenticated() && isUserActive() && (isAdmin() || hasFarmAccess(request.resource.data.farmId));
-      allow delete: if isAuthenticated() && isUserActive() && (isAdmin() || hasFarmAccess(resource.data.farmId));
+      allow delete: if isAdmin();
     }
 
     // Audit Logs
@@ -121,6 +154,192 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
       allow update, delete: if isAdmin();
+    }
+
+    // Import Batches (Admin only)
+    match /importBatches/{batchId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Logs Collection (Farm-level subcollections for feed and flock logs)
+    match /logs/{farmId} {
+      allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
+
+      // Subcollection: feedLogs
+      match /feedLogs/{logId} {
+        allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
+
+        // Helper function for feed log creator ownership:
+        // Caller's UID must match original creator UID; conflicting metadata is locked.
+        function isFeedLogCreator() {
+          return (
+            // 1. Both createdByUid and recordedBy are set, agree with each other, and match caller
+            (resource.data.get('createdByUid', null) != null && resource.data.get('recordedBy', null) != null &&
+             resource.data.createdByUid == resource.data.recordedBy &&
+             resource.data.createdByUid == request.auth.uid) ||
+            // 2. Historical record with only recordedBy set (matches caller)
+            (resource.data.get('createdByUid', null) == null && resource.data.get('recordedBy', null) != null &&
+             resource.data.recordedBy == request.auth.uid) ||
+            // 3. Record with only createdByUid set (matches caller)
+            (resource.data.get('recordedBy', null) == null && resource.data.get('createdByUid', null) != null &&
+             resource.data.createdByUid == request.auth.uid)
+          );
+        }
+
+        // Create: Admin or assigned Supervisor; createdByUid and recordedBy MUST both equal caller auth.uid
+        allow create: if isAuthenticated() && isUserActive() &&
+          (isAdmin() || (hasRole('supervisor') && hasFarmAccess(farmId))) &&
+          request.resource.data.createdByUid == request.auth.uid &&
+          request.resource.data.recordedBy == request.auth.uid;
+
+        // Update: Admin or assigned Supervisor; caller MUST be record creator (no Admin override);
+        // immutable identity keys cannot be modified, added, or removed
+        allow update: if isAuthenticated() && isUserActive() &&
+          (isAdmin() || (hasRole('supervisor') && hasFarmAccess(farmId))) &&
+          isFeedLogCreator() &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+            'createdByUid', 'recordedBy', 'farmId', 'logId', 'loadedAt'
+          ]);
+
+        // Delete: Admin or assigned Supervisor; caller MUST be record creator (no Admin override)
+        allow delete: if isAuthenticated() && isUserActive() &&
+          (isAdmin() || (hasRole('supervisor') && hasFarmAccess(farmId))) &&
+          isFeedLogCreator();
+      }
+
+      // Subcollection: flockLogs
+      match /flockLogs/{logId} {
+        allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    // Notifications Collection
+    match /notifications/{notificationId} {
+      // Helper: Supervisor mark-as-read: only allows adding caller's own auth.uid while preserving existing readers
+      // createdAt is strictly immutable on all updates
+      function isSupervisorReadByUpdate() {
+        return hasRole('supervisor') &&
+               resource.data.farmId in getUserData().farmIds &&
+               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']) &&
+               request.resource.data.readBy.hasAll(resource.data.get('readBy', [])) &&
+               request.resource.data.readBy.hasOnly(resource.data.get('readBy', []).concat([request.auth.uid])) &&
+               request.resource.data.createdAt == resource.data.createdAt;
+      }
+
+      // Helper: Admin resolution & mark-as-read update:
+      // - Explicit allowlist: permits modifying ONLY resolution fields and readBy
+      // - Resolution metadata cannot be modified independently while an alert remains active
+      // - Complete Active -> Resolved transition required whenever any resolution metadata changes
+      // - One-way transition: Active (resolved == false) may transition to resolved == true;
+      //   once resolved, resolution metadata is permanently sealed and immutable (no reopening, no rewriting)
+      // - Resolution timestamp integrity: resolvedAt must match request.time (FieldValue.serverTimestamp())
+      // - Resolver UID integrity: resolvedBy must match caller's authenticated UID (request.auth.uid)
+      // - Admin readBy restrictions: Admin may only append their own authenticated UID; existing readers preserved; no other UID added/removed
+      function isAdminResolutionUpdate() {
+        return isAdmin() &&
+               request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                 'resolved', 'resolvedAt', 'resolvedBy', 'resolvedByName', 'resolutionNotes', 'readBy'
+               ]) && (
+                 // Case 1: Complete, internally consistent Active -> Resolved transition
+                 (request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                    'resolved', 'resolvedAt', 'resolvedBy', 'resolvedByName', 'resolutionNotes'
+                  ]) &&
+                  resource.data.get('resolved', false) == false &&
+                  request.resource.data.resolved == true &&
+                  request.resource.data.resolvedBy == request.auth.uid &&
+                  request.resource.data.resolvedAt == request.time &&
+                  request.resource.data.diff(resource.data).affectedKeys().hasAll([
+                    'resolved', 'resolvedAt', 'resolvedBy'
+                  ])
+                 ) ||
+                 // Case 2: Pure readBy update (marking as read without touching resolution metadata)
+                 !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+                   'resolved', 'resolvedAt', 'resolvedBy', 'resolvedByName', 'resolutionNotes'
+                 ])
+               ) &&
+               // Admin readBy restrictions (applies to both Case 1 and Case 2 if readBy is modified):
+               (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['readBy']) || (
+                 request.resource.data.readBy.hasAll(resource.data.get('readBy', [])) &&
+                 request.resource.data.readBy.hasOnly(resource.data.get('readBy', []).concat([request.auth.uid]))
+               ));
+      }
+
+      // Helper: Validate three-channel delivery state on creation and update (prevents false delivery claims)
+      function isDeliveryStateSafe() {
+        return (!('channels' in request.resource.data) || (
+          request.resource.data.channels.hasOnly(['IN_APP', 'SMS', 'EMAIL']) &&
+          request.resource.data.channels.hasAny(['IN_APP'])
+        )) && (
+          !('delivery' in request.resource.data) || (
+            (!('inApp' in request.resource.data.delivery) ||
+             request.resource.data.delivery.inApp.get('status', 'delivered') in ['delivered', 'enabled']) &&
+            (!('sms' in request.resource.data.delivery) ||
+             (request.resource.data.delivery.sms.get('status', 'disabled') in ['pending_provider', 'not_configured', 'disabled'] &&
+              request.resource.data.delivery.sms.get('provider', null) == null &&
+              request.resource.data.delivery.sms.get('deliveredAt', null) == null &&
+              (request.resource.data.delivery.sms.get('enabled', false) == false ||
+               request.resource.data.get('priority', 'INFO') == 'CRITICAL')
+             )) &&
+            (!('email' in request.resource.data.delivery) ||
+             (request.resource.data.delivery.email.get('status', 'disabled') in ['pending_provider', 'not_configured', 'disabled'] &&
+              request.resource.data.delivery.email.get('provider', null) == null &&
+              request.resource.data.delivery.email.get('deliveredAt', null) == null &&
+              (request.resource.data.delivery.email.get('enabled', false) == false ||
+               request.resource.data.get('priority', 'INFO') in ['CRITICAL', 'WARNING'])
+             ))
+          )
+        );
+      }
+
+      // Create:
+      // - Admin: can create any notification (subject to isDeliveryStateSafe)
+      // - Supervisor: for assigned farms (bootstrap or operations)
+      // - Farmer: for owned farm only on report / feed events
+      // All creates must validate delivery safety; non-admin creates also validate targetRoles, channels, priority, source, and empty readBy
+      allow create: if isAuthenticated() && isUserActive() &&
+        isDeliveryStateSafe() && (
+          isAdmin() || (
+            (
+              (hasRole('supervisor') && hasFarmAccess(request.resource.data.farmId)) ||
+              (hasRole('farmer') && hasFarmAccess(request.resource.data.farmId) &&
+               request.resource.data.source in ['daily_report', 'feed_inventory'])
+            ) &&
+            request.resource.data.targetRoles.hasOnly(['admin', 'supervisor']) &&
+            request.resource.data.channels.hasOnly(['IN_APP', 'SMS', 'EMAIL']) &&
+            request.resource.data.channels.hasAny(['IN_APP']) &&
+            request.resource.data.priority in ['CRITICAL', 'WARNING', 'INFO'] &&
+            request.resource.data.source in ['daily_report', 'feed_inventory', 'missing_report_check', 'bootstrap'] &&
+            request.resource.data.get('readBy', []).size() == 0
+          )
+        );
+
+      // Update:
+      // - createdAt is strictly immutable across EVERY permitted update path (including Admin)
+      // - isDeliveryStateSafe() protects delivery integrity across all update paths:
+      //   prevents marking SMS/Email as 'delivered', injecting external providers/timestamps,
+      //   or configuring channels inconsistently with notification priority
+      // - Admin: restricted strictly to resolution fields (resolved, resolvedAt, resolvedBy, resolvedByName,
+      //   resolutionNotes) and readBy; resolvedBy must match request.auth.uid; all alert identity and delivery keys immutable
+      // - Supervisor: assigned farms only, self-only readBy addition (preserving createdAt)
+      // - Farmers: zero update permissions (notifications are immutable management alerts)
+      allow update: if isAuthenticated() && isUserActive() &&
+        request.resource.data.createdAt == resource.data.createdAt &&
+        isDeliveryStateSafe() && (
+          isAdminResolutionUpdate() ||
+          isSupervisorReadByUpdate()
+        );
+
+      // Read: Admin or Supervisor assigned to the farm
+      allow read: if isAuthenticated() && isUserActive() && (
+        isAdmin() || (
+          hasRole('supervisor') &&
+          resource.data.farmId in getUserData().farmIds
+        )
+      );
+
+      // Delete: Denied for all roles (notifications are permanent historical audit records and must never be deleted)
+      allow delete: if false;
     }
   }
 }

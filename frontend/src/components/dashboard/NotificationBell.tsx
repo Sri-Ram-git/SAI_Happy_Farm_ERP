@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell } from 'lucide-react';
-import { AppNotification, markNotificationAsRead, markAllNotificationsAsRead, subscribeToUserNotifications } from '../../services/notificationService';
+import { AppNotification } from '../../services/notificationService';
 import { useAuth } from '../../context/AuthContext';
+import { useNotifications } from '../../context/NotificationContext';
 
 function getRelativeTime(isoDate: string): string {
   const now = Date.now();
@@ -32,24 +33,13 @@ interface NotificationBellProps {
 
 export function NotificationBell({ role }: NotificationBellProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const { userProfile, role: authRole } = useAuth();
-  
+  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
+
   const activeRole = role || authRole || 'supervisor';
-
-  useEffect(() => {
-    if (!userProfile?.uid) return;
-    const assignedFarmIds = activeRole === 'supervisor' ? userProfile.farmIds : undefined;
-    const unsubscribe = subscribeToUserNotifications(activeRole, assignedFarmIds, (notifs) => {
-      setNotifications(notifs);
-    });
-    return () => unsubscribe();
-  }, [userProfile, activeRole]);
-
   const uid = userProfile?.uid || '';
-  const unreadCount = notifications.filter(n => !(n.readBy || []).includes(uid)).length;
 
   const handleClickOutside = useCallback((e: MouseEvent) => {
     if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -77,15 +67,13 @@ export function NotificationBell({ role }: NotificationBellProps) {
 
   const handleMarkAllRead = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (uid) {
-      await markAllNotificationsAsRead(notifications, uid);
-    }
+    await markAllAsRead();
   };
 
   const handleNotificationClick = async (notif: AppNotification) => {
     const isUnread = !(notif.readBy || []).includes(uid);
-    if (isUnread && uid) {
-      await markNotificationAsRead(notif.id, uid);
+    if (isUnread) {
+      await markAsRead(notif.id);
     }
     setIsOpen(false);
     navigate(`/${activeRole}/notifications`);
@@ -128,7 +116,7 @@ export function NotificationBell({ role }: NotificationBellProps) {
                 <p className="notif-empty-sub">No new notifications right now.</p>
               </div>
             ) : (
-              notifications.slice(0, 5).map(notif => {
+              notifications.map(notif => {
                 const isUnread = !(notif.readBy || []).includes(uid);
                 return (
                   <div 
@@ -144,6 +132,9 @@ export function NotificationBell({ role }: NotificationBellProps) {
                       <div className="notif-item-title-row">
                         <span className="notif-item-priority">{notif.priority}</span>
                         <span className="notif-item-title">{notif.title}</span>
+                        {notif.resolved && (
+                          <span className="notif-item-resolved-badge">Resolved</span>
+                        )}
                       </div>
                       {notif.farmName && (
                         <div className="notif-item-farm">

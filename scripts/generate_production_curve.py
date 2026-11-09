@@ -141,6 +141,29 @@ ROW_LABELS = [
 ]
 
 
+def get_report_act_pct(report):
+    """
+    Return the canonical daily ACT % when available, otherwise derive it.
+    Rules:
+    1. If actualProductionPct is present and valid (finite numeric 0..100), use stored percentage.
+    2. A stored numeric 0 is valid and must remain 0. Never treat zero as missing.
+    3. If absent or invalid, fall back to (eggsProduced / openingBirdCount) * 100.
+    4. If fallback cannot be calculated safely, return None.
+    """
+    stored = report.get('actualProductionPct')
+    if isinstance(stored, (int, float)) and not isinstance(stored, bool) and math.isfinite(float(stored)):
+        val = round(float(stored), 2)
+        if 0.0 <= val <= 100.0:
+            return val
+
+    birds = report.get('openingBirdCount')
+    prod = report.get('eggsProduced')
+    if isinstance(birds, (int, float)) and not isinstance(birds, bool) and float(birds) > 0:
+        if isinstance(prod, (int, float)) and not isinstance(prod, bool) and math.isfinite(float(prod)):
+            return round((float(prod) / float(birds)) * 100, 2)
+    return None
+
+
 def build_farm_sheet(wb, farm):
     farm_name = farm.get('farmName', farm.get('farmId', 'Unknown'))
     reports = farm.get('reports', [])
@@ -199,7 +222,7 @@ def build_farm_sheet(wb, farm):
     # Populate Data Columns (B onwards)
     # Collect all numeric ACT % values for the worksheet-level AVG row
     act_pct_values = []
-    data_columns = []  # Track (col, is_week_start) for AVG row styling
+    data_columns = []  # Track (col, is_week_start, date_str) for AVG row styling
 
     for col_idx, rep in enumerate(reports):
         col = col_idx + 2
@@ -239,15 +262,13 @@ def build_farm_sheet(wb, farm):
         if birds and birds > 0 and feed is not None:
             feed_gms = int(round((feed * 1000) / birds))
 
-        act_pct = None
-        if birds and birds > 0 and prod is not None:
-            act_pct = round((prod / birds) * 100, 2)
+        act_pct = get_report_act_pct(rep)
 
         # Collect numeric ACT % for AVG calculation (include zeroes, exclude None/blanks)
         if act_pct is not None:
             act_pct_values.append(act_pct)
 
-        data_columns.append((col, is_week_start))
+        data_columns.append((col, is_week_start, date_str))
 
         std_pct = get_std_pct(curve_type, age_weeks)
 
@@ -296,13 +317,39 @@ def build_farm_sheet(wb, farm):
             cell.alignment = ALIGN_CENTER
             cell.border = border
 
-    # Row 14: AVG — worksheet-level average of all numeric ACT % values
-    # Include zeroes (valid production day with 0 eggs), exclude blanks/None
-    avg_val = round(sum(act_pct_values) / len(act_pct_values), 2) if act_pct_values else ''
+    # Row 14: AVG — worksheet-level average of ACT %
+    # If preservedAvg is provided for this farm, reproduce the original imported AVG values
+    preserved_avg = farm.get('preservedAvg')
+    preserved_avg_by_date = farm.get('preservedAvgByDate') or {}
 
-    for col, is_week_start in data_columns:
+    # Safe fallback: calculate average of valid daily ACT % values for this farm
+    calculated_avg = round(sum(act_pct_values) / len(act_pct_values), 2) if act_pct_values else ''
+
+    for col, is_week_start, date_str in data_columns:
+        cell_val = ''
+        if date_str and date_str in preserved_avg_by_date:
+            val = preserved_avg_by_date[date_str]
+            if val is not None and not isinstance(val, bool):
+                try:
+                    fval = float(val)
+                    if math.isfinite(fval):
+                        cell_val = round(fval, 2)
+                except (ValueError, TypeError):
+                    pass
+
+        if cell_val == '' and preserved_avg is not None and not isinstance(preserved_avg, bool):
+            try:
+                fval = float(preserved_avg)
+                if math.isfinite(fval):
+                    cell_val = round(fval, 2)
+            except (ValueError, TypeError):
+                pass
+
+        if cell_val == '':
+            cell_val = calculated_avg
+
         border = BORDER_WEEK_START if is_week_start else BORDER_THIN
-        cell = ws.cell(row=14, column=col, value=avg_val)
+        cell = ws.cell(row=14, column=col, value=cell_val)
         cell.number_format = '0.00'
         cell.font = FONT_BOLD_BLACK
         cell.fill = FILL_YELLOW

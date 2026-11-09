@@ -7,7 +7,7 @@ function dedupeAndSort(reports: NormalizedReport[]): NormalizedReport[] {
   const seen = new Map<string, NormalizedReport>();
   for (const r of reports) {
     if (!r.submissionDate) continue; // Keep even if farmId is missing, we'll resolve it dynamically
-    const key = `${r.userId}_${r.submissionDate}_${r.flockId || 'noflock'}`;
+    const key = `${r.farmId || r.userId}_${r.submissionDate}_${r.flockId || 'noflock'}`;
     const existing = seen.get(key);
     if (!existing) {
       seen.set(key, r);

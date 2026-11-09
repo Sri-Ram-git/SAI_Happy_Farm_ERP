@@ -92,13 +92,15 @@ export class ReportsService {
 
     const db = getFirestore();
     const farmsSnap = await db.collection('farms').get();
-    const farmMap = new Map<string, { farmId: string; name: string; initialBirds?: number }>();
+    const farmMap = new Map<string, { farmId: string; name: string; initialBirds?: number; preservedAvg?: number | null; preservedAvgByDate?: Record<string, number> }>();
     farmsSnap.docs.forEach((d: QueryDocumentSnapshot) => {
       const data = d.data();
       farmMap.set(d.id, {
         farmId: d.id,
         name: data['name'] || data['farmName'] || d.id,
         initialBirds: data['initialBirdCount'] || data['currentBirdCount'] || 1000,
+        preservedAvg: typeof data['preservedAvg'] === 'number' && Number.isFinite(data['preservedAvg']) ? data['preservedAvg'] : null,
+        preservedAvgByDate: data['preservedAvgByDate'] && typeof data['preservedAvgByDate'] === 'object' ? data['preservedAvgByDate'] : undefined,
       });
     });
 
@@ -140,6 +142,30 @@ export class ReportsService {
 
       rList.sort((a, b) => (a.submissionDate || a.reportDate || '').localeCompare(b.submissionDate || b.reportDate || ''));
 
+      let preservedAvg = farmInfo?.preservedAvg ?? null;
+      let preservedAvgByDate = farmInfo?.preservedAvgByDate ?? undefined;
+
+      // Fallback: Check if any report belongs to an import batch with worksheet contributions
+      if (preservedAvg === null) {
+        const batchIds = Array.from(new Set(rList.map((r) => r.importBatchId).filter(Boolean)));
+        for (const bId of batchIds) {
+          try {
+            const batchDoc = await db.collection('importBatches').doc(bId).get();
+            if (batchDoc.exists) {
+              const bData = batchDoc.data();
+              const wsContrib = bData?.worksheets?.find((w: any) => w.farmId === fId || (w.worksheetKey && w.worksheetKey.includes(fId)));
+              if (wsContrib && typeof wsContrib.preservedAvg === 'number' && Number.isFinite(wsContrib.preservedAvg)) {
+                preservedAvg = wsContrib.preservedAvg;
+                preservedAvgByDate = wsContrib.preservedAvgByDate;
+                break;
+              }
+            }
+          } catch (e) {
+            // Ignore error loading batch fallback
+          }
+        }
+      }
+
       const initialBirds = flockInfo?.initialBirds || farmInfo?.initialBirds || 1200;
       const curveType = flockInfo?.productionCurve || 'CF_STD';
       const flockStartDateStr = flockInfo?.startDate || rList[0]?.submissionDate || '2026-01-01';
@@ -164,6 +190,7 @@ export class ReportsService {
           selectionEggs: rep.selectionEggs ?? null,
           mortality: rep.mortality ?? null,
           culling: rep.culling ?? null,
+          actualProductionPct: rep.actualProductionPct ?? rep.actPct ?? rep.actualProdPct ?? null,
           temperature: rep.temperature ?? rep.tempAvg ?? null,
           feedKg: rep.feedKg ?? null,
         };
@@ -174,6 +201,8 @@ export class ReportsService {
         farmName: farmInfo?.name || fId,
         productionCurve: curveType,
         initialBirds,
+        preservedAvg,
+        preservedAvgByDate,
         reports: formattedReports,
       });
     }

@@ -61,3 +61,33 @@ export function calculateMovingAverage(values: (number | undefined | null)[], wi
 
   return result;
 }
+
+/**
+ * Holt's linear trend exponential smoothing benchmark.
+ * alpha: level smoothing factor (default 0.2)
+ * beta: trend smoothing factor (default 0.1)
+ */
+export function holtLinearForecast(
+  values: number[],
+  forecastSteps: number = 7,
+  alpha: number = 0.2,
+  beta: number = 0.1,
+): number[] {
+  if (values.length === 0) return [];
+  if (values.length === 1) return Array(forecastSteps).fill(values[0]);
+
+  let level = values[0];
+  let trend = values[1] - values[0];
+
+  for (let t = 1; t < values.length; t++) {
+    const prevLevel = level;
+    level = alpha * values[t] + (1 - alpha) * (prevLevel + trend);
+    trend = beta * (level - prevLevel) + (1 - beta) * trend;
+  }
+
+  const forecast: number[] = [];
+  for (let h = 1; h <= forecastSteps; h++) {
+    forecast.push(parseFloat((level + h * trend).toFixed(1)));
+  }
+  return forecast;
+}

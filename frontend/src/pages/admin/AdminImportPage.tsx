@@ -19,6 +19,7 @@ import {
   parseXlsxWorkbook,
   applyMappingToMatchingFiles,
   getBatchWorksheets,
+  extractPreservedAvgFromMappings,
   type ParsedFile,
   type ValidatedRow,
   type StandardFieldKey,
@@ -326,6 +327,8 @@ export function AdminImportPage() {
               detectedFarmFromSheet: sheet.detectedFarmFromSheet,
               detectedFarmFromFilename: sheet.detectedFarmFromFilename,
               farmConflict: sheet.farmConflict,
+              preservedAvg: sheet.preservedAvg,
+              preservedAvgByDate: sheet.preservedAvgByDate,
               unusualLayoutWarning: sheet.unusualLayoutWarning,
               status: sheet.isEmpty ? 'ERROR' : 'PARSED',
               errorMessage: sheet.isEmpty ? 'Worksheet is completely empty' : undefined,
@@ -411,9 +414,16 @@ export function AdminImportPage() {
             ...m,
             mappedField: fieldKey,
             confidence: (fieldKey === 'ignore' ? 'UNMAPPED' : 'HIGH') as 'UNMAPPED' | 'HIGH',
+            isSummary: fieldKey === 'worksheetSummary',
           };
         });
-        return { ...f, mappings: updatedMappings };
+        const { preservedAvg, preservedAvgByDate } = extractPreservedAvgFromMappings(updatedMappings, f.rawRows);
+        return {
+          ...f,
+          mappings: updatedMappings,
+          preservedAvg,
+          preservedAvgByDate: Object.keys(preservedAvgByDate).length > 0 ? preservedAvgByDate : undefined,
+        };
       })
     );
   };
@@ -505,11 +515,22 @@ export function AdminImportPage() {
     setSimulationResult(null);
 
     try {
+      const worksheetsToImport = parsedFiles
+        .filter((f) => f.status === 'PARSED' && f.isSelectedSheet !== false)
+        .map((f) => ({
+          worksheetKey: `${f.file.name}${f.sheetName ? ` [${f.sheetName}]` : ''}`,
+          fileName: f.file.name,
+          sheetName: f.sheetName || null,
+          farmId: f.assignedFarmId,
+          preservedAvg: f.preservedAvg,
+          preservedAvgByDate: f.preservedAvgByDate,
+        }));
+
       const result = await executeHistoricalImport(
         validatedRows,
         conflictAction,
         (progress) => setImportProgress(progress),
-        { dryRun: true },
+        { dryRun: true, worksheets: worksheetsToImport },
       );
       setSimulationResult(result);
     } catch (err: any) {
@@ -530,11 +551,22 @@ export function AdminImportPage() {
     setImportError(null);
 
     try {
+      const worksheetsToImport = parsedFiles
+        .filter((f) => f.status === 'PARSED' && f.isSelectedSheet !== false)
+        .map((f) => ({
+          worksheetKey: `${f.file.name}${f.sheetName ? ` [${f.sheetName}]` : ''}`,
+          fileName: f.file.name,
+          sheetName: f.sheetName || null,
+          farmId: f.assignedFarmId,
+          preservedAvg: f.preservedAvg,
+          preservedAvgByDate: f.preservedAvgByDate,
+        }));
+
       const result = await executeHistoricalImport(
         validatedRows,
         conflictAction,
         (progress) => setImportProgress(progress),
-        { dryRun: false },
+        { dryRun: false, worksheets: worksheetsToImport },
       );
 
       setImportResult(result);
@@ -1035,7 +1067,9 @@ export function AdminImportPage() {
                                   {mapping.sampleValues.slice(0, 3).join(', ') || '--'}
                                 </td>
                                 <td>
-                                  {mapping.mappedField === 'ignore' ? (
+                                  {mapping.mappedField === 'worksheetSummary' || mapping.isSummary ? (
+                                    <span className="badge badge--success">Recognized</span>
+                                  ) : mapping.mappedField === 'ignore' ? (
                                     mapping.confidence === 'AMBIGUOUS' ? (
                                       <span className="badge badge--warning">Ambiguous (Choose)</span>
                                     ) : (
@@ -1056,6 +1090,9 @@ export function AdminImportPage() {
                                     className="mapping-select"
                                   >
                                     <option value="ignore">-- Do not import (Ignore) --</option>
+                                    <optgroup label="Worksheet Summary">
+                                      <option value="worksheetSummary">Preserve Existing AVG Row</option>
+                                    </optgroup>
                                     <optgroup label="Core Identifiers">
                                       <option value="submissionDate">Report Date *</option>
                                       <option value="farmId">Farm ID / Code *</option>
@@ -1073,12 +1110,13 @@ export function AdminImportPage() {
                                       <option value="feedGramsPerBird">Feed Consumed (Gms / Bird)</option>
                                     </optgroup>
                                     <optgroup label="Production & Quality">
-                                      <option value="eggsProduced">Eggs Produced</option>
-                                      <option value="selectionEggs">Selection Eggs (Graded / Waste)</option>
-                                      <option value="damagedEggs">Damaged / Rejected Eggs</option>
-                                      <option value="floorEggs">Floor Eggs</option>
-                                      <option value="actualProductionPct">Actual Production %</option>
-                                      <option value="standardProductionPct">Standard Production %</option>
+                                      {STANDARD_FIELDS
+                                        .filter((field) => field.category === 'production')
+                                        .map((field) => (
+                                          <option key={field.key} value={field.key}>
+                                            {field.label}
+                                          </option>
+                                        ))}
                                     </optgroup>
                                     <optgroup label="Weights">
                                       <option value="eggWeightAvg">Average Egg Weight (g)</option>

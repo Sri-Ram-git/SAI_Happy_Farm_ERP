@@ -129,7 +129,7 @@ export class ReportsRepository {
         const snap = await this.db.collectionGroup('dailyLogs').get();
         snap.docs.forEach((doc: QueryDocumentSnapshot) => {
           const data = doc.data();
-          const dateStr = data['submissionDate'] || data['reportDate'];
+          const dateStr = data['submissionDate'] || data['reportDate'] || data['date'] || doc.id;
           const fId = data['farmId'];
           if (dateStr && dateStr >= startDate && dateStr <= endDate) {
             if (!farmFilter || (fId && farmFilter.has(fId))) {
@@ -146,7 +146,7 @@ export class ReportsRepository {
         const snap = await this.db.collection('dailyReports').get();
         snap.docs.forEach((doc: QueryDocumentSnapshot) => {
           const data = doc.data();
-          const dateStr = data['submissionDate'] || data['reportDate'];
+          const dateStr = data['submissionDate'] || data['reportDate'] || data['date'] || doc.id;
           const fId = data['farmId'];
           if (dateStr && dateStr >= startDate && dateStr <= endDate) {
             if (!farmFilter || (fId && farmFilter.has(fId))) {
