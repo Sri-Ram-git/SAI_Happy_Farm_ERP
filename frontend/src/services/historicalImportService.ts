@@ -2916,242 +2916,40 @@ export async function executeRevertImportBatch(
   confirmationBatchId: string,
   worksheetKey?: string,
 ): Promise<RevertBatchResponse> {
-  const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+  // Reverts run on the backend only. It enforces the typed confirmation, chunking and the
+  // audit log. There is deliberately no direct-Firestore fallback (SAF-04 / B3).
   const user = auth.currentUser;
-
-  if (user && typeof user.getIdToken === 'function') {
-    try {
-      const idToken = await user.getIdToken();
-      const res = await fetch(`${backendUrl}/api/v1/admin/import/batches/${batchId}/revert`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ confirmationBatchId, worksheetKey }),
-      });
-      if (res.ok) {
-        const json = await res.json();
-        return json.data;
-      } else {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.message || `Revert failed with status ${res.status}`);
-      }
-    } catch (e: any) {
-      if (e?.message && !e.message.includes('fetch')) {
-        throw e;
-      }
-      console.warn('[executeRevertImportBatch] Backend request failed, falling back to direct Firestore:', e);
-    }
+  if (!user || typeof user.getIdToken !== 'function') {
+    throw new Error('Not authenticated');
   }
-
-  // Direct Firestore fallback
   if (confirmationBatchId.trim() !== batchId.trim()) {
     throw new Error(`Confirmation batch ID mismatch. Expected '${batchId}'.`);
   }
 
-  const batchRef = db.collection('importBatches').doc(batchId);
-  const batchDoc = await batchRef.get();
-  if (!batchDoc.exists) throw new Error(`Import batch '${batchId}' not found`);
-  const batch = batchDoc.data();
+  const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+  const idToken = await user.getIdToken();
 
-  const ws = worksheetKey
-    ? (batch.worksheets as WorksheetImportContribution[] | undefined)?.find(
-        (w) =>
-          w.worksheetKey === worksheetKey ||
-          w.fileName === worksheetKey ||
-          (w.sheetName && w.sheetName === worksheetKey),
-      )
-    : undefined;
-
-  if (worksheetKey && ws && ws.revertStatus === 'REVERTED') {
-    throw new Error(`Worksheet '${ws.sheetName || worksheetKey}' has already been reverted`);
-  }
-  if (!worksheetKey && batch.revertStatus === 'REVERTED') {
-    throw new Error('This batch has already been reverted');
-  }
-
-  await batchRef.update({ revertStatus: 'REVERTING' });
-
-  const allManifest = batch.manifest || [];
-  const manifestToRevert = worksheetKey
-    ? allManifest.filter(
-        (m: any) =>
-          m.sourceFile === worksheetKey ||
-          (ws && m.sourceFile === ws.worksheetKey) ||
-          (ws && ws.sheetName && m.sourceFile && m.sourceFile.includes(ws.sheetName)) ||
-          (ws && ws.farmId && m.farmId === ws.farmId),
-      )
-    : allManifest.filter((m: any) => m.reversalStatus !== 'REVERTED');
-
-  let deletedCount = 0;
-  let restoredCount = 0;
-  let conflictCount = 0;
-  let failedCount = 0;
-  const errors: Array<{ docId?: string; reason: string }> = [];
-
-  for (let i = 0; i < manifestToRevert.length; i += 75) {
-    const chunk = manifestToRevert.slice(i, i + 75);
-    const writeBatch = db.batch();
-
-    for (const item of chunk) {
-      try {
-        if (item.action === 'CREATED') {
-          let canDelete = true;
-          const refsToDelete: any[] = [];
-
-          for (const tDoc of item.targetDocs || []) {
-            const docRef = db.collection(tDoc.collectionPath).doc(tDoc.docId);
-            const snap = await docRef.get();
-            if (!snap.exists) continue;
-            const data = snap.data() || {};
-
-            if (data.importBatchId && data.importBatchId !== batchId) {
-              canDelete = false;
-              errors.push({ docId: tDoc.docId, reason: `Modified by another batch '${data.importBatchId}'` });
-              break;
-            }
-            if (item.submissionVersion && data.submissionVersion && data.submissionVersion > item.submissionVersion) {
-              canDelete = false;
-              errors.push({ docId: tDoc.docId, reason: `Subsequent edits detected (v${data.submissionVersion})` });
-              break;
-            }
-            refsToDelete.push(docRef);
-          }
-
-          if (!canDelete) {
-            conflictCount++;
-            item.reversalStatus = 'CONFLICT';
-            continue;
-          }
-
-          for (const ref of refsToDelete) {
-            writeBatch.delete(ref);
-          }
-          item.reversalStatus = 'REVERTED';
-          deletedCount++;
-        } else if (item.action === 'UPDATED') {
-          if (!item.beforeData) {
-            conflictCount++;
-            item.reversalStatus = 'CONFLICT';
-            errors.push({ docId: `${item.farmId}_${item.submissionDate}`, reason: 'Pre-import state missing' });
-            continue;
-          }
-
-          for (const tDoc of item.targetDocs || []) {
-            const docRef = db.collection(tDoc.collectionPath).doc(tDoc.docId);
-            const snap = await docRef.get();
-            if (snap.exists) {
-              const data = snap.data() || {};
-              if (data.importBatchId && data.importBatchId !== batchId) {
-                conflictCount++;
-                item.reversalStatus = 'CONFLICT';
-                errors.push({ docId: tDoc.docId, reason: `Modified by another batch '${data.importBatchId}'` });
-                continue;
-              }
-            }
-
-            const restoreData = { ...item.beforeData };
-            delete restoreData.importBatchId;
-            writeBatch.set(docRef, restoreData);
-          }
-          item.reversalStatus = 'REVERTED';
-          restoredCount++;
-        }
-      } catch (err: any) {
-        failedCount++;
-        errors.push({ reason: err.message || 'Item revert failed' });
-      }
-    }
-    await writeBatch.commit();
-  }
-
-  const revertTimestamp = new Date().toISOString();
-  const wsFinalStatus = failedCount > 0 ? 'REVERT_FAILED' : conflictCount > 0 ? 'REVERT_CONFLICT' : 'REVERTED';
-
-  let updatedWorksheets = (batch.worksheets as WorksheetImportContribution[] | undefined) || [];
-  if (worksheetKey) {
-    updatedWorksheets = updatedWorksheets.map((w) => {
-      if (
-        w.worksheetKey === worksheetKey ||
-        w.fileName === worksheetKey ||
-        (w.sheetName && w.sheetName === worksheetKey) ||
-        (ws && w.worksheetKey === ws.worksheetKey)
-      ) {
-        return {
-          ...w,
-          status: wsFinalStatus as any,
-          revertStatus: wsFinalStatus as any,
-          revertTimestamp,
-          revertAudit: {
-            deletedCount,
-            restoredCount,
-            failedCount,
-            conflictsCount: conflictCount,
-          },
-        };
-      }
-      return w;
-    });
-  } else {
-    updatedWorksheets = updatedWorksheets.map((w) => ({
-      ...w,
-      status: wsFinalStatus as any,
-      revertStatus: wsFinalStatus as any,
-      revertTimestamp,
-      revertAudit: {
-        deletedCount,
-        restoredCount,
-        failedCount,
-        conflictsCount: conflictCount,
+  let res: Response;
+  try {
+    res = await fetch(`${backendUrl}/api/v1/admin/import/batches/${batchId}/revert`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
       },
-    }));
+      body: JSON.stringify({ confirmationBatchId, worksheetKey }),
+    });
+  } catch {
+    throw new Error(
+      'Could not reach the server, so the revert outcome is unknown. Check the import history before retrying.',
+    );
   }
 
-  let overallBatchStatus: RevertBatchStatus;
-  if (worksheetKey) {
-    const allReverted = updatedWorksheets.length > 0 && updatedWorksheets.every((w) => w.revertStatus === 'REVERTED');
-    const anyReverted = updatedWorksheets.some((w) => w.revertStatus === 'REVERTED' || w.revertStatus === 'PARTIALLY_REVERTED');
-    overallBatchStatus = allReverted
-      ? 'REVERTED'
-      : anyReverted
-        ? 'PARTIALLY_REVERTED'
-        : conflictCount > 0
-          ? 'REVERT_REQUIRES_REVIEW'
-          : 'PARTIALLY_REVERTED';
-  } else {
-    overallBatchStatus = failedCount > 0 ? 'PARTIALLY_REVERTED' : conflictCount > 0 ? 'REVERT_REQUIRES_REVIEW' : 'REVERTED';
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(json?.error?.message || json?.message || `Revert failed with status ${res.status}`);
   }
-
-  await batchRef.update({
-    revertStatus: overallBatchStatus,
-    worksheets: updatedWorksheets,
-    manifest: allManifest,
-    revertAudit: {
-      revertOperationId: `client_revert_${Date.now()}`,
-      revertedByUid: user?.uid || 'admin',
-      revertedByEmail: user?.email || null,
-      revertTimestamp,
-      deletedRecordsCount: (batch.revertAudit?.deletedRecordsCount || 0) + deletedCount,
-      restoredRecordsCount: (batch.revertAudit?.restoredRecordsCount || 0) + restoredCount,
-      conflictsCount: (batch.revertAudit?.conflictsCount || 0) + conflictCount,
-      failedCount: (batch.revertAudit?.failedCount || 0) + failedCount,
-    },
-  });
-
-  return {
-    revertOperationId: `client_revert_${Date.now()}`,
-    batchId,
-    worksheetKey,
-    status: overallBatchStatus,
-    worksheetStatus: worksheetKey ? wsFinalStatus : undefined,
-    deletedCount,
-    restoredCount,
-    skippedCount: 0,
-    conflictCount,
-    failedCount,
-    errors,
-  };
+  return json.data;
 }
 
 /**

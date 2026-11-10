@@ -82,29 +82,41 @@ export async function getActiveFarmers(): Promise<UserDoc[]> {
   });
 }
 
-export async function updateUserStatus(uid: string, active: boolean): Promise<void> {
+/**
+ * Sends an admin request to the backend. There is deliberately no direct-Firestore fallback:
+ * the backend enforces last-admin and self-deactivation guards, role checks, token revocation
+ * and audit logging, and a client-side write would bypass all of them (SAF-04 / B3).
+ */
+async function sendAdminRequest(path: string, method: string, body: unknown, fallbackMessage: string): Promise<any> {
   const user = auth.currentUser;
-  if (user) {
-    try {
-      const idToken = await user.getIdToken();
-      const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-      const response = await fetch(`${backendUrl}/api/v1/admin/users/${uid}/status`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ active }),
-      });
-      if (response.ok) {
-        return;
-      }
-      console.warn('[userDataService] Backend updateUserStatus returned status:', response.status, 'falling back to direct Firestore update');
-    } catch (err: any) {
-      console.warn('[userDataService] Backend updateUserStatus failed, falling back to direct Firestore update:', err.message || err);
-    }
+  if (!user) throw new Error('Not authenticated');
+
+  const idToken = await user.getIdToken();
+  const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+
+  let response: Response;
+  try {
+    response = await fetch(`${backendUrl}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error('Could not reach the server. Refresh the page to check whether the change was applied, then try again.');
   }
-  await db.collection('users').doc(uid).update({ active, updatedAt: new Date().toISOString() });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.error?.message || data?.message || fallbackMessage);
+  }
+  return data;
+}
+
+export async function updateUserStatus(uid: string, active: boolean): Promise<void> {
+  await sendAdminRequest(`/api/v1/admin/users/${uid}/status`, 'PATCH', { active }, 'Failed to update user status');
 }
 
 export async function deleteUserAccount(uid: string): Promise<void> {
@@ -275,32 +287,11 @@ export async function createAdmin(payload: CreateAdminPayload): Promise<CreateFa
 }
 
 export async function updateSupervisorAllocation(uid: string, farmIds: string[]): Promise<void> {
-  const user = auth.currentUser;
-  if (user) {
-    try {
-      const idToken = await user.getIdToken();
-      const backendUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
-      const response = await fetch(`${backendUrl}/api/v1/admin/users/supervisor/${uid}/farms`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`,
-        },
-        body: JSON.stringify({ farmIds }),
-      });
-      if (response.ok) {
-        return;
-      }
-      console.warn('[userDataService] Backend updateSupervisorAllocation returned status:', response.status, 'falling back to direct Firestore update');
-    } catch (err: any) {
-      console.warn('[userDataService] Backend updateSupervisorAllocation failed, falling back to direct Firestore update:', err.message || err);
-    }
-  }
-
-  // Firestore direct fallback (partial update ONLY)
-  await db.collection('users').doc(uid).update({
-    farmIds: Array.from(new Set(farmIds)),
-    updatedAt: new Date().toISOString(),
-  });
+  await sendAdminRequest(
+    `/api/v1/admin/users/supervisor/${uid}/farms`,
+    'PATCH',
+    { farmIds },
+    'Failed to update supervisor farm allocation',
+  );
 }
 

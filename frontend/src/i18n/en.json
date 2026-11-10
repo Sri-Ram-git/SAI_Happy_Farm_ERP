@@ -161,6 +161,8 @@
     "online": "Online",
     "reportSavedLocally": "Report saved on this device",
     "offlineSyncNotice": "It will be submitted automatically when internet connection returns.",
+    "offlineSyncFailed": "A report saved on this device could not be submitted and will not be retried automatically. Your entries are kept. Please open the form again or contact your supervisor.",
+    "reportFarmMismatch": "A report for this date was already submitted for a different farm. It cannot be changed to this farm. Please contact your supervisor.",
     "inventoryNotInitialized": "Your farm inventory has not been initialized. You cannot submit daily reports until an Admin sets up the initial bird and feed inventory.",
     "fillRequiredFields": "Please fill in all required fields on this step to proceed.",
     "remarksPlaceholder": "Any observations or notes...",

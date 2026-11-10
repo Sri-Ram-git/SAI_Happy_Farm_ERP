@@ -700,6 +700,11 @@ export async function submitReport(input: SubmitReportInput): Promise<{ reportId
       } else {
         // EXISTING REPORT: CORRECTION / REVISION (VERSION 2) OR HISTORICAL IMPORT REPLACEMENT
         const existingData = existingLog.data();
+        // One daily log per user per date: it cannot be moved to another farm
+        // (also enforced by Firestore rules, SAF-01). Fail with a clear, non-retryable error.
+        if (existingData.farmId && existingData.farmId !== input.farmId) {
+          throw new Error('REPORT_FARM_MISMATCH');
+        }
         const isFromHistoricalImport =
           existingData.submissionMethod === 'HISTORICAL_IMPORT' ||
           (existingData.submittedBy && existingData.submittedBy !== userId);
@@ -1125,6 +1130,29 @@ import {
 
 let isSyncingPending = false;
 
+/**
+ * Errors that will fail identically on every retry. Queue items hitting one are kept on the device
+ * as FAILED (payload and draft preserved, shown to the farmer) instead of being retried forever or deleted.
+ */
+const PERMANENT_SYNC_ERRORS = [
+  'CORRECTION_LIMIT_REACHED',
+  'USER_NOT_AUTHORIZED',
+  'USER_NOT_FOUND',
+  'FARM_NOT_ASSIGNED',
+  'INVENTORY_NOT_INITIALIZED',
+  'FARM_NOT_FOUND',
+  'USER_CREATEDAT_MISSING',
+  'INVALID_REPORTING_PERIOD',
+  'INVALID_REPORT_DATE_WINDOW',
+  'REPORT_FARM_MISMATCH',
+];
+
+export function isPermanentSyncError(err: any): boolean {
+  if (err?.code === 'permission-denied') return true;
+  const msg = String(err?.message || '');
+  return PERMANENT_SYNC_ERRORS.includes(msg) || msg.startsWith('Invalid report date');
+}
+
 export async function syncPendingSubmissions(userId: string): Promise<number> {
   if (isSyncingPending) return 0;
   isSyncingPending = true;
@@ -1135,6 +1163,7 @@ export async function syncPendingSubmissions(userId: string): Promise<number> {
 
     let syncedCount = 0;
     for (const item of pendingList) {
+      if (item.status === 'FAILED') continue; // kept for the farmer to review; never auto-retried
       const targetDate: string = item.reportDate || item.payload.submissionDate || item.payload.reportDate || getIstDate();
       const targetKey = item.submissionKey || `sub_${item.userId}_${item.farmId}_${targetDate}`;
 
@@ -1154,22 +1183,19 @@ export async function syncPendingSubmissions(userId: string): Promise<number> {
         }
       } catch (err: any) {
         console.warn('[reportService] syncPendingSubmissions item error:', err);
-        const nonRetryableErrors = [
-          'NO_CHANGES_DETECTED',
-          'CORRECTION_LIMIT_REACHED',
-          'USER_NOT_AUTHORIZED',
-          'USER_NOT_FOUND',
-          'FARM_NOT_ASSIGNED',
-          'INVENTORY_NOT_INITIALIZED',
-          'FARM_NOT_FOUND',
-          'USER_CREATEDAT_MISSING',
-          'INVALID_REPORTING_PERIOD',
-          'INVALID_REPORT_DATE_WINDOW',
-        ];
-        if (nonRetryableErrors.includes(err.message)) {
+        if (err?.message === 'NO_CHANGES_DETECTED') {
+          // Identical data is already on the server: the item is effectively synced.
           await removePendingSubmission(targetKey);
           await clearFarmerDraft(item.userId, item.farmId, targetDate);
+        } else if (isPermanentSyncError(err)) {
+          await savePendingSubmission({
+            ...item,
+            submissionKey: targetKey,
+            status: 'FAILED',
+            lastError: String(err?.code === 'permission-denied' ? 'permission-denied' : err?.message),
+          });
         }
+        // Anything else (network, contention) stays PENDING_SYNC and is retried on the next reconnect.
       }
     }
     return syncedCount;

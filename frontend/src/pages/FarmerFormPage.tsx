@@ -16,7 +16,7 @@ import {
   type WeeklyMetricsDoc,
   type AllowedReportDateOption,
 } from '../services/reportService';
-import { saveFarmerDraft, getFarmerDraft, clearFarmerDraft } from '../services/offlineDraftService';
+import { saveFarmerDraft, getFarmerDraft, clearFarmerDraft, getPendingSubmissions } from '../services/offlineDraftService';
 import { subscribeToFlocksByFarm, type FlockDoc } from '../services/flockDataService';
 import { subscribeToFarm, type FarmDoc } from '../services/farmDataService';
 import { LanguageSelector } from '../components/LanguageSelector';
@@ -339,6 +339,8 @@ export function FarmerFormPage() {
 
   const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  // Offline reports that the server permanently rejected; kept on the device, never auto-retried.
+  const [failedSyncCount, setFailedSyncCount] = useState<number>(0);
 
   const [flocks, setFlocks] = useState<FlockDoc[]>([]);
   const [farmDoc, setFarmDoc] = useState<FarmDoc | null>(null);
@@ -499,6 +501,12 @@ export function FarmerFormPage() {
       } catch (err) {
         console.error('[FarmerForm] Error syncing pending submissions:', err);
       } finally {
+        try {
+          const remaining = await getPendingSubmissions(userProfile.uid);
+          setFailedSyncCount(remaining.filter((p) => p.status === 'FAILED').length);
+        } catch {
+          /* best effort */
+        }
         setIsSyncing(false);
       }
     };
@@ -903,6 +911,8 @@ export function FarmerFormPage() {
         setSubmitError(t('farmer.noChangesDetected'));
       } else if (err.message === 'CORRECTION_LIMIT_REACHED' || err.message === 'DUPLICATE_REPORT') {
         setSubmitError(t('farmer.correctionLimitReached'));
+      } else if (err.message === 'REPORT_FARM_MISMATCH') {
+        setSubmitError(t('farmer.reportFarmMismatch'));
       } else {
         setSubmitError(err.message || t('common.error'));
       }
@@ -1037,9 +1047,13 @@ export function FarmerFormPage() {
               <Check size={36} />
             </div>
             <h2>{t('farmer.reportSavedLocally')}</h2>
-            <p style={{ marginTop: '10px', fontSize: '14px', color: '#475569' }}>
-              {t('farmer.offlineSyncNotice')}
-            </p>
+            {failedSyncCount > 0 ? (
+              <div className="alert alert--error" style={{ marginTop: '10px' }}>{t('farmer.offlineSyncFailed')}</div>
+            ) : (
+              <p style={{ marginTop: '10px', fontSize: '14px', color: '#475569' }}>
+                {t('farmer.offlineSyncNotice')}
+              </p>
+            )}
             <p className="text-muted" style={{ marginTop: '14px' }}>
               {t('common.date')}: {formatDisplayDate(reportDate)} | {t('farmer.week')} {weekLabel} | {t('flock.farm')}: {farmId}
             </p>

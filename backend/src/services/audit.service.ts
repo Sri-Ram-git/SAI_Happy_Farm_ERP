@@ -1,6 +1,7 @@
 import { getFirestore } from '../config/firebase';
 import { AuditLogEntry } from '../types/reports';
 import { logger } from '../utils/logger';
+import { stripUndefined } from '../utils/firestoreData';
 
 export class AuditService {
   private get db() {
@@ -9,10 +10,11 @@ export class AuditService {
 
   async log(entry: Omit<AuditLogEntry, 'timestamp'>): Promise<void> {
     try {
-      const fullEntry: AuditLogEntry = {
+      // Strip undefined values: Firestore rejects them, which would otherwise drop the whole entry.
+      const fullEntry: AuditLogEntry = stripUndefined({
         ...entry,
         timestamp: new Date().toISOString(),
-      };
+      });
 
       await this.db.collection('auditLogs').add(fullEntry);
 
@@ -29,6 +31,7 @@ export class AuditService {
         userId: entry.uid,
         eventType: entry.eventType,
         errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
       });
     }
   }
