@@ -8,6 +8,7 @@
     "dev:backend": "npm --prefix backend run dev",
     "build:frontend": "npm --prefix frontend run build",
     "build:backend": "npm --prefix backend run build",
-    "test:backend": "npm --prefix backend run test"
+    "test:backend": "npm --prefix backend run test",
+    "test:rules": "npx --yes firebase-tools@15.6.0 emulators:exec --only firestore --project demo-happy-farms \"node --test tests/firestore-rules/rules.test.mjs\""
   }
 }

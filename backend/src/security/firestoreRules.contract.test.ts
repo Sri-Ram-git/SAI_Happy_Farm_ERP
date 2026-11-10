@@ -88,8 +88,13 @@ describe('Firestore Security Rules Contract Verification', () => {
       expect(revisionsBlockMatch).not.toBeNull();
       const revisionsBlock = revisionsBlockMatch![1];
 
-      // Must allow create/update for authorized users with farm access
-      expect(revisionsBlock).toMatch(/allow\s+create,\s*update:\s*if[\s\S]*?hasFarmAccess\(request\.resource\.data\.farmId\)/);
+      // SAF-01: writes are bound to the path owner's assigned farm (or Admin), and an
+      // existing revision's farmId cannot be changed on update.
+      expect(revisionsBlock).toMatch(/allow\s+create:\s*if[\s\S]*?isOwnReportWriteForAssignedFarm\(reportOrUserId\)/);
+      expect(revisionsBlock).toMatch(/allow\s+update:\s*if[\s\S]*?isOwnReportWriteForAssignedFarm\(reportOrUserId\)\s*&&\s*keepsExistingFarmId\(\)/);
+      expect(rulesContent).toMatch(/function\s+isOwnReportWriteForAssignedFarm\(ownerId\)\s*\{\s*return\s+isOwner\(ownerId\)\s*&&\s*hasFarmAccess\(request\.resource\.data\.farmId\)/);
+      // The old "any user with access to the NEW farmId may write" clause must not come back.
+      expect(rulesContent).not.toMatch(/isOwner\(reportOrUserId\)\s*\|\|\s*\(isAdmin\(\)\s*\|\|\s*hasFarmAccess\(request\.resource\.data\.farmId\)\)/);
 
       // Must restrict deletion to Admin
       expect(revisionsBlock).toMatch(/allow\s+delete:\s*if\s*isAdmin\(\)/);

@@ -39,6 +39,20 @@ service cloud.firestore {
       return isAdmin() || (isUserActive() && (farmId in getUserData().farmIds));
     }
 
+    // Daily report write binding (SAF-01):
+    // a non-admin may only write documents under their OWN dailyReports/{uid} path,
+    // and only for a farm they are assigned to.
+    function isOwnReportWriteForAssignedFarm(ownerId) {
+      return isOwner(ownerId) && hasFarmAccess(request.resource.data.farmId);
+    }
+
+    // On update, an existing report's farmId cannot be changed
+    // (legacy documents without a farmId may have one set).
+    function keepsExistingFarmId() {
+      return resource.data.get('farmId', null) == null ||
+             request.resource.data.farmId == resource.data.farmId;
+    }
+
     // Users Collection
     match /users/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isSupervisor());
@@ -61,7 +75,7 @@ service cloud.firestore {
       match /feedTransactions/{txId} {
         allow read: if isAuthenticated() && hasFarmAccess(farmId);
         allow create: if isAuthenticated() && hasFarmAccess(farmId);
-        allow update, delete: if isAdmin() || (isUserActive() && hasRole('supervisor') && hasFarmAccess(farmId));
+        allow update, delete: if isAdmin();
       }
 
       match /birdTransactions/{txId} {
@@ -90,9 +104,10 @@ service cloud.firestore {
         isOwner(reportOrUserId) ||
         (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
       );
+      // Parent pointer doc: owner (assigned farm) or Admin. Its farmId may move between the
+      // owner's assigned farms (multi-farm farmers).
       allow create, update: if isAuthenticated() && isUserActive() && (
-        isOwner(reportOrUserId) ||
-        (isAdmin() || hasFarmAccess(request.resource.data.farmId))
+        isAdmin() || isOwnReportWriteForAssignedFarm(reportOrUserId)
       );
       allow delete: if isAdmin();
 
@@ -102,9 +117,11 @@ service cloud.firestore {
           isOwner(reportOrUserId) ||
           (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
         );
-        allow create, update: if isAuthenticated() && isUserActive() && (
-          isOwner(reportOrUserId) ||
-          (isAdmin() || hasFarmAccess(request.resource.data.farmId))
+        allow create: if isAuthenticated() && isUserActive() && (
+          isAdmin() || isOwnReportWriteForAssignedFarm(reportOrUserId)
+        );
+        allow update: if isAuthenticated() && isUserActive() && (
+          isAdmin() || (isOwnReportWriteForAssignedFarm(reportOrUserId) && keepsExistingFarmId())
         );
         allow delete: if isAdmin();
 
@@ -114,9 +131,11 @@ service cloud.firestore {
             isOwner(reportOrUserId) ||
             (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
           );
-          allow create, update: if isAuthenticated() && isUserActive() && (
-            isOwner(reportOrUserId) ||
-            (isAdmin() || hasFarmAccess(request.resource.data.farmId))
+          allow create: if isAuthenticated() && isUserActive() && (
+            isAdmin() || isOwnReportWriteForAssignedFarm(reportOrUserId)
+          );
+          allow update: if isAuthenticated() && isUserActive() && (
+            isAdmin() || (isOwnReportWriteForAssignedFarm(reportOrUserId) && keepsExistingFarmId())
           );
           allow delete: if isAdmin();
         }
