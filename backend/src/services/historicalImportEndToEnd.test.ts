@@ -234,7 +234,7 @@ describe('End-to-End Historical Data Importer Suite', () => {
             collection: vi.fn().mockReturnValue({
               doc: vi.fn().mockReturnValue({}),
             }),
-            set: vi.fn().mockResolvedValue(undefined),
+            set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined),
           }),
           add: vi.fn().mockResolvedValue({ id: 'audit-1' }),
         };
@@ -370,7 +370,7 @@ describe('End-to-End Historical Data Importer Suite', () => {
             collection: vi.fn().mockReturnValue({
               doc: vi.fn().mockReturnValue({}),
             }),
-            set: vi.fn().mockResolvedValue(undefined),
+            set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined),
           }),
           add: vi.fn().mockResolvedValue({ id: 'audit-log-1' }),
         };
@@ -453,7 +453,7 @@ describe('End-to-End Historical Data Importer Suite', () => {
         return {
           doc: vi.fn().mockReturnValue({
             collection: vi.fn().mockReturnValue({ doc: vi.fn().mockReturnValue({}) }),
-            set: vi.fn().mockResolvedValue(undefined),
+            set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined),
           }),
           add: vi.fn().mockResolvedValue({ id: 'audit-1' }),
         };
@@ -533,7 +533,7 @@ describe('End-to-End Historical Data Importer Suite', () => {
         return {
           doc: vi.fn().mockReturnValue({
             collection: vi.fn().mockReturnValue({ doc: vi.fn().mockReturnValue({}) }),
-            set: vi.fn().mockResolvedValue(undefined),
+            set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined),
           }),
           add: vi.fn().mockResolvedValue({ id: 'audit-1' }),
         };

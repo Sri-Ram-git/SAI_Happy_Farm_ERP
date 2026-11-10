@@ -22,6 +22,7 @@ import {
 } from '../types/import';
 import { auditService } from './audit.service';
 import { logger } from '../utils/logger';
+import { stripUndefined } from '../utils/firestoreData';
 import { InternalError, NotFoundError, ValidationError, DuplicateError } from '../utils/errors';
 
 export class ImportService {
@@ -192,6 +193,8 @@ export class ImportService {
     const errors: ImportBatchError[] = [];
     const overwrittenRecords: OverwrittenRecord[] = [];
     const manifest: ImportManifestItem[] = [];
+    const batchRef = this.db.collection('importBatches').doc(batchId);
+    let batchRecordCreated = false;
 
     let importedCount = 0;
     let skippedCount = 0;
@@ -273,6 +276,31 @@ export class ImportService {
         });
       } catch (err) {
         logger.warn('Could not query collectionGroup dailyLogs in executeImport', { error: err });
+      }
+
+      // Create the batch record BEFORE any data is committed, so an import that fails part-way
+      // still has a batch (marked FAILED in the catch below) that the existing revert can undo.
+      // create() also refuses to overwrite an existing batch that reuses the same ID.
+      if (!req.dryRun) {
+        await batchRef.create(
+          stripUndefined({
+            batchId,
+            adminUid: user.uid,
+            adminEmail: user.email ?? null,
+            importTimestamp: now,
+            filenames: req.sourceFiles,
+            affectedFarms: farmIds,
+            recordType: determineRecordType(records),
+            totalRows: records.length,
+            importedCount: 0,
+            conflictActionChosen: req.conflictAction,
+            status: 'IN_PROGRESS',
+            errors: [],
+            manifest: [],
+            revertStatus: 'NOT_REVERTED',
+          }),
+        );
+        batchRecordCreated = true;
       }
 
       // Bounded batch configuration (safe under Firestore's 500 ops limit)
@@ -629,7 +657,8 @@ export class ImportService {
             (w.farmId && w.farmId === farmId)
         );
         const preservedAvg = optWs?.preservedAvg ?? wsRecords[0]?.preservedAvg ?? null;
-        const preservedAvgByDate = optWs?.preservedAvgByDate ?? wsRecords[0]?.preservedAvgByDate ?? undefined;
+        // null, not undefined: Firestore rejects undefined and the whole batch record write would fail.
+        const preservedAvgByDate = optWs?.preservedAvgByDate ?? wsRecords[0]?.preservedAvgByDate ?? null;
 
         return {
           worksheetKey: wsKey,
@@ -654,7 +683,8 @@ export class ImportService {
       // Update farm document with preservedAvg if available
       if (!req.dryRun) {
         for (const ws of worksheets) {
-          if (ws.farmId && ws.preservedAvg !== null && ws.preservedAvg !== undefined) {
+          // Only existing farms: a merge-set on a missing farm would create a stray farm document.
+          if (ws.farmId && farmDocMap.has(ws.farmId) && ws.preservedAvg !== null && ws.preservedAvg !== undefined) {
             const farmRef = this.db.collection('farms').doc(ws.farmId);
             currentBatch.set(
               farmRef,
@@ -671,6 +701,9 @@ export class ImportService {
             }
           }
         }
+        // Commit the queued farm updates; previously they were only committed when the
+        // 300-operation limit happened to be reached, so they were normally lost.
+        await commitCurrentBatch();
       }
 
       if (req.dryRun) {
@@ -720,7 +753,7 @@ export class ImportService {
         revertStatus: 'NOT_REVERTED',
       };
 
-      await this.db.collection('importBatches').doc(batchId).set(batchRecord);
+      await batchRef.set(stripUndefined(batchRecord));
 
       await auditService.log({
         eventType: 'HISTORICAL_IMPORT',
@@ -765,6 +798,35 @@ export class ImportService {
         batchId,
         error: error instanceof Error ? error.message : 'Unknown error',
       });
+      // Record what was already committed, so the batch stays visible and revertible.
+      if (batchRecordCreated) {
+        try {
+          await batchRef.update(
+            stripUndefined({
+              status: 'FAILED',
+              failureReason: error instanceof Error ? error.message : 'Unknown error',
+              failedAt: new Date().toISOString(),
+              importedCount: manifest.length,
+              manifest,
+              overwrittenRecords,
+              errors,
+            }),
+          );
+          await auditService.log({
+            eventType: 'HISTORICAL_IMPORT_FAILED',
+            uid: user.uid,
+            resourceId: batchId,
+            requestId,
+            metadata: { batchId, committedItems: manifest.length, totalRows: records.length },
+          });
+        } catch (markErr) {
+          logger.error('Failed to mark import batch as FAILED', {
+            requestId,
+            batchId,
+            error: markErr instanceof Error ? markErr.message : 'Unknown error',
+          });
+        }
+      }
       throw new InternalError('Historical data import failed');
     }
   }
@@ -1275,7 +1337,8 @@ export class ImportService {
           conflictCount,
           failedCount,
           finalStatus: overallBatchStatus,
-          worksheetStatus: wsKey ? wsFinalStatus : undefined,
+          // null for whole-batch reverts: undefined made Firestore reject the audit entry.
+          worksheetStatus: wsKey ? wsFinalStatus : null,
         },
       });
 
