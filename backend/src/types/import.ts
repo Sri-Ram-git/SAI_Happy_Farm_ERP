@@ -166,7 +166,7 @@ export interface WorksheetImportContribution {
     conflictsCount: number;
   };
   preservedAvg?: number | null;
-  preservedAvgByDate?: Record<string, number>;
+  preservedAvgByDate?: Record<string, number> | null;
 }
 
 export interface RevertAuditRecord {

@@ -348,7 +348,7 @@ describe('ImportService', () => {
             get: vi.fn().mockResolvedValue({ docs: [] }),
           }),
           doc: vi.fn().mockReturnValue({
-            set: vi.fn().mockResolvedValue(undefined),
+            set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined),
           }),
           add: vi.fn().mockResolvedValue({ id: 'audit-1' }),
         };
@@ -434,7 +434,7 @@ describe('ImportService', () => {
         if (name === 'importBatches') {
           return {
             doc: vi.fn().mockReturnValue({
-              set: vi.fn().mockResolvedValue(undefined),
+              set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined),
             }),
           };
         }
@@ -448,7 +448,7 @@ describe('ImportService', () => {
             collection: vi.fn().mockReturnValue({
               doc: vi.fn().mockReturnValue({}),
             }),
-            set: vi.fn().mockResolvedValue(undefined),
+            set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined),
           }),
         };
       });
@@ -598,7 +598,7 @@ describe('ImportService', () => {
         if (name === 'importBatches') {
           return {
             doc: vi.fn().mockReturnValue({
-              set: vi.fn().mockResolvedValue(undefined),
+              set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined),
             }),
           };
         }
@@ -672,7 +672,7 @@ describe('ImportService', () => {
           };
         }
         if (name === 'importBatches') {
-          return { doc: vi.fn().mockReturnValue({ set: vi.fn().mockResolvedValue(undefined) }) };
+          return { doc: vi.fn().mockReturnValue({ set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined) }) };
         }
         if (name === 'auditLogs') {
           return { add: vi.fn().mockResolvedValue({ id: 'audit-1' }) };
@@ -741,7 +741,7 @@ describe('ImportService', () => {
           };
         }
         if (name === 'importBatches') {
-          return { doc: vi.fn().mockReturnValue({ set: vi.fn().mockResolvedValue(undefined) }) };
+          return { doc: vi.fn().mockReturnValue({ set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined) }) };
         }
         if (name === 'auditLogs') {
           return { add: vi.fn().mockResolvedValue({ id: 'audit-1' }) };
@@ -827,7 +827,7 @@ describe('ImportService', () => {
           };
         }
         if (name === 'importBatches') {
-          return { doc: vi.fn().mockReturnValue({ set: vi.fn().mockResolvedValue(undefined) }) };
+          return { doc: vi.fn().mockReturnValue({ set: vi.fn().mockResolvedValue(undefined), create: vi.fn().mockResolvedValue(undefined) }) };
         }
         if (name === 'auditLogs') {
           return { add: vi.fn().mockResolvedValue({ id: 'audit-1' }) };

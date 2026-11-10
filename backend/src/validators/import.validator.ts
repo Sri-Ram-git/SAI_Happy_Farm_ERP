@@ -63,6 +63,20 @@ export const ExecuteImportSchema = z.object({
   conflictAction: z.enum(['skip', 'replace']),
   sourceFiles: z.array(z.string()).min(1, 'Source files list is required'),
   dryRun: z.boolean().optional(),
+  // Per-worksheet metadata sent by the admin import page (preserved AVG column values).
+  // Previously stripped by validation, so the service never received it.
+  worksheets: z
+    .array(
+      z.object({
+        worksheetKey: z.string().min(1),
+        fileName: z.string().optional(),
+        sheetName: z.string().nullable().optional(),
+        farmId: z.string().optional(),
+        preservedAvg: z.number().finite().nullable().optional(),
+        preservedAvgByDate: z.record(z.string(), z.number().finite()).optional(),
+      }),
+    )
+    .optional(),
 });
 
 export const RevertBatchSchema = z.object({
