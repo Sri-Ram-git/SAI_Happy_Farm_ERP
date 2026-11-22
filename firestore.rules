@@ -41,7 +41,13 @@ service cloud.firestore {
 
     // Users Collection
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isSupervisor());
+      // SEC-22: supervisors may only read profiles that share at least one assigned farm.
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isAdmin() ||
+        (hasRole('supervisor') &&
+          resource.data.get('farmIds', []).hasAny(getUserData().get('farmIds', [])))
+      );
       allow create, delete: if isAdmin();
       allow update: if isAdmin() || (
         isOwner(userId) &&
@@ -55,7 +61,22 @@ service cloud.firestore {
     match /farms/{farmId} {
       allow read: if isAuthenticated() && isUserActive() && hasFarmAccess(farmId);
       allow create, delete: if isAdmin();
-      allow update: if isAdmin() || (isUserActive() && hasFarmAccess(farmId));
+      // SEC-23: non-admins may only touch inventory counters on their assigned farm.
+      // Farmers: daily-report inventory fields only. Supervisors: also feed-load fields.
+      allow update: if isAdmin() || (
+        hasFarmAccess(farmId) && (
+          (hasRole('farmer') &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'currentBirdCount', 'currentFeedKg', 'totalFeedConsumedKg',
+              'lastReportDate', 'inventoryUpdatedAt', 'updatedAt'
+            ])) ||
+          (hasRole('supervisor') &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'currentBirdCount', 'currentFeedKg', 'totalFeedConsumedKg', 'totalFeedLoadedKg',
+              'lastReportDate', 'lastTransactionDate', 'inventoryUpdatedAt', 'updatedAt'
+            ]))
+        )
+      );
 
       // Subcollections: feedTransactions, birdTransactions
       match /feedTransactions/{txId} {
@@ -84,16 +105,24 @@ service cloud.firestore {
       );
     }
 
+    // SEC-24: writes under dailyReports/{uid} require the caller to BE that uid, stamp
+    // their own uid, AND be assigned to the farmId being written (admins exempt).
+    function canWriteOwnFarmReport(ownerId) {
+      return isAdmin() || (
+        isOwner(ownerId) &&
+        request.resource.data.get('userId', null) == request.auth.uid &&
+        request.resource.data.get('farmId', null) is string &&
+        hasFarmAccess(request.resource.data.farmId)
+      );
+    }
+
     // Daily Reports (Root Collection & Subcollections)
     match /dailyReports/{reportOrUserId} {
       allow read: if isAuthenticated() && isUserActive() && (
         isOwner(reportOrUserId) ||
         (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
       );
-      allow create, update: if isAuthenticated() && isUserActive() && (
-        isOwner(reportOrUserId) ||
-        (isAdmin() || hasFarmAccess(request.resource.data.farmId))
-      );
+      allow create, update: if canWriteOwnFarmReport(reportOrUserId);
       allow delete: if isAdmin();
 
       // Subcollection: dailyLogs
@@ -102,10 +131,7 @@ service cloud.firestore {
           isOwner(reportOrUserId) ||
           (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
         );
-        allow create, update: if isAuthenticated() && isUserActive() && (
-          isOwner(reportOrUserId) ||
-          (isAdmin() || hasFarmAccess(request.resource.data.farmId))
-        );
+        allow create, update: if canWriteOwnFarmReport(reportOrUserId);
         allow delete: if isAdmin();
 
         // Subcollection: revisions (Version History / Audit Archive for Version 2 Corrections)
@@ -114,10 +140,7 @@ service cloud.firestore {
             isOwner(reportOrUserId) ||
             (isAdmin() || (resource.data.farmId != null && hasFarmAccess(resource.data.farmId)))
           );
-          allow create, update: if isAuthenticated() && isUserActive() && (
-            isOwner(reportOrUserId) ||
-            (isAdmin() || hasFarmAccess(request.resource.data.farmId))
-          );
+          allow create, update: if canWriteOwnFarmReport(reportOrUserId);
           allow delete: if isAdmin();
         }
       }
