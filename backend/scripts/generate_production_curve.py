@@ -24,6 +24,7 @@ Rows:
   11. Feed Gms/Bird
   12. STD %
   13. ACT %
+  14. AVG  (worksheet-level average of all numeric ACT % values)
 """
 
 import sys
@@ -136,6 +137,7 @@ ROW_LABELS = [
     'Feed Gms/Bird',
     'STD %',
     'ACT %',
+    'AVG',
 ]
 
 
@@ -161,7 +163,7 @@ def build_farm_sheet(wb, farm):
     # Column A width (ample space to prevent clipping of 'DAMAGE/REJECTED' and 'Feed Gms/Bird')
     ws.column_dimensions['A'].width = 21.5
 
-    # Populate Column A labels (Rows 1 to 13)
+    # Populate Column A labels (Rows 1 to 14)
     for idx, label in enumerate(ROW_LABELS):
         r = idx + 1
         cell = ws.cell(row=r, column=1, value=label)
@@ -173,6 +175,9 @@ def build_farm_sheet(wb, farm):
             cell.font = FONT_BOLD_RED
             cell.fill = FILL_WHITE
         elif label == 'ACT %':
+            cell.font = FONT_BOLD_BLACK
+            cell.fill = FILL_YELLOW
+        elif label == 'AVG':
             cell.font = FONT_BOLD_BLACK
             cell.fill = FILL_YELLOW
         elif label == 'SELECTION %':
@@ -192,6 +197,10 @@ def build_farm_sheet(wb, farm):
     reports.sort(key=lambda r: r.get('submissionDate', ''))
 
     # Populate Data Columns (B onwards)
+    # Collect all numeric ACT % values for the worksheet-level AVG row
+    act_pct_values = []
+    data_columns = []  # Track (col, is_week_start) for AVG row styling
+
     for col_idx, rep in enumerate(reports):
         col = col_idx + 2
         col_letter = get_column_letter(col)
@@ -233,6 +242,12 @@ def build_farm_sheet(wb, farm):
         act_pct = None
         if birds and birds > 0 and prod is not None:
             act_pct = round((prod / birds) * 100, 2)
+
+        # Collect numeric ACT % for AVG calculation (include zeroes, exclude None/blanks)
+        if act_pct is not None:
+            act_pct_values.append(act_pct)
+
+        data_columns.append((col, is_week_start))
 
         std_pct = get_std_pct(curve_type, age_weeks)
 
@@ -280,6 +295,19 @@ def build_farm_sheet(wb, farm):
             cell.fill = fill
             cell.alignment = ALIGN_CENTER
             cell.border = border
+
+    # Row 14: AVG — worksheet-level average of all numeric ACT % values
+    # Include zeroes (valid production day with 0 eggs), exclude blanks/None
+    avg_val = round(sum(act_pct_values) / len(act_pct_values), 2) if act_pct_values else ''
+
+    for col, is_week_start in data_columns:
+        border = BORDER_WEEK_START if is_week_start else BORDER_THIN
+        cell = ws.cell(row=14, column=col, value=avg_val)
+        cell.number_format = '0.00'
+        cell.font = FONT_BOLD_BLACK
+        cell.fill = FILL_YELLOW
+        cell.alignment = ALIGN_CENTER
+        cell.border = border
 
 
 def main():

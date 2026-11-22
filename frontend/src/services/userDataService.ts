@@ -28,9 +28,31 @@ export async function getUserByUid(uid: string): Promise<UserDoc | null> {
   };
 }
 
+// SEC-22: Firestore rules only let supervisors read profiles that share an assigned farm,
+// so non-admin list queries must be constrained by farmIds or Firestore rejects them.
+async function getScopedUserQueries(): Promise<any[]> {
+  const uid = auth.currentUser?.uid;
+  const me = uid ? await getUserByUid(uid) : null;
+  if (!me || me.role === 'admin') return [db.collection('users')];
+  const farmIds = me.farmIds.filter(Boolean);
+  const queries: any[] = [];
+  for (let i = 0; i < farmIds.length; i += 30) {
+    queries.push(db.collection('users').where('farmIds', 'array-contains-any', farmIds.slice(i, i + 30)));
+  }
+  return queries;
+}
+
+async function getScopedUserDocs(): Promise<any[]> {
+  const queries = await getScopedUserQueries();
+  const snaps = await Promise.all(queries.map((q) => q.get()));
+  const byId = new Map<string, any>();
+  snaps.forEach((snap: any) => snap.docs.forEach((doc: any) => byId.set(doc.id, doc)));
+  return Array.from(byId.values());
+}
+
 export async function getAllUsers(): Promise<UserDoc[]> {
-  const snap = await db.collection('users').get();
-  return snap.docs.map((doc: any) => {
+  const docs = await getScopedUserDocs();
+  return docs.map((doc: any) => {
     const data = doc.data();
     const createdat = data.createdat ?? data.createdAt ?? data.created_at ?? null;
     return {
@@ -65,8 +87,12 @@ export async function getUsersByRole(role: string): Promise<UserDoc[]> {
 }
 
 export async function getActiveFarmers(): Promise<UserDoc[]> {
-  const snap = await db.collection('users').where('role', '==', 'farmer').where('active', '==', true).get();
-  return snap.docs.map((doc: any) => {
+  // SEC-22: filter role/active client-side so the farm-scoped query needs no composite index.
+  const docs = (await getScopedUserDocs()).filter((doc: any) => {
+    const data = doc.data();
+    return data.role === 'farmer' && data.active === true;
+  });
+  return docs.map((doc: any) => {
     const data = doc.data();
     const createdat = data.createdat ?? data.createdAt ?? data.created_at ?? null;
     return {
@@ -130,9 +156,32 @@ export async function deleteUserAccount(uid: string): Promise<void> {
 }
 
 export function subscribeToAllUsers(callback: (users: UserDoc[]) => void): () => void {
-  return db.collection('users').onSnapshot(
-    (snap: any) => {
-      const users = snap.docs.map((doc: any) => {
+  // SEC-22: one listener per farm-scoped query (single listener for admins), merged by uid.
+  let cancelled = false;
+  const unsubs: Array<() => void> = [];
+  getScopedUserQueries().then((queries) => {
+    if (cancelled) return;
+    const docsByQuery: any[][] = queries.map(() => []);
+    if (queries.length === 0) callback([]);
+    queries.forEach((q, idx) => {
+      unsubs.push(q.onSnapshot(
+        (snap: any) => {
+          docsByQuery[idx] = snap.docs;
+          const byId = new Map<string, any>();
+          docsByQuery.forEach((docs) => docs.forEach((doc: any) => byId.set(doc.id, doc)));
+          emit(Array.from(byId.values()));
+        },
+        (err: any) => {
+          console.error('[userDataService] subscribeToAllUsers error:', err.message || err);
+        },
+      ));
+    });
+  }).catch((err: any) => {
+    console.error('[userDataService] subscribeToAllUsers error:', err.message || err);
+  });
+
+  function emit(docs: any[]) {
+      const users = docs.map((doc: any) => {
         const data = doc.data();
         return {
           uid: doc.id,
@@ -145,11 +194,12 @@ export function subscribeToAllUsers(callback: (users: UserDoc[]) => void): () =>
         };
       });
       callback(users);
-    },
-    (err: any) => {
-      console.error('[userDataService] subscribeToAllUsers error:', err.message || err);
-    },
-  );
+  }
+
+  return () => {
+    cancelled = true;
+    unsubs.forEach((unsub) => unsub());
+  };
 }
 
 export interface CreateFarmerPayload {
